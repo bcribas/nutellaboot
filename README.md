@@ -56,7 +56,8 @@ curl -X POST --data "key=$(cat data/images/testes3/boot.key)" \
      http://127.0.0.1:8890/boot/v3/testes3/manifest
 ```
 
-Telas: `/admin/` (imagens e credenciais), `/configureitor/?id=…&tk=…`
+Telas: `/` (página inicial que guia cada público e monta os links a partir do
+id + token), `/admin/` (imagens e credenciais), `/configureitor/?id=…&tk=…`
 (configuração da sede), `/hotconfig/?id=…&tk=…` (painel do laboratório),
 `/lock/` (temas da tela de bloqueio), `/api/v1/docs` (API navegável).
 

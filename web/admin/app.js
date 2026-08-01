@@ -32,20 +32,28 @@ function copyable(label, value) {
   return wrap;
 }
 
-function credentialsCard(info) {
+function credentialsCard(info, title) {
   const card = document.createElement("div");
   card.className = "card";
   card.style.borderColor = "var(--accent)";
-  const url = `${location.origin}/configureitor/?id=${info.id}&tk=${info.token}`;
+  // links prontos: preferimos os que vêm do servidor (já com o token e a base
+  // corretos); se não vierem, montamos a partir da origem atual.
+  const configUrl =
+    info.configureitor_url || `${location.origin}/configureitor/?id=${info.id}&tk=${info.token}`;
+  const hotUrl =
+    info.hotconfig_url || `${location.origin}/hotconfig/?id=${info.id}&tk=${info.token}`;
   const rows = [
     [t("image"), info.id],
     [t("token"), info.token],
     [t("machine_key"), info.machine_key],
-    [t("config_link"), url],
+    [t("boot_key"), info.boot_key],
+    [t("config_link"), configUrl],
+    [t("manage_link"), hotUrl],
   ];
-  card.innerHTML = `<h2>${t("created")}: ${info.id}</h2>`;
+  card.innerHTML = `<h2>${title || t("created")}: ${info.id}</h2>`;
   const table = document.createElement("table");
   for (const [k, v] of rows) {
+    if (!v || v === "—") continue;
     const tr = document.createElement("tr");
     const th = document.createElement("td");
     th.className = "muted";
@@ -56,6 +64,12 @@ function credentialsCard(info) {
     table.appendChild(tr);
   }
   card.appendChild(table);
+  const fechar = document.createElement("button");
+  fechar.className = "small";
+  fechar.style.marginTop = "10px";
+  fechar.textContent = t("close");
+  fechar.onclick = () => card.remove();
+  card.appendChild(fechar);
   return card;
 }
 
@@ -89,13 +103,23 @@ function renderImages() {
         reserved ? t("reserved_namespace") : t("personal_namespace")
       }</span></td>`;
     const actions = document.createElement("td");
+    const ver = document.createElement("button");
+    ver.className = "small";
+    ver.textContent = t("view_credentials");
+    ver.onclick = async () => {
+      // lê as credenciais atuais sem rotacionar nada (não invalida links já
+      // distribuídos) — é o caminho fácil para pegar o token e o link da sede
+      const cred = await api.get(`/api/v1/images/${img.id}/credentials`, A);
+      document.querySelector("main").prepend(credentialsCard(cred, t("view_credentials")));
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
     const rot = document.createElement("button");
     rot.className = "small";
     rot.textContent = t("rotate_token");
     rot.onclick = async () => {
       const r = await api.post(`/api/v1/images/${img.id}/token/rotate`, undefined, A);
       document.querySelector("main").prepend(
-        credentialsCard({ id: img.id, token: r.token, machine_key: "—" })
+        credentialsCard({ id: img.id, token: r.token }, t("rotate_token"))
       );
     };
     const del = document.createElement("button");
@@ -106,7 +130,7 @@ function renderImages() {
       await api.del(`/api/v1/images/${img.id}`, A);
       load();
     };
-    actions.append(rot, " ", del);
+    actions.append(ver, " ", rot, " ", del);
     tr.appendChild(actions);
     tbody.appendChild(tr);
   }

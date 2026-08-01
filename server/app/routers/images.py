@@ -123,6 +123,16 @@ async def rotate_token(image: str, p=Depends(auth.require_admin)) -> dict:
     return {"token": store.rotate_token(image)}
 
 
+@router.get("/images/{image}/credentials")
+async def get_credentials(image: str, p=Depends(auth.require_admin)) -> dict:
+    """Token, chaves e links prontos da imagem — para o admin entregar ao
+    coordenador sem precisar rotacionar nada (o que invalidaria links já
+    distribuídos)."""
+    if not store.image_exists(image):
+        raise HTTPException(404, "imagem não existe")
+    return store.credentials(image)
+
+
 @router.get("/images/{image}/boot-key")
 async def get_boot_key(image: str, p=Depends(auth.require_admin)) -> dict:
     """Chave que vai no nutellaboot.conf do pendrive desta imagem."""

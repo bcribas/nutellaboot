@@ -138,7 +138,32 @@ def create_image(
         "token": token,
         "machine_key": machine_key,
         "boot_key": boot_key,
-        "configureitor_url": f"{settings.base_url}/configureitor/?id={image_id}",
+        **_links(image_id, token),
+    }
+
+
+def _links(image_id: str, token: str) -> dict:
+    """Links prontos para entregar ao coordenador (com o token embutido)."""
+    q = f"?id={image_id}&tk={token}"
+    return {
+        "configureitor_url": f"{settings.base_url}/configureitor/{q}",
+        "hotconfig_url": f"{settings.base_url}/hotconfig/{q}",
+    }
+
+
+def credentials(image_id: str) -> dict:
+    """Todas as credenciais e links de uma imagem já existente. Só o admin lê
+    isto — os segredos ficam em claro no disco (são o que se distribui, não
+    hashes), então é seguro devolvê-los para quem tem a chave de admin."""
+    token = (fsdb.read_text(image_dir(image_id) / "token") or "").strip()
+    info = get_image(image_id) or {}
+    return {
+        "id": image_id,
+        "fullname": info.get("fullname", ""),
+        "token": token,
+        "machine_key": machine_key(image_id),
+        "boot_key": boot_key(image_id),
+        **_links(image_id, token),
     }
 
 

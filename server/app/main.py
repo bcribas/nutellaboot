@@ -47,6 +47,11 @@ def create_app() -> FastAPI:
     if temas.is_dir():
         app.mount("/lock/themes", StaticFiles(directory=temas, html=True), name="lock-themes")
 
+    # documentação legível a partir do próprio servidor (a home aponta para cá)
+    docs = REPO_ROOT / "docs"
+    if docs.is_dir():
+        app.mount("/docs", StaticFiles(directory=docs), name="docs")
+
     web = REPO_ROOT / "web"
     if web.is_dir():
         app.mount("/", StaticFiles(directory=web, html=True), name="web")

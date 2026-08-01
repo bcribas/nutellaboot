@@ -60,7 +60,10 @@ export function apply(root = document) {
 export async function setLang(next) {
   lang = LANGS[next] ? next : "en";
   localStorage.setItem("nb3-lang", lang);
-  const resp = await fetch(`/common/locales/${lang}.json`, { cache: "no-cache" });
+  // os dicionários só mudam a cada deploy — deixar o cache do navegador
+  // reaproveitá-los evita revalidar a cada carga e reduz o "pisca" de texto
+  // vazio antes da tradução aparecer.
+  const resp = await fetch(`/common/locales/${lang}.json`);
   dict = await resp.json();
   apply();
   document.dispatchEvent(new CustomEvent("nb3:langchange", { detail: { lang } }));

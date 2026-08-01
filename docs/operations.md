@@ -151,17 +151,34 @@ imagem recebe credenciais novas, exportadas em CSV.
 
 ## 3. Entregar a configuração para as pessoas
 
-Cada imagem tem um link próprio:
+### A página inicial
+
+O endereço raiz do servidor (`https://nutellaboot.naquadah.com.br/`) é a porta
+de entrada para todo mundo, em português, inglês e espanhol. Ela tem três
+cartões: **coordenador de sede** (cola o identificador e o token da imagem e
+abre a configuração ou o painel), **administração** (cola a chave de admin e
+entra em `/admin/`) e **documentação**. É para lá que você manda as pessoas.
+
+### Pegar o token e o link de uma imagem
+
+O jeito fácil: em `/admin/`, na lista de imagens, clique em **"ver credenciais
+e link"** na linha da imagem. Aparece um cartão com o token, a chave de boot, a
+chave de máquina e os links prontos do configureitor e do hotconfig — cada um
+com um botão de copiar. Isso **não** rotaciona nada, então os links já
+distribuídos continuam válidos.
+
+Cada imagem tem um link próprio, já com o token embutido:
 
 ```
 https://nutellaboot.naquadah.com.br/configureitor/?id=26spsp&tk=nb3i_...
 ```
 
 Esse link **é** a credencial: quem tem o link configura a imagem. Mande por
-canal privado. Se vazar, gere outro em `/admin/` ("Gerar novo token").
+canal privado. Se vazar, gere outro em `/admin/` ("Gerar novo token") — aí os
+links antigos param de funcionar e você distribui o novo.
 
-A página funciona em português, inglês e espanhol — o idioma é detectado pelo
-navegador e pode ser trocado no canto superior direito.
+Todas as páginas funcionam em português, inglês e espanhol — o idioma é
+detectado pelo navegador e pode ser trocado no canto superior direito.
 
 ### O que a pessoa pode configurar
 
