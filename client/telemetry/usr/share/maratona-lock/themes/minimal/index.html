@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Maratona — aguarde</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: #05070c; color: #dfe6f2;
+    font: 16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; cursor: none; user-select: none;
+  }
+  main {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 22px; padding: 6vh 5vw; text-align: center;
+  }
+  #teamname { font-size: clamp(26px, 4.6vw, 68px); font-weight: 600; }
+  #org, #seat { color: #7b8699; font-size: clamp(14px, 1.5vw, 22px); }
+  #messages .line { color: #7b8699; font-size: clamp(14px, 1.5vw, 22px); }
+  #messages .line.primary { color: #dfe6f2; font-size: clamp(17px, 2vw, 30px); }
+  #alert {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #000; opacity: 0; transition: opacity .15s; pointer-events: none;
+  }
+  #alert.on { opacity: .93; }
+  #alert .txt { color: #ff5757; font-size: clamp(18px, 2.4vw, 40px); font-weight: 700; text-align: center; }
+  footer { position: fixed; bottom: 14px; color: #39424f; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <div id="teamname"></div>
+  <div id="org"></div>
+  <div id="seat"></div>
+  <div id="messages"></div>
+</main>
+<div id="alert"><div class="txt"></div></div>
+<footer id="site"></footer>
+<script src="../common/lock.js"></script>
+<script>
+NB3Lock.fillCommon(NB3Lock.info(), NB3Lock.t);
+var alertBox = document.querySelector("#alert");
+NB3Lock.watchInput(function (level) {
+  alertBox.className = level ? "on" : "";
+});
+</script>
+</body>
+</html>

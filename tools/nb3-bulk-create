@@ -1,0 +1,36 @@
+#!/bin/bash
+# nb3-bulk-create — cria muitas imagens de uma vez a partir de um TSV.
+#
+# Uso típico no começo da temporada (mais de 50 sedes):
+#     tools/nb3-bulk-create sedes.tsv > credenciais.csv
+#
+# Formato do arquivo (separado por TAB):
+#     26brbr<TAB>Brazilian Finals<TAB>maratonalinux2604
+#     26brspsp<TAB>SEDE: SP, São Paulo<TAB>maratonalinux2604
+#
+# O template pode ser omitido (usa o primeiro cadastrado). Linhas começando
+# com # são ignoradas. Cada linha é independente: um id inválido não impede
+# as outras.
+
+set -euo pipefail
+
+SERVIDOR=${NB3_BASE_URL:-https://nutellaboot.charge.naquadah.com.br:8443}
+CHAVE=${NB3_ADMIN_KEY:-}
+ARQUIVO=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --server) SERVIDOR=$2; shift 2 ;;
+        --admin-key) CHAVE=$2; shift 2 ;;
+        -h | --help) sed -n '2,16p' "$0"; exit 0 ;;
+        *) ARQUIVO=$1; shift ;;
+    esac
+done
+
+[ -n "$ARQUIVO" ] && [ -f "$ARQUIVO" ] || { echo "informe o arquivo TSV" >&2; exit 1; }
+[ -n "$CHAVE" ] || { echo "defina NB3_ADMIN_KEY ou use --admin-key" >&2; exit 1; }
+
+curl -sS --fail-with-body -X POST "$SERVIDOR/api/v1/images/bulk?format=csv" \
+    -H "Authorization: Bearer $CHAVE" \
+    -H 'Content-Type: text/tab-separated-values' \
+    --data-binary "@$ARQUIVO"

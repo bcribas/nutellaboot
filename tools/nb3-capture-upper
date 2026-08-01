@@ -1,0 +1,61 @@
+#!/bin/bash
+# nb3-capture-upper — captura a camada de escrita DENTRO da máquina de teste.
+#
+# Caminho alternativo ao builder rootless: use quando a mudança precisa
+# acontecer no ambiente real de boot (driver, dconf compilado, algo que só o
+# sistema em execução monta direito).
+#
+# Rode ISTO NA MÁQUINA/VM já bootada pelo NutellaBoot, depois de instalar o
+# que quiser. Ele aplica a MESMA poda do builder automático (o fluxo manual
+# do nb2 dependia de lembrar de apagar cada coisa — e camadas reais foram
+# publicadas com /etc/shadow dentro).
+#
+#     sudo nb3-capture-upper /secretdev/nutellaboot/minha-camada.tar
+#
+# Depois, no seu computador: tools/nb3-pack-upper minha-camada.tar
+
+set -euo pipefail
+
+UPPER=${NB3_UPPER:-/dev/newroot/upper}
+SAIDA=${1:-}
+
+if [ -z "$SAIDA" ]; then
+    echo "uso: nb3-capture-upper <arquivo.tar>" >&2
+    exit 1
+fi
+if [ ! -d "$UPPER" ]; then
+    echo "não achei a camada de escrita em $UPPER — esta máquina bootou pelo NutellaBoot?" >&2
+    exit 1
+fi
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+echo ">> copiando a camada de escrita"
+cp -a "$UPPER" "$TMP/upper"
+
+echo ">> podando o que não pode ser publicado"
+cd "$TMP/upper"
+rm -rf var/cache/apt var/lib/apt/lists var/log tmp run \
+    root/.bash_history root/.cache \
+    etc/resolv.conf etc/hostname etc/machine-id \
+    usr/sbin/policy-rc.d var/lib/dbus/machine-id \
+    etc/.nb3 etc/.secrets home 2> /dev/null || true
+find . -name '*.dpkg-new' -o -name '*.dpkg-tmp' -delete 2> /dev/null || true
+
+# whiteouts do overlay (arquivos de dispositivo) não fazem sentido na camada
+find . \( -type c -o -type b \) -delete 2> /dev/null || true
+
+# nenhum hash de senha sai daqui: contas novas entram bloqueadas
+for f in etc/shadow etc/gshadow; do
+    [ -f "$f" ] || continue
+    awk -F: 'BEGIN{OFS=":"} {if ($2 != "" && $2 != "*" && $2 != "!") $2="*"; print}' "$f" > "$f.novo"
+    mv "$f.novo" "$f"
+    echo "   credenciais bloqueadas em $f"
+done
+rm -f etc/shadow- etc/gshadow- etc/passwd- etc/group-
+
+echo ">> empacotando"
+tar cf "$SAIDA" .
+echo
+echo "pronto: $SAIDA ($(du -h "$SAIDA" | cut -f1))"
+echo "agora, no seu computador:  tools/nb3-pack-upper $(basename "$SAIDA")"

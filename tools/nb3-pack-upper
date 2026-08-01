@@ -1,0 +1,96 @@
+#!/bin/bash
+# nb3-pack-upper — transforma o tar capturado na VM em camada squashfs.
+#
+# Segunda metade do caminho manual (a primeira é o nb3-capture-upper, rodado
+# dentro da máquina de teste). Não precisa de root.
+#
+#     tools/nb3-pack-upper minha-camada.tar --name spim --attach 25brbr
+
+set -euo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+DATA=${NB3_DATA_ROOT:-$REPO/data}
+TAR=""
+NOME=""
+ANEXAR=()
+SERVIDOR=${NB3_BASE_URL:-}
+CHAVE=${NB3_ADMIN_KEY:-}
+
+usage() {
+    cat << EOF
+Uso: nb3-pack-upper ARQUIVO.tar --name NOME [opções]
+
+  --name NOME        nome da camada (vira <nome>-<data>.squash)
+  --attach IMAGEM    anexa a camada a esta imagem (pode repetir)
+  --server URL       servidor da API (para anexar)
+  --admin-key CHAVE  chave de administração (ou NB3_ADMIN_KEY)
+EOF
+    exit "${1:-0}"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --name) NOME=$2; shift 2 ;;
+        --attach) ANEXAR+=("$2"); shift 2 ;;
+        --server) SERVIDOR=$2; shift 2 ;;
+        --admin-key) CHAVE=$2; shift 2 ;;
+        -h | --help) usage 0 ;;
+        *) TAR=$1; shift ;;
+    esac
+done
+
+[ -n "$TAR" ] && [ -f "$TAR" ] || { echo "informe o arquivo .tar" >&2; usage 1; }
+[ -n "$NOME" ] || { echo "informe --name" >&2; usage 1; }
+command -v mksquashfs > /dev/null || { echo "falta mksquashfs (squashfs-tools)" >&2; exit 1; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+mkdir -p "$TMP/root" "$DATA/blobs"
+
+echo ">> extraindo"
+tar xf "$TAR" -C "$TMP/root"
+
+# Rede de segurança: mesmo que a captura tenha sido feita à mão, não deixamos
+# hash de senha nem cache de pacote virar camada publicada.
+rm -rf "$TMP/root/var/cache/apt" "$TMP/root/var/log" "$TMP/root/tmp" "$TMP/root/run" \
+    "$TMP/root/etc/.nb3" "$TMP/root/etc/.secrets" 2> /dev/null || true
+for f in etc/shadow etc/gshadow; do
+    [ -f "$TMP/root/$f" ] || continue
+    awk -F: 'BEGIN{OFS=":"} {if ($2 != "" && $2 != "*" && $2 != "!") $2="*"; print}' \
+        "$TMP/root/$f" > "$TMP/root/$f.novo"
+    mv "$TMP/root/$f.novo" "$TMP/root/$f"
+    echo "   credenciais bloqueadas em $f"
+done
+
+ARQUIVO="$NOME-$(date +%Y%m%d-%H%M).squash"
+echo ">> empacotando $ARQUIVO"
+mksquashfs "$TMP/root" "$DATA/blobs/$ARQUIVO" \
+    -comp zstd -Xcompression-level 15 -b 1048576 -noappend -quiet -all-root
+
+MD5=$(md5sum "$DATA/blobs/$ARQUIVO" | cut -d' ' -f1)
+TAMANHO=$(stat -c%s "$DATA/blobs/$ARQUIVO")
+echo
+echo "camada: $DATA/blobs/$ARQUIVO"
+echo "  md5:  $MD5"
+echo "  tam:  $((TAMANHO / 1024)) kB"
+
+if [ ${#ANEXAR[@]} -eq 0 ]; then
+    echo
+    echo "para anexar a uma imagem, rode de novo com --attach <imagem>"
+    exit 0
+fi
+
+if [ -z "$SERVIDOR" ] || [ -z "$CHAVE" ]; then
+    echo
+    echo "informe --server e --admin-key (ou NB3_BASE_URL / NB3_ADMIN_KEY) para anexar" >&2
+    exit 1
+fi
+
+for IMAGEM in "${ANEXAR[@]}"; do
+    echo ">> anexando a $IMAGEM"
+    curl -sS -X POST "$SERVIDOR/api/v1/images/$IMAGEM/layers" \
+        -H "Authorization: Bearer $CHAVE" \
+        -H 'Content-Type: application/json' \
+        --data "{\"md5\":\"$MD5\",\"file\":\"$ARQUIVO\",\"size\":$TAMANHO}"
+    echo
+done

@@ -1,0 +1,2 @@
+# Módulos extras vão no hook (hooks/nutellaboot), que usa manual_add_modules.
+# Este arquivo fica vazio de propósito.

@@ -1,0 +1,266 @@
+# shellcheck shell=sh
+# NutellaBoot 3 — bootstrap do initrd (selecionado por boot=nutellaboot).
+#
+# Responsabilidades, nesta ordem:
+#   1. ler a configuração da partição do pendrive (label NB3CFG);
+#   2. subir a rede — WIFI INCLUSIVE, com espera real de associação;
+#   3. acertar o relógio (RTC errado invalida certificado);
+#   4. baixar o stuff do servidor por HTTPS VERIFICADO e executá-lo.
+#
+# Tudo além disto vive no stuff, que é atualizado no servidor sem regravar
+# pendrive. Este arquivo deve permanecer pequeno.
+
+NB_DEFAULT_SERVER='https://nutellaboot.naquadah.com.br'
+NB_CA_BUNDLE=${NB_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}
+NB_RUN=${NB_RUN:-/run/nutellaboot}
+# Caminhos parametrizados para que a lógica de configuração possa ser
+# exercitada fora do initramfs (tests/test_bootstrap_shell.py).
+NB_CFGMNT=${NB_CFGMNT:-/mnt/nb3cfg}
+NB_WPA_CONF=${NB_WPA_CONF:-/etc/wpa_supplicant.conf}
+NB_HOSTS_FILE=${NB_HOSTS_FILE:-/etc/hosts}
+NB_RESOLV_FILE=${NB_RESOLV_FILE:-/etc/resolv.conf}
+NB_DEFAULTS_FILE=${NB_DEFAULTS_FILE:-/etc/nutellaboot.defaults}
+
+nb_log() { log_begin_msg "$*"; log_end_msg; }
+nb_warn() { log_warning_msg "$*"; }
+
+nb_fatal() {
+    _wait=${NB_FATAL_WAIT:-30}
+    log_failure_msg "$*"
+    log_failure_msg "Reiniciando em ${_wait}s / rebooting in ${_wait}s"
+    sleep "$_wait"
+    reboot -f
+    panic=60 panic "$*"
+}
+
+# --- 1. configuração vinda do pendrive -------------------------------------
+
+# Monta a partição de configuração (FAT, label NB3CFG) e lê os arquivos.
+# Precedência: linha de comando do kernel > pendrive > padrão embutido.
+# O pendrive só é necessário até aqui: o GRUB já carregou kernel e initrd na
+# memória, e acabamos de copiar a configuração para a RAM. Avisar isso cedo
+# importa de verdade numa sala com dezenas de máquinas — um pendrive por
+# computador, e todos podem ser recolhidos enquanto o boot continua.
+nb_usb_livre() {
+    echo
+    echo "  ┌────────────────────────────────────────────────────────────┐"
+    echo "  │  PODE RETIRAR O PENDRIVE AGORA                              │"
+    echo "  │  YOU CAN REMOVE THE USB DRIVE NOW                           │"
+    echo "  │  YA PUEDE RETIRAR LA MEMORIA USB                            │"
+    echo "  └────────────────────────────────────────────────────────────┘"
+    echo
+    : > /run/nutellaboot-usb-livre
+    sleep 2
+}
+
+nb_conf_value() {
+    # Lê KEY=valor do nutellaboot.conf, sem aspas, primeira ocorrência.
+    sed -n "s/^$1=//p" "$NB_RUN/nutellaboot.conf" 2> /dev/null |
+        tr -d "\"'" | head -n1
+}
+
+nb_read_usbconfig() {
+    mkdir -p "$NB_RUN" "$NB_CFGMNT"
+    # O pendrive pode demorar a aparecer (enumeração USB) — daí as tentativas.
+    _try=0
+    while [ "$_try" -lt "${NB_CFG_TRIES:-5}" ]; do
+        _dev=$(blkid -L NB3CFG 2> /dev/null)
+        [ -n "$_dev" ] && break
+        sleep "${NB_CFG_WAIT:-2}"
+        _try=$((_try + 1))
+    done
+    if [ -n "$_dev" ] && mount -o ro "$_dev" "$NB_CFGMNT" 2> /dev/null; then
+        [ -f "$NB_CFGMNT/nutellaboot.conf" ] && cp "$NB_CFGMNT/nutellaboot.conf" "$NB_RUN/"
+        [ -f "$NB_CFGMNT/wifi.conf" ] && cp "$NB_CFGMNT/wifi.conf" "$NB_RUN/"
+        sync
+        umount "$NB_CFGMNT"
+        nb_log "configuração lida do pendrive ($_dev)"
+        nb_usb_livre
+    else
+        nb_warn "partição NB3CFG não encontrada — usando padrões embutidos"
+    fi
+
+    # shellcheck disable=SC1090
+    [ -f "$NB_DEFAULTS_FILE" ] && . "$NB_DEFAULTS_FILE"
+
+    # Precedência: linha de comando do kernel > pendrive > padrão embutido.
+    [ -z "$IMAGEROOT" ] && IMAGEROOT=$(nb_conf_value IMAGEROOT)
+    # Chave de boot: autentica este pendrive no servidor. Sem ela, o servidor
+    # não entrega manifest nem script de boot.
+    NB_BOOT_KEY=$(nb_conf_value NB_BOOT_KEY)
+    _cfg_server=$(nb_conf_value NB_SERVER)
+    [ -n "$_cfg_server" ] && NB_SERVER=$_cfg_server
+    [ -z "$NB_SERVER" ] && NB_SERVER=$NB_DEFAULT_SERVER
+    NB_SERVER=${NB_SERVER%/}
+
+    # NB_HOSTS="nome ip" — fixa nomes no /etc/hosts sem abrir mão do TLS
+    # (usado no ambiente de teste em qemu, onde o host é 10.0.2.2, e em
+    # espelhos locais durante a prova).
+    if [ -f "$NB_RUN/nutellaboot.conf" ]; then
+        sed -n 's/^NB_HOSTS=//p' "$NB_RUN/nutellaboot.conf" | tr -d "\"'" |
+            while read -r _name _ip; do
+                [ -n "$_name" ] && [ -n "$_ip" ] && echo "$_ip $_name" >> "$NB_HOSTS_FILE"
+            done
+    fi
+    [ -z "$IMAGEROOT" ] && nb_fatal "IMAGEROOT não definido (nem no pendrive, nem na linha de comando)"
+    nb_log "imagem=$IMAGEROOT servidor=$NB_SERVER"
+}
+
+# --- 2. rede ----------------------------------------------------------------
+
+# Gera wpa_supplicant.conf a partir do wifi.conf do pendrive (ssid<TAB>psk[<TAB>hidden]).
+nb_write_wpaconf() {
+    [ -s "$NB_RUN/wifi.conf" ] || return 1
+    {
+        echo "ctrl_interface=/run/wpa_supplicant"
+        echo "update_config=0"
+        while IFS="$(printf '\t')" read -r _ssid _psk _flags; do
+            case "$_ssid" in '' | '#'*) continue ;; esac
+            echo "network={"
+            echo "	ssid=\"$_ssid\""
+            case "$_flags" in *hidden*) echo "	scan_ssid=1" ;; esac
+            if [ -n "$_psk" ]; then
+                echo "	psk=\"$_psk\""
+                echo "	key_mgmt=WPA-PSK"
+            else
+                echo "	key_mgmt=NONE"
+            fi
+            echo "}"
+        done < "$NB_RUN/wifi.conf"
+    } > "$NB_WPA_CONF"
+    return 0
+}
+
+# Sobe o wifi e ESPERA a associação completar. O nb2 dava um `sleep 3` cego —
+# tempo insuficiente para handshake WPA2 + DHCP, e o stuff servido ainda por
+# cima deixava de chamar esta função.
+configure_wifi() {
+    _iface=$(ip -o link | awk -F': ' '{print $2}' | grep -E '^w' | head -n1)
+    [ -z "$_iface" ] && return 1
+    nb_write_wpaconf || [ -s /etc/wpa_supplicant.conf ] || return 1
+
+    log_begin_msg "Conectando ao wifi em $_iface"
+    rfkill unblock all 2>/dev/null
+    ip link set "$_iface" up
+    mkdir -p /run/wpa_supplicant
+    /sbin/wpa_supplicant -i"$_iface" -c/etc/wpa_supplicant.conf \
+        -P/run/initram-wpa_supplicant.pid -B -f /tmp/wpa_supplicant.log
+
+    _n=0
+    while [ "$_n" -lt "${NB_WIFI_TIMEOUT:-30}" ]; do
+        if /sbin/wpa_cli -p/run/wpa_supplicant -i"$_iface" status 2>/dev/null |
+            grep -q '^wpa_state=COMPLETED'; then
+            log_end_msg
+            nb_log "wifi associado em $_iface"
+            DEVICE=$_iface
+            export DEVICE
+            return 0
+        fi
+        sleep 1
+        _n=$((_n + 1))
+    done
+    log_failure_msg "wifi não associou em ${NB_WIFI_TIMEOUT:-30}s"
+    return 1
+}
+
+nb_resolvconf() {
+    for _f in /run/net-*.conf; do
+        [ -e "$_f" ] || continue
+        # shellcheck disable=SC1090
+        . "$_f"
+    done
+    : > "$NB_RESOLV_FILE"
+    for _d in $IPV4DNS0 $IPV4DNS1; do
+        [ -n "$_d" ] && [ "$_d" != 0.0.0.0 ] &&
+            echo "nameserver $_d" >> "$NB_RESOLV_FILE"
+    done
+}
+
+nb_online() {
+    _out=$(wget.good -q -O - --timeout=10 --tries=1 \
+        --ca-certificate="$NB_CA_BUNDLE" "$NB_SERVER/boot/v3/sanity" 2> /dev/null)
+    echo "$_out" | grep -q penguin
+}
+
+# nb_post <caminho> <destino> — busca um recurso do servidor enviando a chave
+# de boot por POST (com TLS verificado). Devolve 1 se falhar.
+nb_post() {
+    wget.good -q -O "$2" --timeout=20 --tries=2 \
+        --ca-certificate="$NB_CA_BUNDLE" \
+        --post-data="key=$NB_BOOT_KEY" \
+        "$NB_SERVER/boot/v3/$1"
+}
+
+configure_localnetwork() {
+    _n=1
+    while [ "$_n" -le "${NB_NET_TRIES:-10}" ]; do
+        log_begin_msg "Configurando a rede (tentativa $_n)"
+        configure_networking
+        nb_resolvconf
+        log_end_msg
+        nb_online && return 0
+
+        nb_warn "sem conexão pela rede cabeada; tentando wifi"
+        if configure_wifi; then
+            configure_networking
+            nb_resolvconf
+            nb_online && return 0
+        fi
+        sleep 5
+        _n=$((_n + 1))
+    done
+    nb_fatal "Não foi possível conectar ao servidor $NB_SERVER"
+}
+
+# --- 3. relógio -------------------------------------------------------------
+
+# Certificado TLS é validado contra a data do sistema; máquina com RTC zerado
+# ou fora de hora falharia a verificação. O /time é HTTP simples de propósito:
+# ele existe justamente para tornar o HTTPS possível.
+nb_synctime() {
+    _epoch=$(wget.good -q -O - --timeout=10 --tries=2 --no-check-certificate \
+        "$NB_SERVER/boot/v3/time" 2>/dev/null | tr -dc '0-9')
+    [ -z "$_epoch" ] && return 1
+    _now=$(date +%s)
+    _diff=$((_epoch - _now))
+    [ "$_diff" -lt 0 ] && _diff=$((-_diff))
+    if [ "$_diff" -gt 60 ]; then
+        date -s "@$_epoch" > /dev/null 2>&1
+        nb_log "relógio ajustado (desvio de ${_diff}s)"
+    fi
+}
+
+# --- 4. stuff ---------------------------------------------------------------
+
+nb_fetch_stuff() {
+    _n=1
+    while [ "$_n" -le 10 ]; do
+        if nb_post "$IMAGEROOT/stuff" /stuff.sh && [ -s /stuff.sh ]; then
+            return 0
+        fi
+        nb_warn "não foi possível baixar o stuff (tentativa $_n/10)"
+        sleep 5
+        _n=$((_n + 1))
+    done
+    return 1
+}
+
+mountroot() {
+    nb_read_usbconfig
+    configure_localnetwork
+    nb_synctime
+    nb_online || nb_fatal "servidor inacessível após ajuste de relógio"
+
+    nb_fetch_stuff || nb_fatal "Não foi possível obter o script de boot do servidor"
+    log_begin_msg "Executando o script de boot do servidor"
+    export NB_SERVER NB_CA_BUNDLE IMAGEROOT
+    # shellcheck disable=SC1091
+    . /stuff.sh
+    log_end_msg
+
+    nb3_mountroot
+}
+
+mount_top() { local_top; }
+mount_premount() { local_premount; }
+mount_bottom() { local_bottom; }

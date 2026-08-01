@@ -1,0 +1,17 @@
+[project]
+name = "nutellaboot3"
+version = "3.0.0.dev0"
+description = "NutellaBoot 3 — sistema de boot em rede da Maratona SBC de Programação"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "httpx",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

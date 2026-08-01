@@ -1,0 +1,21 @@
+# ambiente
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# banco-filesystem e segredos (nunca versionar)
+data/*
+!data/README.md
+
+# artefatos grandes de build
+*.raw
+*.raw.gz
+*.img
+*.squash
+*.squash-*
+*.squashfs
+client/build/
+
+# logs
+*.log

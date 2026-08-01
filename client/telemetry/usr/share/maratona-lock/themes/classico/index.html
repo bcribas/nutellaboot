@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Maratona — aguarde</title>
+<style>
+  :root { --fg: #eef2f8; --dim: #93a0b4; --alert: #ff5b5b; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: radial-gradient(ellipse at 50% 30%, #1d2740 0%, #0a0e17 70%);
+    color: var(--fg);
+    font: 16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+    cursor: none; user-select: none;
+  }
+  main {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 28px; padding: 5vh 4vw;
+  }
+  #logo img { max-height: 22vh; max-width: 40vw; }
+  #team { text-align: center; }
+  #teamname { font-size: clamp(28px, 5.5vw, 82px); font-weight: 700; line-height: 1.1; }
+  #org { font-size: clamp(15px, 1.7vw, 26px); color: var(--dim); margin-top: 8px; }
+  #seat { font-size: clamp(14px, 1.4vw, 22px); color: var(--dim); margin-top: 4px; }
+  #messages { text-align: center; }
+  #messages .line { font-size: clamp(15px, 1.7vw, 26px); color: var(--dim); }
+  #messages .line.primary { color: var(--fg); font-size: clamp(19px, 2.2vw, 34px); font-weight: 600; }
+  #alert {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 14px; background: rgba(120, 0, 0, 0);
+    opacity: 0; transition: opacity .18s, background .18s; pointer-events: none;
+  }
+  #alert.on { opacity: 1; background: rgba(90, 0, 0, .55); }
+  #alert.lvl2 { background: rgba(130, 0, 0, .68); }
+  #alert.lvl3 { background: rgba(170, 0, 0, .8); }
+  #alert .x { font-size: clamp(60px, 12vw, 190px); color: var(--alert); line-height: 1; }
+  #alert .txt { font-size: clamp(18px, 2.4vw, 40px); font-weight: 700; text-align: center; }
+  #alert.lvl3 .x { animation: pulse .35s infinite alternate; }
+  @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.12); } }
+  footer { position: fixed; bottom: 14px; color: #46516a; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <div id="logo"></div>
+  <div id="team">
+    <div id="teamname"></div>
+    <div id="org"></div>
+    <div id="seat"></div>
+  </div>
+  <div id="messages"></div>
+</main>
+<div id="alert"><div class="x">✖</div><div class="txt"></div></div>
+<footer id="site"></footer>
+<script src="../common/lock.js"></script>
+<script>
+NB3Lock.fillCommon(NB3Lock.info(), NB3Lock.t);
+var alertBox = document.querySelector("#alert");
+NB3Lock.watchInput(function (level) {
+  alertBox.className = level ? "on lvl" + level : "";
+});
+</script>
+</body>
+</html>

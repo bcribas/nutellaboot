@@ -1,0 +1,132 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Maratona — aguarde</title>
+<style>
+  :root { --fg: #f2f6ff; --dim: #9fb0cc; --alert: #ff5757; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; cursor: none; user-select: none; }
+  body {
+    color: var(--fg);
+    font: 16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(-45deg, #0b1020, #21123f, #0d3b52, #3a1530, #1a1030);
+    background-size: 400% 400%;
+    animation: drift 26s ease infinite;
+  }
+  @keyframes drift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  canvas#stars { position: fixed; inset: 0; }
+  main {
+    position: relative; height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 26px; padding: 5vh 4vw;
+    text-shadow: 0 2px 24px rgba(0, 0, 0, .55);
+  }
+  #logo img {
+    max-height: 20vh; max-width: 38vw;
+    filter: drop-shadow(0 6px 26px rgba(0, 0, 0, .5));
+    animation: float 6s ease-in-out infinite;
+  }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+  #teamname {
+    font-size: clamp(30px, 6vw, 90px); font-weight: 800; text-align: center; line-height: 1.05;
+    background: linear-gradient(90deg, #ffd479, #ff9de2, #7ad7ff, #ffd479);
+    background-size: 300% auto;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: shine 9s linear infinite;
+  }
+  @keyframes shine { to { background-position: 300% center; } }
+  #org, #seat { text-align: center; color: var(--dim); }
+  #org { font-size: clamp(15px, 1.8vw, 27px); }
+  #seat { font-size: clamp(14px, 1.4vw, 22px); }
+  #messages { text-align: center; }
+  #messages .line { font-size: clamp(15px, 1.7vw, 26px); color: var(--dim); opacity: .9; }
+  #messages .line.primary { color: var(--fg); font-size: clamp(19px, 2.3vw, 35px); font-weight: 600; }
+  .pulse-ring {
+    position: fixed; left: 50%; top: 50%; width: 40vmin; height: 40vmin;
+    margin: -20vmin 0 0 -20vmin; border: 2px solid rgba(255, 255, 255, .07);
+    border-radius: 50%; animation: ring 4.5s ease-out infinite;
+  }
+  .pulse-ring:nth-child(2) { animation-delay: 1.5s; }
+  .pulse-ring:nth-child(3) { animation-delay: 3s; }
+  @keyframes ring {
+    from { transform: scale(.3); opacity: .8; }
+    to { transform: scale(2.4); opacity: 0; }
+  }
+  #alert {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 16px; opacity: 0; pointer-events: none;
+    background: rgba(120, 0, 0, 0); transition: opacity .16s, background .16s;
+    backdrop-filter: blur(2px);
+  }
+  #alert.on { opacity: 1; background: rgba(90, 0, 0, .5); }
+  #alert.lvl2 { background: rgba(130, 0, 0, .66); }
+  #alert.lvl3 { background: rgba(175, 0, 0, .8); }
+  #alert .x { font-size: clamp(64px, 13vw, 200px); color: var(--alert); line-height: 1; }
+  #alert .txt { font-size: clamp(18px, 2.5vw, 42px); font-weight: 800; text-align: center; }
+  #alert.lvl2 .x, #alert.lvl3 .x { animation: shake .3s infinite; }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0) scale(1.05); }
+    25% { transform: translateX(-12px) rotate(-4deg); }
+    75% { transform: translateX(12px) rotate(4deg); }
+  }
+  footer { position: fixed; bottom: 14px; color: #55617d; font-size: 12px; }
+</style>
+</head>
+<body>
+<canvas id="stars"></canvas>
+<div class="pulse-ring"></div><div class="pulse-ring"></div><div class="pulse-ring"></div>
+<main>
+  <div id="logo"></div>
+  <div id="teamname"></div>
+  <div id="org"></div>
+  <div id="seat"></div>
+  <div id="messages"></div>
+</main>
+<div id="alert"><div class="x">✖</div><div class="txt"></div></div>
+<footer id="site"></footer>
+<script src="../common/lock.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+NB3Lock.fillCommon(NB3Lock.info(), NB3Lock.t);
+
+const alertBox = $("#alert");
+NB3Lock.watchInput((level) => (alertBox.className = level ? `on lvl${level}` : ""));
+
+// Partículas leves: agradável de olhar sem consumir a máquina.
+const cv = $("#stars");
+const ctx = cv.getContext("2d");
+let parts = [];
+function resize() {
+  cv.width = innerWidth;
+  cv.height = innerHeight;
+  const n = Math.min(90, Math.round((innerWidth * innerHeight) / 26000));
+  parts = Array.from({ length: n }, () => ({
+    x: Math.random() * cv.width,
+    y: Math.random() * cv.height,
+    r: Math.random() * 1.8 + 0.4,
+    vx: (Math.random() - 0.5) * 0.22,
+    vy: (Math.random() - 0.5) * 0.22,
+    a: Math.random() * 0.5 + 0.15,
+  }));
+}
+addEventListener("resize", resize);
+resize();
+(function draw() {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  for (const p of parts) {
+    p.x = (p.x + p.vx + cv.width) % cv.width;
+    p.y = (p.y + p.vy + cv.height) % cv.height;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, 7);
+    ctx.fillStyle = `rgba(255,255,255,${p.a})`;
+    ctx.fill();
+  }
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

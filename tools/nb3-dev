@@ -1,0 +1,8 @@
+#!/bin/bash
+# Sobe o servidor de desenvolvimento em 127.0.0.1:8890 (single-worker —
+# invariante do long-poll/SSE; NUNCA use --workers >1).
+cd "$(dirname "$0")/.." || exit 1
+exec .venv/bin/uvicorn server.app.main:app \
+    --host "${NB3_HOST:-127.0.0.1}" \
+    --port "${NB3_PORT:-8890}" \
+    "$@"

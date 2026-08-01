@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NutellaBoot 3 — Administração</title>
+<link rel="stylesheet" href="/common/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="admin_title"></h1>
+  <span class="spacer"></span>
+  <button type="button" id="logout" class="small hidden" data-i18n="admin_logout"></button>
+  <span id="lang"></span>
+</header>
+
+<main class="wide">
+  <div class="card" id="login">
+    <h2 data-i18n="admin_key"></h2>
+    <p class="help muted" data-i18n="admin_key_help"></p>
+    <div class="actions">
+      <input type="password" id="key" style="max-width:420px" autocomplete="off">
+      <button type="button" id="enter" class="primary" data-i18n="admin_enter"></button>
+    </div>
+  </div>
+
+  <div id="panel" class="hidden">
+    <div class="card">
+      <h2 data-i18n="new_image"></h2>
+      <div class="field">
+        <div class="flabel" data-i18n="image_id"></div>
+        <div class="help" data-i18n="image_id_help"></div>
+        <input type="text" id="newid" style="max-width:320px">
+      </div>
+      <div class="field">
+        <div class="flabel" data-i18n="image_name"></div>
+        <input type="text" id="newname">
+      </div>
+      <div class="field">
+        <div class="flabel" data-i18n="template"></div>
+        <select id="newtpl" style="max-width:320px"></select>
+      </div>
+      <div class="actions">
+        <button type="button" id="create" class="primary" data-i18n="create"></button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="bulk"></h2>
+      <p class="help muted" data-i18n="bulk_help"></p>
+      <textarea id="bulktsv" spellcheck="false"
+        placeholder="26brbr&#9;Brazilian Finals&#9;maratonalinux2404"></textarea>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" id="bulkgo" class="primary" data-i18n="bulk_create"></button>
+        <button type="button" id="bulkcsv" class="hidden" data-i18n="download_csv"></button>
+        <span id="bulkstatus" class="muted"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span data-i18n="images"></span> <span id="imgcount" class="muted"></span></h2>
+      <div class="actions" style="margin-bottom:10px">
+        <input type="text" id="filter" data-i18n-placeholder="search" style="max-width:260px">
+        <button type="button" id="reload" class="small" data-i18n="refresh"></button>
+      </div>
+      <div id="imglist" class="muted" data-i18n="loading"></div>
+    </div>
+  </div>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

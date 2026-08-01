@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Importa as imagens do NutellaBoot 2 para o formato do NutellaBoot 3.
+
+Converte, por imagem:
+    fullname            -> image.json.fullname
+    alvo do symlink stuff -> image.json.template  (e "-desbloqueado" -> unlocked)
+    stuff.conf.json     -> config.json
+    template.extra      -> layers-extra.json
+    WALLPAPER (url)     -> wallpaper.png, se o arquivo existir na cópia local
+                           do site (não baixa nada da internet)
+
+NÃO importa: token e senha antigos (a senha de seeder do nb2 era
+md5("qwer <sede>"), derivável por qualquer um) — credenciais novas são
+geradas e exportadas em CSV.
+
+Uso:
+    tools/nb3-import-nb2 [--nb2 DIR] [--web DIR] [--glob '25*'] [--dry-run]
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+VENV_PY = REPO / ".venv" / "bin" / "python3"
+if VENV_PY.exists() and Path(sys.prefix).resolve() != (REPO / ".venv").resolve():
+    os.execv(str(VENV_PY), [str(VENV_PY), __file__, *sys.argv[1:]])
+sys.path.insert(0, str(REPO))
+
+from server.app import auth, fsdb  # noqa: E402
+from server.app.services import store  # noqa: E402
+from server.app.services.default_schema import build_default_schema  # noqa: E402
+from server.app.settings import settings  # noqa: E402
+
+NB2_PADRAO = REPO.parent / "nutellaboot" / "nutellaboot" / "nutellaboot2"
+WEB_PADRAO = REPO.parent / "nutellaboot" / "nutellaboot.naquadah.com.br"
+
+# imagens-base do nb2: viram templates, não imagens
+BASES = re.compile(r"^maratonalinux")
+
+
+def ler_template(path: Path) -> list[dict]:
+    camadas = []
+    for linha in path.read_text().splitlines():
+        linha = linha.strip()
+        if not linha or linha.startswith("#"):
+            continue
+        partes = linha.split(None, 2)
+        if len(partes) < 2:
+            continue
+        md5, arquivo = partes[0], partes[1]
+        url = partes[2].strip() if len(partes) > 2 else ""
+        # o nb2 usava o literal "unk" quando não havia URL de origem
+        camadas.append({"md5": md5, "file": arquivo, "cdn_url": "" if url == "unk" else url})
+    return camadas
+
+
+def valores_do_stuff_conf(path: Path) -> dict:
+    """Extrai os valores escolhidos do stuff.conf.json do nb2."""
+    try:
+        dados = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    out = {}
+    for chave, campo in (dados.get("configs") or {}).items():
+        if not isinstance(campo, dict):
+            continue
+        valor = campo.get("selected")
+        if valor is None:
+            continue
+        if valor == "t":
+            valor = True
+        elif valor == "f":
+            valor = False
+        out[chave] = valor
+    return out
+
+
+def importar_wallpaper(valores: dict, web: Path, destino: Path) -> dict | None:
+    """Copia o wallpaper da cópia local do site, se estiver lá. A URL do nb2
+    apontava para o próprio servidor na maioria dos casos."""
+    url = valores.pop("WALLPAPER", "")
+    if not url or not isinstance(url, str):
+        return None
+    nome = url.rstrip("/").split("/")[-1]
+    if not nome:
+        return None
+    candidatos = list((web / "wallpapers").rglob(nome)) if (web / "wallpapers").is_dir() else []
+    if not candidatos:
+        return None
+    dados = candidatos[0].read_bytes()
+    (destino / "wallpaper.png").write_bytes(dados)
+    meta = {
+        "md5": hashlib.md5(dados).hexdigest(),
+        "size": len(dados),
+        "filename": nome,
+        "content_type": "image/png" if dados[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg",
+    }
+    fsdb.write_json(destino / "wallpaper.json", meta)
+    return meta
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--nb2", type=Path, default=NB2_PADRAO)
+    ap.add_argument("--web", type=Path, default=WEB_PADRAO)
+    ap.add_argument("--glob", default="*", help="filtra as imagens a importar")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--csv", type=Path, help="onde gravar as credenciais novas")
+    args = ap.parse_args()
+
+    if not args.nb2.is_dir():
+        print(f"diretório do nb2 não encontrado: {args.nb2}", file=sys.stderr)
+        return 1
+
+    # 1) templates (as imagens-base do nb2)
+    templates = []
+    for d in sorted(args.nb2.iterdir()):
+        if not d.is_dir() or not BASES.match(d.name):
+            continue
+        if not (d / "template").is_file():
+            continue
+        camadas = ler_template(d / "template")
+        templates.append((d.name, camadas))
+        if args.dry_run:
+            print(f"[template] {d.name}: {len(camadas)} camadas")
+            continue
+        tdir = store.template_dir(d.name)
+        fsdb.write_json(tdir / "template.json", {"layers": camadas})
+        if not (tdir / "schema.json").exists():
+            fsdb.write_json(tdir / "schema.json", build_default_schema())
+
+    # 2) imagens
+    linhas_csv = []
+    for d in sorted(args.nb2.iterdir()):
+        if not d.is_dir() or BASES.match(d.name) or d.name in ("old", "log"):
+            continue
+        if not d.match(args.glob):
+            continue
+        if not (d / "stuff.conf.json").is_file() and not (d / "fullname").is_file():
+            continue
+
+        fullname = (d / "fullname").read_text().strip() if (d / "fullname").is_file() else d.name
+
+        # De onde a imagem herdava, no nb2. Vale olhar os três: era comum a
+        # sede apontar 'template' para o perfil bloqueado e o
+        # 'template.conf.json' para o "-desbloqueado" (era ESTE que liberava
+        # os campos do formulário), como em 25brbr.
+        alvos = []
+        for nome in ("stuff", "template", "template.conf.json"):
+            if (d / nome).is_symlink():
+                alvos.append(os.readlink(d / nome).split("/")[-2])
+        unlocked = any(a.endswith("-desbloqueado") for a in alvos)
+        base = next((a for a in alvos if a), "")
+        template = base.replace("-desbloqueado", "") or "maratonalinux2404"
+
+        if args.dry_run:
+            print(f"[imagem] {d.name}: template={template} unlocked={unlocked} ({fullname})")
+            continue
+
+        if not store.template_exists(template):
+            print(f"  ! {d.name}: template '{template}' não existe — pulando", file=sys.stderr)
+            continue
+        if store.image_exists(d.name):
+            print(f"  = {d.name}: já existe — pulando")
+            continue
+
+        criada = store.create_image(d.name, fullname, template, unlocked=unlocked)
+        destino = store.image_dir(d.name)
+
+        valores = valores_do_stuff_conf(d / "stuff.conf.json")
+        valores.pop("SEEDPASSWORD", None)  # senha antiga era derivável
+        valores.pop("RESETSEEDSERVERS", None)  # sem equivalente no v3
+        importar_wallpaper(valores, args.web, destino)
+        fsdb.write_json(destino / "config.json", {"values": valores})
+
+        if (d / "template.extra").is_file():
+            fsdb.write_json(destino / "layers-extra.json", ler_template(d / "template.extra"))
+
+        linhas_csv.append(
+            [d.name, fullname, template, criada["token"], criada["machine_key"], criada["configureitor_url"]]
+        )
+        print(f"  + {d.name} ({fullname})")
+
+    if linhas_csv:
+        destino_csv = args.csv or (settings.data_root / "credenciais-importacao.csv")
+        with open(destino_csv, "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["id", "fullname", "template", "token", "machine_key", "configureitor_url"])
+            w.writerows(linhas_csv)
+        os.chmod(destino_csv, 0o600)
+        print(f"\n{len(linhas_csv)} imagens importadas; credenciais em {destino_csv}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

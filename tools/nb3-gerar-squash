@@ -1,0 +1,129 @@
+#!/bin/bash
+# nb3-gerar-squash — gera a camada base (o Maratona Linux inteiro) a partir da
+# imagem-mestre, e registra no template.
+#
+# Substitui o mlinux/gerar-squash, que tinha o nome do .raw e o /mnt fixos no
+# código, e cujo md5 era copiado do terminal para o servidor na mão.
+#
+# Precisa de root só por causa do losetup/mount da imagem-mestre:
+#     sudo tools/nb3-gerar-squash --raw ubuntu-24.04-initial.raw --name icpc-latam2026
+#
+# Com --register, publica direto no template (aí precisa da chave de admin):
+#     sudo -E tools/nb3-gerar-squash --raw ... --name ... --register maratonalinux2604
+
+set -euo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+DATA=${NB3_DATA_ROOT:-$REPO/data}
+RAW=""
+NOME=""
+PARTICAO=2
+REGISTRAR=""
+SERVIDOR=${NB3_BASE_URL:-}
+CHAVE=${NB3_ADMIN_KEY:-}
+SAIDA=""
+
+usage() {
+    cat << EOF
+Uso: sudo nb3-gerar-squash --raw IMAGEM.raw --name NOME [opções]
+
+  --raw ARQUIVO      imagem-mestre do Maratona Linux
+  --name NOME        nome da camada (vira <nome>.squash-<data>)
+  --part N           partição raiz dentro do .raw (padrão: 2)
+  --out DIR          onde gravar (padrão: data/blobs)
+  --register TPL     registra a camada neste template pela API
+  --server URL       endereço da API (ou NB3_BASE_URL)
+  --admin-key CHAVE  chave de administração (ou NB3_ADMIN_KEY)
+EOF
+    exit "${1:-0}"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --raw) RAW=$2; shift 2 ;;
+        --name) NOME=$2; shift 2 ;;
+        --part) PARTICAO=$2; shift 2 ;;
+        --out) SAIDA=$2; shift 2 ;;
+        --register) REGISTRAR=$2; shift 2 ;;
+        --server) SERVIDOR=$2; shift 2 ;;
+        --admin-key) CHAVE=$2; shift 2 ;;
+        -h | --help) usage 0 ;;
+        *) echo "opção desconhecida: $1" >&2; usage 1 ;;
+    esac
+done
+
+[ -n "$RAW" ] && [ -n "$NOME" ] || usage 1
+[ -f "$RAW" ] || { echo "imagem não encontrada: $RAW" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || { echo "precisa de root (losetup/mount da imagem-mestre)" >&2; exit 1; }
+
+SAIDA=${SAIDA:-$DATA/blobs}
+mkdir -p "$SAIDA"
+ARQUIVO="$NOME.squash-$(date +%Y-%m-%d-%H-%M)"
+MNT=$(mktemp -d)
+LOOP=""
+
+cleanup() {
+    mountpoint -q "$MNT" && umount "$MNT" || true
+    [ -n "$LOOP" ] && losetup -d "$LOOP" || true
+    rmdir "$MNT" 2> /dev/null || true
+}
+trap cleanup EXIT
+
+echo ">> montando $RAW (partição $PARTICAO)"
+LOOP=$(losetup --show -r -fP "$RAW")
+mount -o ro,norecovery "${LOOP}p${PARTICAO}" "$MNT"
+
+echo ">> gerando $ARQUIVO (pode demorar bastante)"
+mksquashfs "$MNT" "$SAIDA/$ARQUIVO" \
+    -comp zstd -Xcompression-level 15 -b 1048576 \
+    -always-use-fragments -noappend \
+    -e swapfile -e var/log -e root/sistema -e etc/nologin -e etc/fstab \
+    -e boot -e lost+found -e usr/bin/grub-editenv \
+    -e usr/share/doc/texlive-doc -e var/cache/backups -e home/icpc \
+    -e var/cache/apt/pkgcache.bin -e var/cache/apt/srcpkgcache.bin \
+    -e etc/.nb3 -e etc/.secrets -e etc/machine-id
+
+MD5=$(md5sum "$SAIDA/$ARQUIVO" | cut -d' ' -f1)
+TAMANHO=$(stat -c%s "$SAIDA/$ARQUIVO")
+chown "$(stat -c '%u:%g' "$REPO")" "$SAIDA/$ARQUIVO"
+
+echo
+echo "camada base pronta:"
+echo "  arquivo: $SAIDA/$ARQUIVO"
+echo "  md5:     $MD5"
+echo "  tamanho: $((TAMANHO / 1024 / 1024)) MB"
+
+if [ -z "$REGISTRAR" ]; then
+    echo
+    echo "para publicar no template:  --register <template>"
+    exit 0
+fi
+
+[ -n "$SERVIDOR" ] && [ -n "$CHAVE" ] || {
+    echo "informe --server e --admin-key para registrar" >&2
+    exit 1
+}
+
+echo ">> registrando no template $REGISTRAR"
+ATUAL=$(curl -sS "$SERVIDOR/api/v1/templates/$REGISTRAR" -H "Authorization: Bearer $CHAVE")
+NOVAS=$(python3 - "$ATUAL" "$MD5" "$ARQUIVO" "$TAMANHO" "$SERVIDOR" << 'PY'
+import json, sys
+atual, md5, arquivo, tamanho, servidor = sys.argv[1:6]
+camadas = json.loads(atual).get("layers", [])
+prefixo = arquivo.split(".squash")[0]
+# troca a versão anterior da MESMA camada base, mantendo a ordem (a base é a
+# última: as camadas anteriores têm prioridade no overlay)
+camadas = [c for c in camadas if not c["file"].startswith(prefixo)]
+camadas.append({
+    "md5": md5,
+    "file": arquivo,
+    "cdn_url": f"{servidor}/blobs/{arquivo}",
+    "size": int(tamanho),
+})
+print(json.dumps({"layers": camadas}))
+PY
+)
+curl -sS -X PUT "$SERVIDOR/api/v1/templates/$REGISTRAR/layers" \
+    -H "Authorization: Bearer $CHAVE" -H 'Content-Type: application/json' \
+    --data "$NOVAS"
+echo

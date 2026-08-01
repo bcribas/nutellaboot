@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+"""Construtor de camadas extras — SEM ROOT.
+
+Substitui o fluxo manual do NutellaBoot 2, que era: subir a VM de teste,
+logar, instalar o pacote, dar `tar` no /dev/newroot/upper (um diretório em
+RAM), podar o lixo na mão, rodar mksquashfs, calcular o md5 e editar o
+template.extra no servidor. Camadas assim já foram publicadas com /etc/shadow
+dentro.
+
+Como funciona sem privilégio:
+    unshare -r      cria um namespace de usuário onde somos "root"
+    squashfuse      monta as camadas base (leitura)
+    fuse-overlayfs  junta tudo com uma camada de escrita real em disco
+    bwrap           entra no sistema montado para rodar o apt
+    mksquashfs      empacota só a diferença, já podada
+
+Uso:
+    tools/nb3-layer-worker            # fica observando a fila
+    tools/nb3-layer-worker --once     # processa o que estiver na fila e sai
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+DATA = Path(os.environ.get("NB3_DATA_ROOT", REPO / "data"))
+QUEUE = DATA / "layerbuilds"
+BLOBS = DATA / "blobs"
+WORKROOT = Path(os.environ.get("NB3_BUILD_DIR", "/var/tmp/nb3-build"))
+
+FERRAMENTAS = ["unshare", "squashfuse", "fuse-overlayfs", "bwrap", "mksquashfs", "fusermount3"]
+
+# O que nunca pode entrar numa camada publicada.
+PODA = [
+    "var/cache/apt",
+    "var/lib/apt/lists",
+    "var/log",
+    "tmp",
+    "run",
+    "root/.bash_history",
+    "root/.cache",
+    "etc/resolv.conf",
+    "etc/hostname",
+    "etc/machine-id",
+    "usr/sbin/policy-rc.d",
+    "var/lib/dbus/machine-id",
+    "etc/.nb3",
+    "etc/.secrets",
+]
+PODA_GLOB = ["var/lib/dpkg/*-old", "**/*.dpkg-new", "**/*.dpkg-tmp"]
+CREDENCIAIS = ["etc/shadow", "etc/gshadow", "etc/shadow-", "etc/gshadow-", "etc/passwd-", "etc/group-"]
+
+
+def log(job_log: Path, msg: str) -> None:
+    linha = f"[{time.strftime('%H:%M:%S')}] {msg}"
+    print(linha, flush=True)
+    with open(job_log, "a", encoding="utf-8") as fh:
+        fh.write(linha + "\n")
+
+
+def run(cmd: list[str], job_log: Path, **kw) -> subprocess.CompletedProcess:
+    log(job_log, "$ " + " ".join(cmd))
+    proc = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    for stream in (proc.stdout, proc.stderr):
+        if stream:
+            with open(job_log, "a", encoding="utf-8") as fh:
+                fh.write(stream[-20000:])
+    return proc
+
+
+def checar_ferramentas() -> list[str]:
+    return [t for t in FERRAMENTAS if shutil.which(t) is None]
+
+
+def md5_of(path: Path) -> str:
+    h = hashlib.md5()
+    with open(path, "rb") as fh:
+        for bloco in iter(lambda: fh.read(1 << 20), b""):
+            h.update(bloco)
+    return h.hexdigest()
+
+
+def baixar_camadas(job: dict, destino: Path, job_log: Path) -> list[Path]:
+    """Garante as camadas base em cache local (verificando o md5)."""
+    tpl = json.loads((DATA / "templates" / job["template"] / "template.json").read_text())
+    arquivos = []
+    destino.mkdir(parents=True, exist_ok=True)
+    for camada in tpl.get("layers", []):
+        alvo = BLOBS / camada["file"]
+        if alvo.is_file() and md5_of(alvo) == camada["md5"]:
+            log(job_log, f"cache: {camada['file']}")
+        else:
+            url = camada.get("cdn_url")
+            if not url:
+                raise RuntimeError(f"camada {camada['file']} sem URL de origem")
+            log(job_log, f"baixando {camada['file']} de {url}")
+            BLOBS.mkdir(parents=True, exist_ok=True)
+            with urllib.request.urlopen(url) as resp, open(alvo, "wb") as out:
+                shutil.copyfileobj(resp, out)
+            got = md5_of(alvo)
+            if got != camada["md5"]:
+                alvo.unlink(missing_ok=True)
+                raise RuntimeError(f"md5 divergente em {camada['file']}: {got}")
+        arquivos.append(alvo)
+    return arquivos
+
+
+MOUNT_SH = r"""
+set -eu
+WORK="$1"; shift
+PACOTES="$*"
+
+mkdir -p "$WORK"/lower "$WORK"/upper "$WORK"/work "$WORK"/merged
+
+i=0
+LOWERS=""
+for squash in "$WORK"/base/*; do
+    d="$WORK/lower/$i"
+    mkdir -p "$d"
+    squashfuse "$squash" "$d"
+    # a primeira camada listada tem prioridade: entra à esquerda
+    LOWERS="$d:$LOWERS"
+    i=$((i+1))
+done
+LOWERS="${LOWERS%:}"
+
+fuse-overlayfs -o lowerdir="$LOWERS",upperdir="$WORK/upper",workdir="$WORK/work" "$WORK/merged"
+
+# apt não pode iniciar serviços dentro do chroot
+printf '#!/bin/sh\nexit 101\n' > "$WORK/merged/usr/sbin/policy-rc.d"
+chmod +x "$WORK/merged/usr/sbin/policy-rc.d"
+cp /etc/resolv.conf "$WORK/merged/etc/resolv.conf" 2>/dev/null || true
+
+bwrap --bind "$WORK/merged" / \
+      --proc /proc --dev /dev \
+      --tmpfs /tmp --tmpfs /run \
+      --setenv DEBIAN_FRONTEND noninteractive \
+      --setenv LC_ALL C \
+      --unshare-uts --hostname maratona-build \
+      --die-with-parent \
+      /bin/sh -c "apt-get update && apt-get install -y --no-install-recommends $PACOTES"
+
+fusermount3 -u "$WORK/merged"
+for d in "$WORK"/lower/*; do fusermount3 -u "$d" || true; done
+"""
+
+
+def podar(upper: Path, job_log: Path) -> None:
+    """Remove do diretório de diferença tudo que não deve ser publicado."""
+    for rel in PODA:
+        alvo = upper / rel
+        if alvo.is_symlink() or alvo.is_file():
+            alvo.unlink()
+            log(job_log, f"podado: {rel}")
+        elif alvo.is_dir():
+            shutil.rmtree(alvo)
+            log(job_log, f"podado: {rel}/")
+    for padrao in PODA_GLOB:
+        for alvo in upper.glob(padrao):
+            alvo.unlink(missing_ok=True)
+
+    # Política de credenciais: se o pacote criou usuário de sistema, o hash
+    # não vai junto — as contas entram bloqueadas.
+    for rel in CREDENCIAIS:
+        alvo = upper / rel
+        if not alvo.is_file():
+            continue
+        if rel.endswith("-"):
+            alvo.unlink()
+            log(job_log, f"podado (backup de credencial): {rel}")
+            continue
+        linhas = []
+        for linha in alvo.read_text().splitlines():
+            campos = linha.split(":")
+            if len(campos) > 1 and campos[1] not in ("", "*", "!", "!*"):
+                campos[1] = "*"
+                linha = ":".join(campos)
+            linhas.append(linha)
+        alvo.write_text("\n".join(linhas) + "\n")
+        log(job_log, f"credenciais bloqueadas em {rel}")
+
+    # arquivos de dispositivo / whiteouts do overlay não vão para a camada
+    for caminho in upper.rglob("*"):
+        if caminho.is_symlink():
+            continue
+        try:
+            if caminho.is_char_device() or caminho.is_block_device():
+                caminho.unlink()
+        except OSError:
+            pass
+
+
+def construir_no_namespace(job_file: Path) -> int:
+    """Fase interna: já estamos dentro do namespace de usuário.
+
+    Montagem, apt, poda e mksquashfs precisam rodar TODOS aqui: os arquivos
+    gerados pelo apt pertencem ao "root" do namespace (um subuid, visto de
+    fora), e do lado de fora nem dá para apagá-los.
+    """
+    job = json.loads(job_file.read_text())
+    work = WORKROOT / job["id"]
+    job_log = Path(job["_log"])
+
+    script = work / "mount.sh"
+    script.write_text(MOUNT_SH)
+    proc = run(["/bin/sh", str(script), str(work), *job["packages"]], job_log)
+    if proc.returncode != 0:
+        raise RuntimeError(f"apt/bwrap falhou (código {proc.returncode}) — veja o log")
+
+    podar(work / "upper", job_log)
+
+    BLOBS.mkdir(parents=True, exist_ok=True)
+    nome_arquivo = f"{job['name']}-{time.strftime('%Y%m%d-%H%M')}.squash"
+    saida = BLOBS / nome_arquivo
+    proc = run(
+        ["mksquashfs", str(work / "upper"), str(saida), "-comp", "zstd",
+         "-Xcompression-level", "15", "-b", "1048576", "-noappend", "-quiet",
+         "-all-root"],
+        job_log,
+    )
+    if proc.returncode != 0 or not saida.is_file():
+        raise RuntimeError("mksquashfs falhou")
+
+    resultado = {"file": nome_arquivo, "md5": md5_of(saida), "size": saida.stat().st_size}
+    log(job_log, f"pronto: {nome_arquivo} ({resultado['size'] // 1024} kB, md5 {resultado['md5']})")
+    (work / "resultado.json").write_text(json.dumps(resultado))
+    return 0
+
+
+def construir(job: dict, estado_dir: Path) -> dict:
+    work = WORKROOT / job["id"]
+    job_log = estado_dir / f"{job['id']}.log"
+    if work.exists():
+        # pode conter arquivos de subuid: apaga de dentro do namespace
+        subprocess.run(
+            ["unshare", "--user", "--map-auto", "--map-root-user",
+             "rm", "-rf", str(work)],
+            capture_output=True,
+        )
+        shutil.rmtree(work, ignore_errors=True)
+    (work / "base").mkdir(parents=True)
+
+    log(job_log, f"construindo camada '{job['name']}' com: {' '.join(job['packages'])}")
+    for i, camada in enumerate(baixar_camadas(job, work / "base", job_log)):
+        # o prefixo numérico preserva a ordem de prioridade das camadas
+        os.symlink(camada, work / "base" / f"{i:02d}-{camada.name}")
+
+    interno = work / "job.json"
+    interno.write_text(json.dumps({**job, "_log": str(job_log)}))
+    proc = run(
+        ["unshare", "--user", "--map-auto", "--map-root-user", "--mount",
+         sys.executable, os.path.abspath(__file__), "--build-job", str(interno)],
+        job_log,
+        env={**os.environ, "NB3_DATA_ROOT": str(DATA), "NB3_BUILD_DIR": str(WORKROOT)},
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"construção falhou (código {proc.returncode}) — veja o log")
+
+    resultado = json.loads((work / "resultado.json").read_text())
+    subprocess.run(
+        ["unshare", "--user", "--map-auto", "--map-root-user", "rm", "-rf", str(work)],
+        capture_output=True,
+    )
+    shutil.rmtree(work, ignore_errors=True)
+    return resultado
+
+
+def mover(job_id: str, de: str, para: str) -> Path:
+    origem = QUEUE / de / f"{job_id}.json"
+    destino_dir = QUEUE / para
+    destino_dir.mkdir(parents=True, exist_ok=True)
+    destino = destino_dir / f"{job_id}.json"
+    if origem.is_file():
+        origem.rename(destino)
+    log_origem = QUEUE / de / f"{job_id}.log"
+    if log_origem.is_file():
+        log_origem.rename(destino_dir / f"{job_id}.log")
+    return destino
+
+
+def processar_um() -> bool:
+    pendentes = sorted((QUEUE / "queue").glob("*.json")) if (QUEUE / "queue").is_dir() else []
+    if not pendentes:
+        return False
+    job = json.loads(pendentes[0].read_text())
+    destino = mover(job["id"], "queue", "running")
+
+    try:
+        saida = construir(job, QUEUE / "running")
+        job["output"] = saida
+        job["finished_at"] = time.time()
+        destino.write_text(json.dumps(job, ensure_ascii=False, indent=1))
+        mover(job["id"], "running", "done")
+        print(f"job {job['id']} concluído: {saida['file']}")
+    except Exception as e:  # noqa: BLE001
+        job["error"] = str(e)
+        job["finished_at"] = time.time()
+        destino.write_text(json.dumps(job, ensure_ascii=False, indent=1))
+        mover(job["id"], "running", "failed")
+        print(f"job {job['id']} FALHOU: {e}", file=sys.stderr)
+    return True
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--once", action="store_true", help="processa a fila e sai")
+    ap.add_argument("--interval", type=float, default=5)
+    ap.add_argument("--check", action="store_true", help="só verifica os pré-requisitos")
+    ap.add_argument("--build-job", help="uso interno: fase que roda dentro do namespace")
+    args = ap.parse_args()
+
+    if args.build_job:
+        return construir_no_namespace(Path(args.build_job))
+
+    faltando = checar_ferramentas()
+    if faltando:
+        print("faltam ferramentas: " + ", ".join(faltando), file=sys.stderr)
+        print("no Fedora: sudo dnf install bubblewrap squashfuse fuse-overlayfs squashfs-tools", file=sys.stderr)
+        return 1
+    if args.check:
+        print("pré-requisitos ok (construção roda sem root)")
+        return 0
+
+    for estado in ("queue", "running", "done", "failed"):
+        (QUEUE / estado).mkdir(parents=True, exist_ok=True)
+
+    if args.once:
+        while processar_um():
+            pass
+        return 0
+    print(f"observando {QUEUE / 'queue'}")
+    while True:
+        if not processar_um():
+            time.sleep(args.interval)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,65 @@
+#!/bin/sh
+# Hook único do NutellaBoot 3: rede, wifi, downloads, overlay e seeding.
+# (No nb2 isto era dividido entre hooks/network e hooks/overlay, com metade
+# das linhas comentadas.)
+
+set -e
+
+PREREQ=""
+prereqs() { echo "${PREREQ}"; }
+case "${1}" in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# --- drivers e módulos ---
+copy_modules_dir kernel/drivers/net
+manual_add_modules overlay squashfs loop ext4 nvme sd_mod ahci fuse
+for mod in virtio virtio_net virtio_blk virtio_pci; do
+    manual_add_modules $mod
+done
+
+# --- downloads ---
+# wget do busybox é limitado (sem --ca-certificate); usamos o wget real,
+# renomeado para não colidir.
+copy_exec /usr/bin/wget /usr/bin/wget.good
+copy_exec /usr/bin/aria2c /usr/bin
+copy_exec /usr/bin/md5sum /usr/bin
+copy_exec /bin/bash /bin
+
+# --- TLS DE VERDADE ---
+# O nb2 embutia um único certificado no stuff e depois desligava a verificação
+# em todo download (--check-certificate=false). Aqui vai o bundle completo do
+# sistema e a verificação fica ligada.
+copy_file config /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+# --- wifi ---
+copy_exec /sbin/wpa_supplicant /sbin
+copy_exec /sbin/wpa_cli /sbin
+copy_exec /usr/bin/wpa_passphrase /bin
+copy_exec /sbin/rfkill /sbin
+# Credenciais de fallback: o normal é vir do wifi.conf da partição do pendrive.
+if [ -f /etc/initramfs-tools/wifi.conf ]; then
+    copy_file config /etc/initramfs-tools/wifi.conf /etc/nutellaboot-wifi.conf
+fi
+
+# --- padrões do servidor (sobrescritos pelo pendrive/cmdline) ---
+if [ -f /etc/initramfs-tools/nutellaboot.defaults ]; then
+    copy_file config /etc/initramfs-tools/nutellaboot.defaults /etc/nutellaboot.defaults
+fi
+
+# --- armazenamento ---
+copy_exec /sbin/losetup /sbin
+copy_exec /bin/fallocate /bin
+copy_exec /sbin/mkfs.ext4 /sbin
+copy_exec /sbin/mke2fs /sbin/mke2fs.good
+copy_exec /sbin/blkid /sbin
+
+# --- seeding ---
+copy_exec /usr/bin/webfsd /usr/bin
+
+exit 0

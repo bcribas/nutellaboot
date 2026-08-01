@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""Extrator mínimo de JSON para o agente shell.
+
+O agente é shell (decisão do projeto), mas montar e ler JSON com awk/sed é
+como o nb2 fazia — inclusive com o truque de anexar uma máquina fictícia para
+consertar a vírgula final. A imagem já tem python3; usá-lo aqui custa nada e
+elimina uma classe inteira de erros.
+
+Uso:
+    ... | nb3-json commands     -> uma linha "id<TAB>comando<TAB>args" por comando
+    ... | nb3-json locked       -> "true" ou "false"
+"""
+
+import json
+import sys
+
+
+def main() -> int:
+    what = sys.argv[1] if len(sys.argv) > 1 else ""
+    try:
+        data = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        return 1
+
+    if what == "commands":
+        for cmd in data.get("commands", []):
+            print(f"{cmd.get('id', '')}\t{cmd.get('command', '')}\t{cmd.get('args', '')}")
+    elif what == "locked":
+        print("true" if (data.get("lock") or {}).get("locked") else "false")
+    else:
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,26 @@
+# nutellaboot.conf — configuração do pendrive (partição NB3CFG).
+#
+# Este arquivo é lido pelo initrd logo no começo do boot: ele copia tudo para
+# a memória e desmonta a partição na hora, mostrando na tela que o pendrive
+# já pode ser retirado. Daí em diante nada mais é lido do pendrive.
+#
+# Pode ser editado em qualquer computador (Windows, macOS, Linux) sem
+# regravar o pendrive: a partição é FAT32 e monta em qualquer lugar.
+#
+# Precedência: linha de comando do kernel > este arquivo > padrão do initrd.
+
+# Qual imagem esta máquina deve bootar (obrigatório).
+IMAGEROOT=25brbr
+
+# Chave de boot da imagem: é ela que autoriza este pendrive a baixar o script
+# de boot e a lista de camadas do servidor. Pegue em
+# /api/v1/images/<imagem>/boot-key (ou na tela de administração, junto com o
+# token). Sem ela, o servidor recusa o download.
+NB_BOOT_KEY=nb3b_troque-por-a-chave-da-sua-imagem
+
+# Servidor do NutellaBoot (opcional; use para apontar a um servidor de teste).
+#NB_SERVER=https://nutellaboot.naquadah.com.br
+
+# Fixa nomes no /etc/hosts do initrd: "nome ip", uma linha por entrada.
+# Serve para testes em máquina virtual e para espelhos locais na sede.
+#NB_HOSTS=nutellaboot.charge.naquadah.com.br 10.0.2.2

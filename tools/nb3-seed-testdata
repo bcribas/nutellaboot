@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Popula data/ com dados de teste: admin key, template importado do
+nutellaboot2 e a imagem `testes3`. Imprime as credenciais UMA vez.
+
+Uso: tools/nb3-seed-testdata [--nb2 DIR_DO_NUTELLABOOT2]
+Idempotente: não sobrescreve chaves/imagens existentes.
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+VENV_PY = REPO / ".venv" / "bin" / "python3"
+if VENV_PY.exists() and Path(sys.prefix).resolve() != (REPO / ".venv").resolve():
+    os.execv(str(VENV_PY), [str(VENV_PY), __file__, *sys.argv[1:]])
+sys.path.insert(0, str(REPO))
+
+from server.app import auth, fsdb  # noqa: E402
+from server.app.services import store  # noqa: E402
+from server.app.services.default_schema import build_default_schema  # noqa: E402
+from server.app.settings import settings  # noqa: E402
+
+NB2_DEFAULT = REPO.parent / "nutellaboot" / "nutellaboot" / "nutellaboot2"
+TEMPLATE_NAME = "maratonalinux2404"
+
+
+def parse_nb2_template(path: Path) -> list[dict]:
+    layers = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        md5, file, url = line.split(None, 2)
+        layers.append({"md5": md5, "file": file, "cdn_url": url.strip()})
+    return layers
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--nb2", type=Path, default=NB2_DEFAULT)
+    args = ap.parse_args()
+
+    data = settings.data_root
+    creds: dict[str, str] = {}
+
+    if not (data / "server.json").exists():
+        fsdb.write_json(
+            data / "server.json",
+            {
+                "base_url": settings.base_url,
+                "cdn_base_url": "https://files.mdp.naquadah.com.br/maratonalinux",
+                "seeder_ttl_sec": 180,
+                "reserved_prefix_regex": "^[0-9]",
+            },
+        )
+
+    admin_file = data / "keys" / "admin.json"
+    if not admin_file.exists():
+        key = auth.new_key("nb3a")
+        fsdb.write_json(admin_file, {"keys": [{"id": "admin", "sha256": auth.key_hash(key)}]}, mode=0o600)
+        creds["admin_key"] = key
+
+    if not (data / "keys" / "services.json").exists():
+        fsdb.write_json(data / "keys" / "services.json", {}, mode=0o600)
+
+    tpl_dir = data / "templates" / TEMPLATE_NAME
+    nb2_template = args.nb2 / TEMPLATE_NAME / "template"
+    if not (tpl_dir / "template.json").exists() and nb2_template.exists():
+        fsdb.write_json(tpl_dir / "template.json", {"layers": parse_nb2_template(nb2_template)})
+        print(f"template '{TEMPLATE_NAME}' importado de {nb2_template}")
+    if not (tpl_dir / "schema.json").exists():
+        fsdb.write_json(tpl_dir / "schema.json", build_default_schema())
+        print(f"esquema de configuração padrão criado em {tpl_dir / 'schema.json'}")
+
+    # usa a MESMA função da API: assim a imagem de teste nasce com todas as
+    # credenciais (inclusive a chave de boot) e nada fica diferente da produção
+    if not store.image_exists("testes3"):
+        criada = store.create_image(
+            "testes3", "Imagem de teste do NutellaBoot 3", TEMPLATE_NAME, unlocked=True
+        )
+        creds["testes3_token"] = criada["token"]
+        creds["testes3_machine_key"] = criada["machine_key"]
+        creds["testes3_boot_key"] = criada["boot_key"]
+
+    if creds:
+        print("\n== CREDENCIAIS (admin fica só como hash; as da imagem ficam em data/images/testes3/, 0600) ==")
+        for k, v in creds.items():
+            print(f"{k} = {v}")
+    else:
+        print("nada a fazer — dados já existem")
+
+
+if __name__ == "__main__":
+    main()

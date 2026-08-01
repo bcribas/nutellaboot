@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NutellaBoot 3 — Configuração</title>
+<link rel="stylesheet" href="/common/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="config_title"></h1>
+  <span class="sub" id="imginfo"></span>
+  <span class="spacer"></span>
+  <span id="lang"></span>
+</header>
+
+<main>
+  <p class="intro" data-i18n="config_intro"></p>
+
+  <div class="card" id="wallcard">
+    <h2 data-i18n="wallpaper"></h2>
+    <p class="help muted" data-i18n="wallpaper_help"></p>
+    <div id="wallpreview"></div>
+    <div class="actions" style="margin-top:10px">
+      <input type="file" id="wallfile" accept="image/png,image/jpeg" hidden>
+      <button type="button" id="wallchoose" data-i18n="wallpaper_choose"></button>
+      <button type="button" id="wallsend" class="primary" data-i18n="wallpaper_send" disabled></button>
+      <button type="button" id="wallremove" class="danger" data-i18n="wallpaper_remove"></button>
+      <span id="wallstatus" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 data-i18n="config_title"></h2>
+    <form id="form"></form>
+    <div class="actions" style="margin-top:16px">
+      <button type="button" id="save" class="primary" data-i18n="save"></button>
+      <span id="savestatus" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 data-i18n="seeders"></h2>
+    <p class="help muted" data-i18n="seeders_help"></p>
+    <div id="seeders" class="muted" data-i18n="loading"></div>
+  </div>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+#!/bin/bash
+# nb3-run-test — sobe uma máquina virtual que boota pelo servidor de teste.
+#
+# Equivalente ao mlinux/rodar-nutellatest, mas apontando para o NutellaBoot 3
+# e sem precisar de root para gerar o pendrive.
+#
+# Detalhe que economiza tempo: dentro do qemu com rede de usuário (SLIRP), a
+# máquina hospedeira é sempre 10.0.2.2, e o nome do servidor de teste resolve
+# só em IPv6 — por isso fixamos o nome no /etc/hosts do initrd (NB_HOSTS) em
+# vez de mexer em DNS. O certificado continua sendo validado normalmente.
+
+set -euo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+IMAGEM=${NB3_TEST_IMAGE:-testes3}
+SERVIDOR=${NB3_BASE_URL:-https://nutellaboot.charge.naquadah.com.br:8443}
+DISCO=${NB3_TEST_DISK:-$REPO/data/test-disk.raw}
+USB=${NB3_TEST_USB:-$REPO/data/test-usb.img}
+MEM=${NB3_TEST_MEM:-8G}
+TAM_DISCO=${NB3_TEST_DISK_SIZE:-40G}
+GRAFICO=1
+SO_GERAR=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --image) IMAGEM=$2; shift 2 ;;
+        --server) SERVIDOR=$2; shift 2 ;;
+        --headless) GRAFICO=0; shift ;;
+        --build-only) SO_GERAR=1; shift ;;
+        --fresh-disk) rm -f "$DISCO"; shift ;;
+        -h | --help)
+            sed -n '2,12p' "$0"
+            exit 0
+            ;;
+        *) echo "opção desconhecida: $1" >&2; exit 1 ;;
+    esac
+done
+
+NOME_HOST=$(echo "$SERVIDOR" | sed -e 's,^https\?://,,' -e 's,/.*,,' -e 's,:.*,,')
+
+echo ">> gerando o pendrive de teste (sem root)"
+"$REPO/tools/nb3-genusb" \
+    --output "$USB" \
+    --imageroot "$IMAGEM" \
+    --server "$SERVIDOR" \
+    --hosts "$NOME_HOST=10.0.2.2" \
+    > /dev/null
+echo "   $USB"
+
+if [ ! -f "$DISCO" ]; then
+    echo ">> criando o 'disco da máquina' ($TAM_DISCO, esparso)"
+    truncate -s "$TAM_DISCO" "$DISCO"
+    # uma partição ext4 vazia: é onde o NutellaBoot guarda o cache e a home
+    if command -v mkfs.ext4 > /dev/null; then
+        sfdisk --quiet "$DISCO" << 'EOF'
+label: gpt
+start=2048, type=linux
+EOF
+        echo "   (formate a partição no primeiro boot, ou deixe o NutellaBoot cuidar)"
+    fi
+fi
+
+[ "$SO_GERAR" = 1 ] && exit 0
+
+OVMF=$(ls /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE.fd 2> /dev/null | head -n1)
+VARS=$(ls /usr/share/edk2/ovmf/OVMF_VARS.fd /usr/share/OVMF/OVMF_VARS.fd 2> /dev/null | head -n1)
+[ -n "$OVMF" ] || { echo "OVMF não encontrado (instale edk2-ovmf)" >&2; exit 1; }
+cp "$VARS" "$REPO/data/OVMF_VARS.test.fd"
+
+ARGS=(
+    -m "$MEM" -smp 4
+    -drive "if=pflash,format=raw,readonly=on,file=$OVMF"
+    -drive "if=pflash,format=raw,file=$REPO/data/OVMF_VARS.test.fd"
+    -drive "file=$DISCO,format=raw,if=ide"
+    -drive "file=$USB,format=raw,if=ide"
+    -netdev user,id=n0 -device virtio-net-pci,netdev=n0
+    -boot menu=on
+)
+[ -e /dev/kvm ] && ARGS+=(-enable-kvm -cpu host)
+[ "$GRAFICO" = 1 ] && ARGS+=(-vga virtio) || ARGS+=(-display none)
+
+echo ">> subindo a máquina virtual (imagem=$IMAGEM servidor=$SERVIDOR)"
+exec qemu-system-x86_64 "${ARGS[@]}"

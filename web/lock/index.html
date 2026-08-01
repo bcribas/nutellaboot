@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NutellaBoot 3 — Temas da tela de bloqueio</title>
+<link rel="stylesheet" href="/common/style.css">
+<style>
+  .themes { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .theme { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+  .theme h3 { margin: 0; padding: 10px 14px; font-size: 14px; border-bottom: 1px solid var(--line); }
+  .theme iframe { width: 100%; height: 260px; border: 0; display: block; background: #000; }
+  .theme .foot { padding: 10px 14px; display: flex; gap: 8px; align-items: center; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <h1>Temas da tela de bloqueio</h1>
+  <span class="spacer"></span>
+  <span id="lang"></span>
+</header>
+<main class="wide">
+  <p class="intro">
+    Pré-visualização dos temas embarcados na imagem. Escolha o tema no
+    configureitor (campo <code>LOCK_THEME</code>); ele é renderizado localmente
+    na máquina, sem depender de rede.
+  </p>
+  <div class="themes" id="themes"></div>
+</main>
+<script type="module">
+import { init } from "/common/i18n.js";
+
+const TEMAS = [
+  { id: "classico", nome: "Clássico" },
+  { id: "animado", nome: "Animado" },
+  { id: "minimal", nome: "Minimalista" },
+];
+
+const DEMO = encodeURIComponent(JSON.stringify({
+  site: "Sede de exemplo",
+  seat: "012",
+  team: { name: "Os Batatinhas", display_name: "UnB — Os Batatinhas" },
+  organization: { id: "unb", name: "Universidade de Brasília" },
+  country: "BRA",
+}));
+
+await init(document.querySelector("#lang"));
+
+const box = document.querySelector("#themes");
+for (const tema of TEMAS) {
+  const card = document.createElement("div");
+  card.className = "theme";
+  card.innerHTML = `
+    <h3>${tema.nome} <span class="muted mono">${tema.id}</span></h3>
+    <iframe src="/lock/themes/${tema.id}/index.html?lang=pt&info=${DEMO}" loading="lazy"></iframe>
+    <div class="foot">
+      <a class="btn" href="/lock/themes/${tema.id}/index.html?lang=pt&info=${DEMO}" target="_blank">
+        Abrir em tela cheia
+      </a>
+    </div>`;
+  box.appendChild(card);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,88 @@
+#!/bin/bash
+# nb3-build-initrd — gera vmlinuz + initrd.img do NutellaBoot 3.
+#
+# Este é o ÚNICO passo do projeto que precisa de root, porque o initramfs-tools
+# roda dentro da imagem-mestre (loop mount + chroot). Rode-o você mesmo:
+#
+#     sudo tools/nb3-build-initrd --raw /caminho/ubuntu-24.04-initial.raw
+#
+# Alternativa sem root: suba a imagem-mestre no qemu (mlinux/rodar), copie
+# client/initramfs-tools/ para /etc/initramfs-tools/ lá dentro, rode
+# `update-initramfs -c -k <versão>` e traga vmlinuz/initrd.img para
+# client/build/. O resultado é idêntico.
+
+set -euo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+RAW=""
+KVER=""
+OUT="$REPO/client/build"
+
+usage() {
+    cat << EOF
+Uso: sudo nb3-build-initrd --raw IMAGEM.raw [--kver VERSAO] [--out DIR]
+
+  --raw ARQUIVO   imagem-mestre do Maratona Linux (partição 2 = raiz)
+  --kver VERSAO   versão do kernel (padrão: a mais nova encontrada)
+  --out DIR       destino (padrão: client/build)
+EOF
+    exit "${1:-0}"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --raw) RAW=$2; shift 2 ;;
+        --kver) KVER=$2; shift 2 ;;
+        --out) OUT=$2; shift 2 ;;
+        -h | --help) usage 0 ;;
+        *) echo "opção desconhecida: $1" >&2; usage 1 ;;
+    esac
+done
+
+[ -n "$RAW" ] || usage 1
+[ "$(id -u)" = 0 ] || { echo "precisa de root (veja a alternativa por qemu no cabeçalho)" >&2; exit 1; }
+[ -f "$RAW" ] || { echo "imagem não encontrada: $RAW" >&2; exit 1; }
+
+MNT=$(mktemp -d)
+LOOP=""
+cleanup() {
+    for d in dev/pts dev proc sys; do
+        mountpoint -q "$MNT/$d" && umount "$MNT/$d" || true
+    done
+    mountpoint -q "$MNT" && umount "$MNT" || true
+    [ -n "$LOOP" ] && losetup -d "$LOOP" || true
+    rmdir "$MNT" 2> /dev/null || true
+}
+trap cleanup EXIT
+
+echo ">> montando $RAW"
+LOOP=$(losetup --show -fP "$RAW")
+mount "${LOOP}p2" "$MNT"
+
+echo ">> instalando initramfs-tools do nutellaboot3"
+rm -rf "$MNT/etc/initramfs-tools/scripts/nutellaboot" \
+    "$MNT/etc/initramfs-tools/hooks/network" \
+    "$MNT/etc/initramfs-tools/hooks/overlay"
+rsync -a "$REPO/client/initramfs-tools/" "$MNT/etc/initramfs-tools/"
+chmod +x "$MNT/etc/initramfs-tools/hooks/nutellaboot"
+
+if [ -z "$KVER" ]; then
+    KVER=$(ls "$MNT/lib/modules" | sort -V | tail -n1)
+fi
+echo ">> kernel: $KVER"
+
+for d in proc sys dev dev/pts; do
+    mount --bind "/$d" "$MNT/$d"
+done
+
+chroot "$MNT" update-initramfs -c -k "$KVER" || chroot "$MNT" update-initramfs -u -k "$KVER"
+
+mkdir -p "$OUT"
+cp "$MNT/boot/initrd.img-$KVER" "$OUT/initrd.img"
+cp "$MNT/boot/vmlinuz-$KVER" "$OUT/vmlinuz"
+chown "$(stat -c '%u:%g' "$REPO")" "$OUT/initrd.img" "$OUT/vmlinuz"
+
+echo
+echo "pronto:"
+ls -la "$OUT/vmlinuz" "$OUT/initrd.img"
+echo "agora: tools/nb3-genusb --imageroot <sede> --server <url>"

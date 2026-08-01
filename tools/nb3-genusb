@@ -1,0 +1,215 @@
+#!/bin/bash
+# nb3-genusb — gera a imagem do pendrive de boot SEM root.
+#
+# O gerador do nb2 exigia losetup + mount + grub-install (e carregava um
+# binário do GRUB do Debian junto com uma libdevmapper para funcionar num
+# host Fedora). Aqui tudo é feito manipulando o ARQUIVO de imagem:
+#   sfdisk grava a tabela de partição no arquivo;
+#   mformat/mcopy (mtools) formatam e populam a FAT usando offset (img@@1M);
+#   grub2-mkstandalone/grub2-mkimage produzem os bootloaders.
+# Nenhum passo precisa de privilégio.
+#
+# Modo genérico (padrão): o grub NÃO fixa IMAGEROOT — a sede é escolhida
+# editando nutellaboot.conf na própria partição. Uma imagem serve todas as
+# sedes, no lugar das ~45 imagens de 400 MB que só diferiam nesse token.
+
+set -euo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+OUT=""
+IMAGEROOT=""
+SERVER=""
+BOOT_KEY="${NB3_BOOT_KEY:-}"
+ADMIN_KEY="${NB3_ADMIN_KEY:-}"
+HOSTS=()
+WIFI=""
+KERNEL="$REPO/client/build/vmlinuz"
+INITRD="$REPO/client/build/initrd.img"
+SIZE_MB=400
+BIOS=1
+
+usage() {
+    cat << EOF
+Uso: nb3-genusb [opções]
+
+  -o, --output ARQUIVO     imagem de saída (padrão: maratonalinux-nb3.img)
+      --imageroot ID       fixa a imagem no pendrive (padrão: genérico)
+      --boot-key CHAVE     chave de boot da imagem (ou NB3_BOOT_KEY)
+      --fetch-key          busca a chave de boot na API (usa --admin-key)
+      --admin-key CHAVE    chave de administração (ou NB3_ADMIN_KEY)
+      --server URL         servidor do NutellaBoot
+      --hosts "nome=ip"    fixa nome no /etc/hosts do initrd (repetível)
+      --wifi ARQUIVO       wifi.conf a embarcar
+      --kernel ARQUIVO     vmlinuz (padrão: client/build/vmlinuz)
+      --initrd ARQUIVO     initrd.img (padrão: client/build/initrd.img)
+      --size MB            tamanho da imagem (padrão: 400)
+      --no-bios            só EFI (dispensa grub2-mkimage i386-pc)
+EOF
+    exit "${1:-0}"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o | --output) OUT=$2; shift 2 ;;
+        --imageroot) IMAGEROOT=$2; shift 2 ;;
+        --boot-key) BOOT_KEY=$2; shift 2 ;;
+        --admin-key) ADMIN_KEY=$2; shift 2 ;;
+        --fetch-key) FETCH_KEY=1; shift ;;
+        --server) SERVER=$2; shift 2 ;;
+        --hosts) HOSTS+=("$2"); shift 2 ;;
+        --wifi) WIFI=$2; shift 2 ;;
+        --kernel) KERNEL=$2; shift 2 ;;
+        --initrd) INITRD=$2; shift 2 ;;
+        --size) SIZE_MB=$2; shift 2 ;;
+        --no-bios) BIOS=0; shift ;;
+        -h | --help) usage 0 ;;
+        *) echo "opção desconhecida: $1" >&2; usage 1 ;;
+    esac
+done
+
+OUT=${OUT:-maratonalinux-nb3.img}
+FETCH_KEY=${FETCH_KEY:-0}
+
+# Busca a chave de boot da imagem na API, se pedido.
+if [ "$FETCH_KEY" = 1 ]; then
+    [ -n "$IMAGEROOT" ] || { echo "--fetch-key exige --imageroot" >&2; exit 1; }
+    [ -n "$ADMIN_KEY" ] || { echo "--fetch-key exige --admin-key (ou NB3_ADMIN_KEY)" >&2; exit 1; }
+    API=${SERVER:-${NB3_BASE_URL:-https://nutellaboot.naquadah.com.br}}
+    BOOT_KEY=$(curl -sS --fail "$API/api/v1/images/$IMAGEROOT/boot-key" \
+        -H "Authorization: Bearer $ADMIN_KEY" |
+        sed -n 's/.*"boot_key":"\([^"]*\)".*/\1/p')
+    [ -n "$BOOT_KEY" ] || { echo "não consegui obter a chave de boot de $IMAGEROOT" >&2; exit 1; }
+fi
+
+for t in sfdisk mformat mcopy mmd grub2-mkstandalone; do
+    command -v "$t" > /dev/null || { echo "faltando: $t" >&2; exit 1; }
+done
+[ "$BIOS" = 1 ] && { command -v grub2-mkimage > /dev/null || { echo "faltando: grub2-mkimage (ou use --no-bios)" >&2; exit 1; }; }
+[ -f "$KERNEL" ] || { echo "kernel não encontrado: $KERNEL (rode nb3-build-initrd)" >&2; exit 1; }
+[ -f "$INITRD" ] || { echo "initrd não encontrado: $INITRD (rode nb3-build-initrd)" >&2; exit 1; }
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+# --- configuração da partição ---
+{
+    echo "# gerado por nb3-genusb — edite à vontade, é só texto"
+    echo "# O initrd lê este arquivo, copia para a memória e desmonta a"
+    echo "# partição já no início do boot: o pendrive pode ser retirado assim"
+    echo "# que a mensagem aparecer na tela."
+    [ -n "$IMAGEROOT" ] && echo "IMAGEROOT=$IMAGEROOT" || echo "#IMAGEROOT=25brbr"
+    if [ -n "$BOOT_KEY" ]; then
+        echo "NB_BOOT_KEY=$BOOT_KEY"
+    else
+        echo "#NB_BOOT_KEY=  # chave de boot da imagem (/api/v1/images/<id>/boot-key)"
+    fi
+    [ -n "$SERVER" ] && echo "NB_SERVER=$SERVER"
+    for h in ${HOSTS+"${HOSTS[@]}"}; do
+        echo "NB_HOSTS=${h/=/ }"
+    done
+} > "$WORK/nutellaboot.conf"
+
+if [ -n "$WIFI" ]; then
+    cp "$WIFI" "$WORK/wifi.conf"
+else
+    cp "$REPO/client/usb/wifi.conf.example" "$WORK/wifi.conf"
+fi
+
+# --- grub.cfg (na partição, editável) ---
+CMDLINE_BASE="boot=nutellaboot noresume pcie_aspm=off net.ifnames=0"
+[ -n "$IMAGEROOT" ] && CMDLINE_BASE="$CMDLINE_BASE IMAGEROOT=$IMAGEROOT"
+
+cat > "$WORK/grub.cfg" << EOF
+set timeout=10
+set default=0
+
+menuentry "Maratona Linux (NutellaBoot 3)" {
+	linux /vmlinuz $CMDLINE_BASE persistenthome=y
+	initrd /initrd.img
+}
+menuentry "Maratona Linux — limpar a home (clean home)" {
+	linux /vmlinuz $CMDLINE_BASE persistenthome=y cleanhome=y
+	initrd /initrd.img
+}
+menuentry "Maratona Linux — modo live (sem home persistente)" {
+	linux /vmlinuz $CMDLINE_BASE persistenthome=n
+	initrd /initrd.img
+}
+menuentry "Remover o NutellaBoot deste computador (factory reset)" {
+	linux /vmlinuz $CMDLINE_BASE factoryreset=y
+	initrd /initrd.img
+}
+EOF
+
+# grub embutido: só encontra a partição e carrega o grub.cfg de verdade,
+# que fica editável na FAT. Busca pelo arquivo (mais confiável que por label,
+# que depende de como o volume foi rotulado) e cai no label como reserva.
+cat > "$WORK/grub-embed.cfg" << 'EOF'
+insmod part_msdos
+insmod fat
+insmod search_fs_file
+insmod search_label
+search --no-floppy --file --set=root /nutellaboot.conf
+if [ -z "$root" ]; then
+	search --no-floppy --label --set=root NB3CFG
+fi
+# NÃO redefina prefix aqui: numa imagem standalone os módulos vivem no
+# memdisk, e apontar o prefix para a partição faz o GRUB perder o acesso a
+# eles (o menu carrega vazio, sem erro visível).
+configfile ($root)/grub.cfg
+EOF
+
+echo ">> montando imagem de ${SIZE_MB}MB em $OUT"
+rm -f "$OUT"
+truncate -s "${SIZE_MB}M" "$OUT"
+
+# Partição única FAT32 (tipo EF = EFI System), começando em 1 MiB: o espaço
+# antes dela guarda o core.img do GRUB para BIOS legado.
+sfdisk --quiet "$OUT" << EOF
+label: dos
+unit: sectors
+start=2048, type=ef, bootable
+EOF
+
+OFFSET=$((2048 * 512))
+mformat -i "$OUT@@$OFFSET" -F -v NB3CFG ::
+
+echo ">> gerando bootloader EFI"
+grub2-mkstandalone -O x86_64-efi \
+    -o "$WORK/BOOTX64.EFI" \
+    "boot/grub/grub.cfg=$WORK/grub-embed.cfg" 2>/dev/null
+
+mmd -i "$OUT@@$OFFSET" ::/EFI ::/EFI/BOOT
+mcopy -i "$OUT@@$OFFSET" "$WORK/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+
+if [ "$BIOS" = 1 ]; then
+    echo ">> gerando bootloader BIOS legado"
+    BOOTIMG=$(ls /usr/lib/grub/i386-pc/boot.img /usr/share/grub/i386-pc/boot.img 2>/dev/null | head -n1 || true)
+    if [ -n "$BOOTIMG" ]; then
+        # A mesma config embutida do EFI: acha a partição pelo label e carrega
+        # o grub.cfg editável de lá — nada depende de número de disco.
+        grub2-mkimage -O i386-pc -p "()/" -c "$WORK/grub-embed.cfg" -o "$WORK/core.img" \
+            biosdisk part_msdos fat search search_label configfile normal linux echo
+        # boot.img no setor 0 (preservando a tabela de partição) e core.img no
+        # espaço livre entre a MBR e o início da partição (1 MiB).
+        dd if="$BOOTIMG" of="$OUT" bs=446 count=1 conv=notrunc status=none
+        dd if="$WORK/core.img" of="$OUT" bs=512 seek=1 conv=notrunc status=none
+    else
+        echo "   aviso: boot.img do GRUB não encontrado; imagem ficará só-EFI"
+    fi
+fi
+
+echo ">> copiando kernel, initrd e configuração"
+mcopy -i "$OUT@@$OFFSET" "$KERNEL" ::/vmlinuz
+mcopy -i "$OUT@@$OFFSET" "$INITRD" ::/initrd.img
+mcopy -i "$OUT@@$OFFSET" "$WORK/grub.cfg" ::/grub.cfg
+mcopy -i "$OUT@@$OFFSET" "$WORK/nutellaboot.conf" ::/nutellaboot.conf
+mcopy -i "$OUT@@$OFFSET" "$WORK/wifi.conf" ::/wifi.conf
+
+echo
+echo "pronto: $OUT"
+echo "  modo:      ${IMAGEROOT:-genérico (defina IMAGEROOT em nutellaboot.conf)}"
+echo "  servidor:  ${SERVER:-padrão do initrd}"
+echo "  gravar:    sudo dd if=$OUT of=/dev/sdX bs=4M status=progress oflag=sync"
+echo "  conteúdo:"
+mdir -i "$OUT@@$OFFSET" :: | sed 's/^/    /'

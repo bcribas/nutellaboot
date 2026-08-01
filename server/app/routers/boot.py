@@ -1,0 +1,195 @@
+"""Endpoints consumidos pelo initrd, pelo agente e pela tela de bloqueio.
+
+Formato: texto puro, porque quem lê é shell dentro do initramfs, sem jq.
+
+Autenticação: cada imagem tem uma CHAVE DE BOOT (data/images/<id>/boot.key),
+que o pendrive carrega no nutellaboot.conf e envia por POST. Sem ela, o
+servidor não entrega manifest nem script de boot — no NutellaBoot 2 esses
+endpoints eram completamente abertos e bastava saber o nome da sede.
+
+A chave pode chegar de três formas, todas equivalentes:
+  - corpo de POST:      key=<chave>          (o que o initrd usa)
+  - cabeçalho:          X-NB-Boot-Key        (usado pelo aria2c e pelo curl)
+  - query string:       ?key=<chave>         (conveniência para depuração)
+
+Imagens sem boot.key continuam abertas — é o modo de depuração, e some
+assim que a imagem é criada pelo próprio nutellaboot3.
+"""
+
+from __future__ import annotations
+
+import time
+
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+
+from .. import auth
+from ..services import seeders, store, stuffgen
+
+router = APIRouter(prefix="/boot/v3", default_response_class=PlainTextResponse)
+
+
+async def _key_from(request: Request, header: str | None, query: str | None) -> str | None:
+    if header:
+        return header
+    if query:
+        return query
+    if request.method == "POST":
+        try:
+            form = await request.form()
+        except Exception:
+            return None
+        valor = form.get("key")
+        return str(valor) if valor is not None else None
+    return None
+
+
+async def _autorizar(request: Request, image: str, header: str | None, query: str | None) -> None:
+    """Confere que a imagem existe e que a chave de boot confere."""
+    if not store.image_exists(image):
+        raise HTTPException(404, "imagem não existe")
+    chave = await _key_from(request, header, query)
+    if not auth.check_boot_key(image, chave):
+        raise HTTPException(401, "chave de boot inválida ou ausente")
+
+
+@router.get("/sanity")
+async def sanity() -> str:
+    return "penguin\n"
+
+
+@router.get("/time")
+async def server_time() -> str:
+    """Hora do servidor, em texto. É o único endpoint que o cliente consulta
+    sem validar certificado — existe justamente para corrigir o relógio e
+    tornar a validação de TLS possível logo em seguida."""
+    return f"{int(time.time())}\n"
+
+
+@router.get("/{image}/manifest", name="manifest")
+@router.post("/{image}/manifest", name="manifest_post")
+async def manifest(
+    image: str,
+    request: Request,
+    x_nb_boot_key: str | None = Header(None),
+    key: str | None = Query(None),
+) -> str:
+    """Linhas `MD5 ARQUIVO URL1 URL2 ...` — camadas extras primeiro (maior
+    prioridade no overlay). URLs: todos os seeders vivos + CDN por último;
+    o aria2c usa todas como espelhos do mesmo arquivo."""
+    await _autorizar(request, image, x_nb_boot_key, key)
+    live = seeders.live(image)
+    out = []
+    for layer in store.image_layers(image):
+        urls = [f"http://{ip}/{layer['file']}" for ip in live]
+        if layer.get("cdn_url"):
+            urls.append(layer["cdn_url"])
+        if not urls:
+            raise HTTPException(500, f"camada {layer['file']} sem nenhuma fonte")
+        out.append(f"{layer['md5']} {layer['file']} {' '.join(urls)}")
+    return "\n".join(out) + "\n"
+
+
+@router.get("/{image}/stuff", name="stuff")
+@router.post("/{image}/stuff", name="stuff_post")
+async def stuff(
+    image: str,
+    request: Request,
+    x_nb_boot_key: str | None = Header(None),
+    key: str | None = Query(None),
+) -> str:
+    await _autorizar(request, image, x_nb_boot_key, key)
+    return stuffgen.render(image)
+
+
+@router.post("/{image}/seeders/join", name="seeder_join")
+@router.post("/{image}/seeders/heartbeat", name="seeder_heartbeat")
+async def seeder_join(
+    image: str,
+    request: Request,
+    ip: str = Query(...),
+    key: str | None = Query(None),
+    x_nb_boot_key: str | None = Header(None),
+) -> str:
+    """join e heartbeat: registra/renova o seeder com a chave de boot."""
+    await _autorizar(request, image, x_nb_boot_key, key)
+    if not seeders.valid_ip(ip):
+        raise HTTPException(400, "bad ip")
+    seeders.touch(image, ip)
+    return "ok\n"
+
+
+@router.post("/{image}/seeders/leave")
+async def seeder_leave(image: str, ip: str = Query(...)) -> str:
+    # sem chave, como o `out` do nb2: só remove uma entrada — inócuo.
+    if not store.image_exists(image):
+        raise HTTPException(404, "imagem não existe")
+    seeders.leave(image, ip)
+    return "ok\n"
+
+
+@router.get("/{image}/machines/{mac}/lockstate", name="lockstate")
+@router.post("/{image}/machines/{mac}/lockstate", name="lockstate_post")
+async def lockstate(
+    image: str,
+    mac: str,
+    request: Request,
+    x_nb_boot_key: str | None = Header(None),
+    key: str | None = Query(None),
+) -> str:
+    """Consultado pela própria tela de bloqueio a cada poucos segundos —
+    redundância caso o agente esteja travado."""
+    await _autorizar(request, image, x_nb_boot_key, key)
+    from ..services import machines as m
+
+    return "locked\n" if m.get_lock(image, m.normalize_mac(mac)).get("locked") else "unlocked\n"
+
+
+@router.get("/{image}/lockinfo/{mac}", name="lockinfo", response_class=JSONResponse)
+@router.post("/{image}/lockinfo/{mac}", name="lockinfo_post", response_class=JSONResponse)
+async def lockinfo(
+    image: str,
+    mac: str,
+    request: Request,
+    x_nb_boot_key: str | None = Header(None),
+    key: str | None = Query(None),
+) -> dict:
+    """Dados exibidos na tela de bloqueio (time, organização, país, lugar)."""
+    await _autorizar(request, image, x_nb_boot_key, key)
+    from ..services import machines as m
+    from .roster import lockinfo as build
+
+    return build(image, m.normalize_mac(mac))
+
+
+@router.get("/{image}/roster/logos/{org_id}", name="roster_logo")
+@router.post("/{image}/roster/logos/{org_id}", name="roster_logo_post")
+async def roster_logo(
+    image: str,
+    org_id: str,
+    request: Request,
+    x_nb_boot_key: str | None = Header(None),
+    key: str | None = Query(None),
+):
+    await _autorizar(request, image, x_nb_boot_key, key)
+    from .roster import logo_response
+
+    return logo_response(image, org_id)
+
+
+@router.get("/{image}/wallpaper", name="wallpaper")
+@router.post("/{image}/wallpaper", name="wallpaper_post")
+async def wallpaper(
+    image: str,
+    request: Request,
+    x_nb_boot_key: str | None = Header(None),
+    key: str | None = Query(None),
+):
+    await _autorizar(request, image, x_nb_boot_key, key)
+    from .. import fsdb
+
+    meta = fsdb.read_json(store.image_dir(image) / "wallpaper.json")
+    path = store.image_dir(image) / "wallpaper.png"
+    if not meta or not path.is_file():
+        raise HTTPException(404, "sem wallpaper")
+    return FileResponse(path, media_type="image/png", headers={"ETag": f'"{meta["md5"]}"'})

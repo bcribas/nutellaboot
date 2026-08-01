@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Sobe uma imagem no qemu (UEFI), tira um screenshot e encerra.
+
+Ferramenta de verificação: confirma que o pendrive gerado realmente dá boot,
+sem precisar de hardware nem de olho humano na tela.
+
+Uso: nb3-qemu-shot IMAGEM.img SAIDA.png [--wait 12] [--disk EXTRA.img]
+"""
+
+import argparse
+import json
+import os
+import shutil
+import socket
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+
+OVMF_CODE = next(
+    (
+        p
+        for p in (
+            "/usr/share/edk2/ovmf/OVMF_CODE.fd",
+            "/usr/share/OVMF/OVMF_CODE.fd",
+        )
+        if os.path.exists(p)
+    ),
+    None,
+)
+OVMF_VARS = next(
+    (
+        p
+        for p in (
+            "/usr/share/edk2/ovmf/OVMF_VARS.fd",
+            "/usr/share/OVMF/OVMF_VARS.fd",
+        )
+        if os.path.exists(p)
+    ),
+    None,
+)
+
+
+def qmp(sock_path: str, commands: list[dict]) -> list[str]:
+    s = socket.socket(socket.AF_UNIX)
+    s.connect(sock_path)
+    f = s.makefile("rw")
+    f.readline()  # greeting
+    out = []
+    for c in [{"execute": "qmp_capabilities"}] + commands:
+        f.write(json.dumps(c) + "\n")
+        f.flush()
+        out.append(f.readline().strip())
+    s.close()
+    return out[1:]
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("image")
+    ap.add_argument("output")
+    ap.add_argument("--wait", type=float, default=12)
+    ap.add_argument("--disk", help="disco extra (o 'HD' da máquina de teste)")
+    ap.add_argument("--mem", default="2G")
+    ap.add_argument("--keep", action="store_true", help="não encerra a VM ao final")
+    args = ap.parse_args()
+
+    if not OVMF_CODE:
+        raise SystemExit("OVMF não encontrado (instale edk2-ovmf)")
+
+    work = Path(tempfile.mkdtemp(prefix="nb3-qemu-"))
+    varsfd = work / "OVMF_VARS.fd"
+    shutil.copy(OVMF_VARS, varsfd)
+    sock = str(work / "qmp.sock")
+
+    cmd = [
+        "qemu-system-x86_64", "-m", args.mem, "-display", "none",
+        "-qmp", f"unix:{sock},server,nowait",
+        "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
+        "-drive", f"if=pflash,format=raw,file={varsfd}",
+        "-drive", f"file={args.image},format=raw,if=ide",
+    ]
+    if args.disk:
+        cmd += ["-drive", f"file={args.disk},format=raw,if=ide"]
+    if os.path.exists("/dev/kvm"):
+        cmd += ["-enable-kvm", "-cpu", "host"]
+    cmd += ["-netdev", "user,id=n0", "-device", "virtio-net-pci,netdev=n0"]
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        for _ in range(40):
+            if os.path.exists(sock):
+                break
+            time.sleep(0.25)
+        time.sleep(args.wait)
+        ppm = str(work / "shot.ppm")
+        print(qmp(sock, [{"execute": "screendump", "arguments": {"filename": ppm}}])[0])
+        time.sleep(1)
+        subprocess.run(["magick", ppm, args.output], check=True)
+        print(f"screenshot: {args.output}")
+    finally:
+        if not args.keep:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            shutil.rmtree(work, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NutellaBoot 3 — Laboratório</title>
+<link rel="stylesheet" href="/common/style.css">
+<link rel="stylesheet" href="./lab.css">
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="machines"></h1>
+  <span class="sub" id="imginfo"></span>
+  <span id="counts" class="sub"></span>
+  <span id="live" class="pill" title="SSE">●</span>
+  <span class="spacer"></span>
+  <span id="lang"></span>
+</header>
+
+<div class="toolbar">
+  <div class="filters" id="filters"></div>
+  <span class="spacer"></span>
+  <input type="text" id="search" data-i18n-placeholder="search">
+  <button type="button" id="selall" class="small" data-i18n="select_all"></button>
+  <button type="button" id="selnone" class="small" data-i18n="select_none"></button>
+</div>
+
+<div class="actionbar" id="actionbar">
+  <span id="selcount"></span>
+  <span class="spacer"></span>
+  <button type="button" class="primary" data-cmd="lock" data-i18n="lock_screen"></button>
+  <button type="button" data-cmd="unlock" data-i18n="unlock_screen"></button>
+  <button type="button" data-cmd="cleanhomenow" data-i18n="clean_home"></button>
+  <button type="button" data-cmd="enablefirewall" data-i18n="enable_firewall"></button>
+  <button type="button" data-cmd="disablefirewall" data-i18n="disable_firewall"></button>
+  <button type="button" data-cmd="resetcontaeditores" data-i18n="reset_editors"></button>
+  <button type="button" class="danger" data-cmd="mlreboot" data-i18n="reboot"></button>
+  <button type="button" class="danger" data-cmd="mlpoweroff" data-i18n="poweroff"></button>
+</div>
+
+<main class="wide">
+  <div id="grid" class="grid"></div>
+  <p id="empty" class="muted" data-i18n="no_machines"></p>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

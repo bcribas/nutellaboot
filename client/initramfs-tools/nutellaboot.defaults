@@ -1,0 +1,3 @@
+# Padrões embutidos no initrd, usados quando o pendrive não traz
+# nutellaboot.conf. Copiado para /etc/nutellaboot.defaults pelo hook.
+NB_SERVER=https://nutellaboot.naquadah.com.br

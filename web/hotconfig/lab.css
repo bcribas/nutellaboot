@@ -1,0 +1,131 @@
+.toolbar,
+.actionbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.actionbar {
+  position: sticky;
+  top: 53px;
+  z-index: 9;
+  background: var(--panel2);
+}
+
+.toolbar .spacer,
+.actionbar .spacer { flex: 1; }
+
+.toolbar input { max-width: 240px; }
+
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.filters button.on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+#live { color: var(--bad); border-color: var(--bad); }
+#live.on { color: var(--ok); border-color: var(--ok); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 10px;
+}
+
+.mcard {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--muted);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.15s;
+}
+
+.mcard.online { border-left-color: var(--ok); }
+.mcard.stale { border-left-color: var(--warn); }
+.mcard.offline { border-left-color: #4b5468; opacity: 0.62; }
+.mcard.alert { border-left-color: var(--bad); }
+.mcard.sel { border-color: var(--accent); background: rgba(244, 121, 31, 0.09); }
+.mcard.locked::after {
+  content: "🔒";
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 14px;
+}
+
+.mcard .team {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcard .team.none { color: var(--muted); font-weight: 400; font-style: italic; }
+.mcard .mac { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
+
+.mcard .metrics {
+  display: flex;
+  gap: 10px;
+  margin-top: 7px;
+  font-size: 11px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.mcard .metrics b { color: var(--fg); font-weight: 600; }
+.mcard .metrics .hot { color: var(--bad); }
+
+.bar {
+  height: 3px;
+  background: var(--line);
+  border-radius: 3px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.bar > i { display: block; height: 100%; background: var(--ok); }
+.bar > i.warn { background: var(--warn); }
+.bar > i.bad { background: var(--bad); }
+
+.detail {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 20;
+}
+
+.detail > div {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 620px;
+  width: 100%;
+  max-height: 82vh;
+  overflow: auto;
+}
+
+.detail pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  overflow: auto;
+  max-height: 40vh;
+}

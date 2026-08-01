@@ -1,0 +1,17 @@
+# wifi.conf — redes sem fio do pendrive (partição NB3CFG).
+#
+# Uma rede por linha, campos separados por TAB:
+#     ssid <TAB> senha <TAB> [hidden]
+#
+# Rede aberta: deixe a senha vazia (dois TABs seguidos).
+# Rede oculta: escreva "hidden" no terceiro campo.
+#
+# Este mesmo arquivo alimenta DUAS coisas, sem duplicação:
+#   1. o wpa_supplicant do initrd, que conecta antes de baixar o sistema;
+#   2. os perfis do NetworkManager do sistema já instalado.
+# (No NutellaBoot 2 eram duas bases separadas mantidas à mão — o
+# wpa_supplicant.conf embutido no initrd e a camada wifis.squash.)
+
+ICPC-BR	senha-da-rede-da-maratona
+ICPC-BR-EMG
+minha-rede-oculta	senha123	hidden
