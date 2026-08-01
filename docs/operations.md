@@ -285,9 +285,33 @@ placa de rede, aparece como máquina nova e o vínculo precisa ser refeito.
 
 - [ ] Ligar primeiro a máquina semeadora e esperar ela terminar o boot
 - [ ] Bootar as demais (a primeira leva minutos; as outras puxam da semeadora)
+- [ ] **Recolher os pendrives assim que a mensagem aparecer** (veja abaixo)
 - [ ] Conferir no painel: todas as máquinas online?
 - [ ] Vincular os times aos lugares
 - [ ] Testar bloquear e desbloquear **uma** máquina antes de fazer na sala toda
+
+#### Quando tirar o pendrive
+
+A instrução mudou em relação às versões anteriores. **Não é mais "quando o
+kernel começar a mostrar mensagens"**: agora a própria máquina avisa, e o
+momento é bem mais cedo — antes de qualquer coisa de rede.
+
+```
+  ┌────────────────────────────────────────────────────────────┐
+  │  PODE RETIRAR O PENDRIVE AGORA                              │
+  │  YOU CAN REMOVE THE USB DRIVE NOW                           │
+  │  YA PUEDE RETIRAR LA MEMORIA USB                            │
+  └────────────────────────────────────────────────────────────┘
+```
+
+Assim que esse quadro aparece, o pendrive não é mais lido: o GRUB já colocou
+kernel e initrd na memória, e o initrd acabou de copiar o `nutellaboot.conf`
+e o `wifi.conf` para a RAM e desmontar a partição. Todo o resto do boot —
+rede, download das camadas, montagem do sistema — acontece sem ele.
+
+Na prática, isso permite ligar as máquinas em sequência com poucos pendrives:
+liga, espera o aviso (poucos segundos), tira e leva para a próxima, enquanto a
+primeira continua baixando sozinha.
 
 ### Antes do início
 
