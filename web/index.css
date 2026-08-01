@@ -8,6 +8,14 @@
   text-align: center;
 }
 
+.hero .logo {
+  height: 96px;
+  width: auto;
+  max-width: 80%;
+  margin: 8px auto 20px;
+  display: block;
+}
+
 .hero p {
   font-size: 17px;
   color: var(--muted);
