@@ -84,9 +84,9 @@ data/
 │   └── services.json            {"<nome>": {"sha256","scopes","images"}}
 ├── templates/<nome>/
 │   ├── template.json            {"layers":[…], "public": bool, "description"}
-│   └── schema.json              formulário de configuração (rótulos pt/en/es)
+│   └── schema.json              formulário de configuração (rótulos pt/en/es) + `locked` por campo
 ├── images/<id>/
-│   ├── image.json               id, fullname, template, namespace, unlocked; nas de auto-atendimento também self_service e build_quota
+│   ├── image.json               id, fullname, template, namespace, unlocked, wallpaper_locked; nas de auto-atendimento também self_service e build_quota
 │   ├── token                    nb3i_… — credencial do configureitor (0600)
 │   ├── machine.key              nb3m_… — credencial das máquinas (0600)
 │   ├── boot.key                 nb3b_… — credencial do pendrive (0600)
@@ -110,8 +110,30 @@ data/
 │   ├── running/<job>.json+log   em andamento
 │   ├── done/<job>.json+log      concluídos (com `output`: file, md5, size)
 │   └── failed/<job>.json+log    falhas (com `error`)
+├── publish/<arquivo>.json       envio ao servidor de arquivos: {file, kind, status, url, error}
+├── usb/                         imagens de pendrive geradas com --publish
 └── blobs/                       squashfs construídos aqui, servidos em /blobs/
 ```
+
+O `server.json` guarda, além da URL base e do TTL dos seeders, o bloco de
+publicação — é o único lugar que sabe o nome do servidor de arquivos, o que
+permite trocá-lo por uma CDN sem mexer em código:
+
+```json
+"publish": {
+  "enabled": true,
+  "host": "files.mdp.naquadah.com.br",
+  "user": "root",
+  "paths":     {"layers": "/var/www/html/maratonalinux", "usb": "/var/www/html/mlbootimages"},
+  "base_urls": {"layers": "https://files.mdp.naquadah.com.br/maratonalinux",
+                "usb":    "https://files.mdp.naquadah.com.br/mlbootimages"}
+}
+```
+
+Camadas e imagens de pendrive são enviadas por `rsync` sobre SSH e passam a ser
+baixadas de lá; o estado de cada envio fica em `publish/`, que é o que alimenta
+o botão de reenviar quando o servidor está fora do ar. Falha de publicação não
+quebra o boot: a camada continua sendo servida pela máquina de gestão.
 
 O MAC é normalizado para minúsculas com hífen (`52-54-00-12-34-56`), que é o
 formato entregue pelo `BOOTIF` na linha de comando do kernel.
@@ -152,6 +174,17 @@ português, inglês e espanhol. Os dicionários ficam em `web/common/locales/{pt
 e os rótulos do formulário de configuração ficam no próprio `schema.json`, com
 as três traduções. Há teste automatizado comparando as chaves dos três
 arquivos: uma string a menos em espanhol quebra a suíte.
+
+### Onde ficam as travas
+
+A trava **por campo** vive no `schema.json` do template (a chave `locked` de
+cada campo) e vale para todas as imagens Oficiais daquele template; ela é
+editável pela tela do `/admin/` ou por `PUT /api/v1/templates/{nome}/schema/locks`,
+que só altera essa chave e preserva o resto do formulário. Já a trava do
+**papel de parede** é por imagem, no `wallpaper_locked` do `image.json`, e é
+verificada na rota de upload. As duas seguem a mesma regra: administração
+sempre pode; imagens marcadas `unlocked` (perfil Livre) ignoram as travas de
+campo.
 
 ## Autenticação
 

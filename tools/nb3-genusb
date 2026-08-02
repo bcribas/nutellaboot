@@ -44,6 +44,7 @@ Uso: nb3-genusb [opções]
       --initrd ARQUIVO     initrd.img (padrão: client/build/initrd.img)
       --size MB            tamanho da imagem (padrão: 400)
       --no-bios            só EFI (dispensa grub2-mkimage i386-pc)
+      --publish            envia a imagem pronta para o servidor de arquivos
 EOF
     exit "${1:-0}"
 }
@@ -62,6 +63,7 @@ while [ $# -gt 0 ]; do
         --initrd) INITRD=$2; shift 2 ;;
         --size) SIZE_MB=$2; shift 2 ;;
         --no-bios) BIOS=0; shift ;;
+        --publish) PUBLISH=1; shift ;;
         -h | --help) usage 0 ;;
         *) echo "opção desconhecida: $1" >&2; usage 1 ;;
     esac
@@ -69,6 +71,7 @@ done
 
 OUT=${OUT:-maratonalinux-nb3.img}
 FETCH_KEY=${FETCH_KEY:-0}
+PUBLISH=${PUBLISH:-0}
 
 # Busca a chave de boot da imagem na API, se pedido.
 if [ "$FETCH_KEY" = 1 ]; then
@@ -205,6 +208,20 @@ mcopy -i "$OUT@@$OFFSET" "$INITRD" ::/initrd.img
 mcopy -i "$OUT@@$OFFSET" "$WORK/grub.cfg" ::/grub.cfg
 mcopy -i "$OUT@@$OFFSET" "$WORK/nutellaboot.conf" ::/nutellaboot.conf
 mcopy -i "$OUT@@$OFFSET" "$WORK/wifi.conf" ::/wifi.conf
+
+if [ "$PUBLISH" = 1 ]; then
+    echo ">> publicando no servidor de arquivos"
+    # o arquivo precisa estar em data/usb para a API saber reenviar depois
+    mkdir -p "$REPO/data/usb"
+    [ "$(readlink -f "$OUT")" = "$(readlink -f "$REPO/data/usb/$(basename "$OUT")")" ] ||
+        cp -f "$OUT" "$REPO/data/usb/"
+    "$REPO/.venv/bin/python" -c "
+import sys; sys.path.insert(0, '$REPO')
+from server.app.services import publish
+e = publish.publish_file('$REPO/data/usb/$(basename "$OUT")', 'usb')
+print('   ', e['status'], e.get('url', e.get('error', '')))
+"
+fi
 
 echo
 echo "pronto: $OUT"

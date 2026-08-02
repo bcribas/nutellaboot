@@ -10,12 +10,14 @@ class ImageCreate(BaseModel):
     fullname: str = ""
     template: str
     unlocked: bool = False
+    wallpaper_locked: bool = False
 
 
 class ImagePatch(BaseModel):
     fullname: str | None = None
     unlocked: bool | None = None
     template: str | None = None
+    wallpaper_locked: bool | None = None
 
 
 class BulkRow(BaseModel):

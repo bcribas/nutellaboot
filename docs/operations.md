@@ -96,6 +96,65 @@ Depois de gravado, o pendrive é uma partição FAT normal: monte em qualquer
 computador e edite `nutellaboot.conf` (sede, chave de boot) e `wifi.conf`
 (redes) com um editor de texto.
 
+### 1.5 Publicação de arquivos (files.mdp)
+
+Camadas têm vários GB e imagens de pendrive têm centenas de MB. Servir isso
+pela máquina de gestão significa uma sala inteira baixando do mesmo servidor
+que responde à API no meio da prova. Por isso esses arquivos são enviados para
+um **servidor de arquivos**, e o manifest entregue às máquinas passa a apontar
+para a URL pública de lá.
+
+A configuração fica no bloco `publish` do `data/server.json`:
+
+```json
+{
+  "publish": {
+    "enabled": true,
+    "host": "files.mdp.naquadah.com.br",
+    "user": "root",
+    "paths": {
+      "layers": "/var/www/html/maratonalinux",
+      "usb": "/var/www/html/mlbootimages"
+    },
+    "base_urls": {
+      "layers": "https://files.mdp.naquadah.com.br/maratonalinux",
+      "usb": "https://files.mdp.naquadah.com.br/mlbootimages"
+    }
+  }
+}
+```
+
+O envio é feito com `rsync` sobre SSH, sem interação: o usuário que roda o
+servidor na máquina de gestão precisa ter **chave SSH autorizada** no `root`
+do files.mdp. Confira com:
+
+```bash
+ssh -o BatchMode=yes root@files.mdp.naquadah.com.br 'echo ok'
+```
+
+Se a publicação estiver **desligada** (`enabled: false`), nada é enviado e as
+máquinas baixam da própria máquina de gestão — funciona, mas não é o que você
+quer numa sede grande.
+
+**O painel Publicação**, no `/admin/`, lista cada arquivo com o estado
+(publicado, falhou, desligado) e a URL ou o motivo do erro. Quando o servidor
+de arquivos está fora do ar na hora da construção, a camada fica marcada como
+falha e continua sendo servida pela máquina de gestão — o boot não quebra. Use
+**"Reenviar pendentes"** quando o servidor voltar; ele reenvia tudo que não
+está publicado.
+
+Para publicar a imagem de pendrive junto com a geração:
+
+```bash
+tools/nb3-genusb --output 26brbr.img --imageroot 26brbr --publish
+```
+
+Ele copia a imagem para `data/usb/` (para o botão de reenviar saber onde
+encontrá-la) e envia para o diretório configurado em `paths.usb`.
+
+Trocar o files.mdp por uma CDN no futuro é editar `base_urls` — nenhum outro
+lugar do sistema sabe o nome do servidor.
+
 ## 2. Criar imagens
 
 Uma **imagem** é um sistema que as máquinas de uma sala baixam ao ligar. Há
@@ -122,6 +181,31 @@ Abra `/admin/` no navegador, informe a chave de administração e preencha
 identificador, nome e template. A tela devolve, **uma única vez**, o token, a
 chave de máquina, a chave de boot e o link de configuração. Copie tudo antes de
 sair da página.
+
+No mesmo formulário dá para já enviar o **papel de parede** da imagem (PNG ou
+JPEG) e marcar **"não deixar trocar o papel de parede"**. Marcando essa caixa,
+o papel de parede fica travado: só a administração muda. No configureitor a
+pessoa continua vendo o papel de parede atual, mas os botões de enviar e
+remover ficam desabilitados, com a mensagem de que o papel de parede foi
+definido pela organização.
+
+O envio é feito logo depois de criar a imagem, então uma falha no upload não
+impede a criação — a imagem já existe e você pode enviar o arquivo depois pelo
+configureitor.
+
+Se preferir travar (ou destravar) o papel de parede de uma imagem que já
+existe, use a API:
+
+```bash
+curl -X PATCH https://nutellaboot.naquadah.com.br/api/v1/images/26spsp \
+    -H "Authorization: Bearer $NB3_ADMIN_KEY" \
+    -H 'Content-Type: application/json' \
+    -d '{"wallpaper_locked": true}'
+```
+
+Os **códigos de convite** também podem fixar isso: ao gerar um código com
+`wallpaper_locked`, todas as imagens criadas com ele já nascem com o papel de
+parede travado.
 
 ### Em massa
 
@@ -308,6 +392,42 @@ detectado pelo navegador e pode ser trocado no canto superior direito.
 Campos marcados como **bloqueados** aparecem em cinza com a etiqueta "Definido
 pela organização": são as decisões que não podem variar por sala (numa prova,
 por exemplo, o firewall e as permissões).
+
+### Escolher o que a sede pode mudar
+
+Quais campos ficam bloqueados é decisão sua, e se ajusta pela tela. No
+`/admin/`, na seção do modelo, **clique no nome do modelo**: abre a lista de
+todos os campos daquele modelo, cada um com um cadeado.
+
+- **Cadeado fechado** — só a administração muda aquele campo.
+- **Cadeado aberto** — a sede pode mudar.
+
+Clique nos cadeados que quiser inverter e use **"Salvar cadeados"**. A mudança
+vale para todas as imagens **Oficiais** daquele modelo; as imagens **Livres**
+continuam editando tudo, independentemente dos cadeados (veja o perfil logo
+abaixo).
+
+É assim que se faz, por exemplo, "nesta temporada as sedes escolhem a RAM
+mínima, mas o firewall continua fechado": abra o cadeado da RAM mínima e deixe
+o do firewall fechado.
+
+Quem preferir a API:
+
+```bash
+# ver os campos e o estado de cada cadeado
+curl https://nutellaboot.naquadah.com.br/api/v1/templates/maratonalinux2604/schema \
+    -H "Authorization: Bearer $NB3_ADMIN_KEY"
+
+# abrir a RAM mínima e fechar o fuso horário
+curl -X PUT https://nutellaboot.naquadah.com.br/api/v1/templates/maratonalinux2604/schema/locks \
+    -H "Authorization: Bearer $NB3_ADMIN_KEY" \
+    -H 'Content-Type: application/json' \
+    -d '{"locks": {"MINRAM": false, "TIMEZONE": true}}'
+```
+
+Só a chave `locked` de cada campo é alterada: rótulos, tipos e opções do
+formulário ficam intactos. Campos que não existem no modelo são recusados com
+erro, para um nome errado não passar despercebido.
 
 ### Perfil da imagem: Oficial ou Livre
 

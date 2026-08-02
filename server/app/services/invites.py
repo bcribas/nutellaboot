@@ -48,6 +48,7 @@ def create(
     note: str = "",
     count: int = 1,
     unlocked: bool = True,
+    wallpaper_locked: bool = False,
 ) -> list[dict]:
     """Gera `count` códigos e devolve a lista (com o código em claro).
 
@@ -69,6 +70,7 @@ def create(
                 "expires_at": expires_at,
                 "note": note,
                 "unlocked": bool(unlocked),
+                "wallpaper_locked": bool(wallpaper_locked),
                 "created_at": time.time(),
             }
             novos.append({"code": code, **data[code]})

@@ -49,8 +49,17 @@
           <option value="free" data-i18n="profile_free"></option>
         </select>
       </div>
+      <div class="field">
+        <div class="flabel" data-i18n="wallpaper_at_creation"></div>
+        <input type="file" id="newwall" accept="image/png,image/jpeg">
+        <label style="display:block;margin-top:8px">
+          <input type="checkbox" id="newwalllock">
+          <span data-i18n="wallpaper_lock_label"></span>
+        </label>
+      </div>
       <div class="actions">
         <button type="button" id="create" class="primary" data-i18n="create"></button>
+        <span id="createstatus" class="muted"></span>
       </div>
     </div>
 
@@ -105,8 +114,58 @@
     </div>
 
     <div class="card">
+      <h2 data-i18n="layers_section"></h2>
+      <p class="help muted" data-i18n="layers_section_help"></p>
+      <div class="tabs" style="display:flex;gap:8px;margin-bottom:14px">
+        <button type="button" id="ltab_tpl" class="small on" data-i18n="layer_by_template"></button>
+        <button type="button" id="ltab_img" class="small" data-i18n="layer_by_image"></button>
+      </div>
+
+      <div id="lpane_tpl">
+        <div class="actions" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+          <label class="fld" style="max-width:200px"><span data-i18n="layer_name"></span>
+            <input type="text" id="lay_name" placeholder="mono"></label>
+          <label class="fld" style="max-width:220px"><span data-i18n="template"></span>
+            <select id="lay_tpl"></select></label>
+          <label class="fld" style="flex:1;min-width:220px"><span data-i18n="layer_packages"></span>
+            <input type="text" id="lay_pkgs" placeholder="htop tmux"></label>
+          <button type="button" id="lay_build" class="primary" data-i18n="layer_build"></button>
+        </div>
+        <div class="field">
+          <div class="flabel" data-i18n="layer_attach_to"></div>
+          <div id="lay_images" class="list-editor" style="max-height:160px;overflow:auto"></div>
+        </div>
+      </div>
+
+      <div id="lpane_img" class="hidden">
+        <div class="actions" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+          <label class="fld" style="max-width:220px"><span data-i18n="image"></span>
+            <select id="layi_img"></select></label>
+          <label class="fld" style="max-width:200px"><span data-i18n="layer_name"></span>
+            <input type="text" id="layi_name" placeholder="spim"></label>
+          <label class="fld" style="flex:1;min-width:220px"><span data-i18n="layer_packages"></span>
+            <input type="text" id="layi_pkgs" placeholder="spim"></label>
+          <button type="button" id="layi_build" class="primary" data-i18n="layer_build"></button>
+        </div>
+      </div>
+
+      <div id="laylist" class="muted" style="margin-top:12px" data-i18n="layer_none"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="publish_section"></h2>
+      <p class="help muted" data-i18n="publish_help"></p>
+      <div class="actions">
+        <button type="button" id="pub_retry" class="small" data-i18n="publish_retry"></button>
+        <span id="pub_info" class="muted"></span>
+      </div>
+      <div id="publist" class="muted" style="margin-top:10px" data-i18n="publish_none"></div>
+    </div>
+
+    <div class="card">
       <h2 data-i18n="template"></h2>
       <div id="tpllist"></div>
+      <div id="lockpanel" style="margin-top:14px"></div>
     </div>
   </div>
 </main>

@@ -288,6 +288,40 @@ def mover(job_id: str, de: str, para: str) -> Path:
     return destino
 
 
+def _url_local(filename: str) -> str:
+    """URL servida pela própria máquina de gestão (reserva, quando a
+    publicação no servidor de arquivos falha)."""
+    base = os.environ.get("NB3_BASE_URL", "")
+    if not base:
+        try:
+            base = (json.loads((DATA / "server.json").read_text()).get("base_url") or "").rstrip("/")
+        except (ValueError, OSError):
+            base = ""
+    return f"{base}/blobs/{filename}"
+
+
+def publicar(saida: dict, job_log: Path) -> dict:
+    """Envia a camada para o servidor de arquivos e devolve a saída com a URL
+    pública. Se falhar, mantém a URL local — o boot nunca fica sem fonte."""
+    sys.path.insert(0, str(REPO))
+    try:
+        from server.app.services import publish as pub
+    except ImportError:
+        return saida
+    if not pub.enabled():
+        log(job_log, "publicação desligada; servindo a camada da máquina de gestão")
+        return saida
+
+    caminho = BLOBS / saida["file"]
+    log(job_log, f"publicando {saida['file']} no servidor de arquivos")
+    estado = pub.publish_file(caminho, "layers")
+    if estado.get("status") == "done":
+        log(job_log, f"publicado: {estado['url']}")
+        return {**saida, "url": estado["url"]}
+    log(job_log, f"publicação falhou ({estado.get('error', '')}) — usando a URL local")
+    return saida
+
+
 def anexar_camada(image_id: str, saida: dict, job_id: str) -> None:
     """Registra a camada pronta na imagem (camadas extras vêm ANTES no
     manifest = prioridade no overlay). Escrita atômica, sem passar pela API —
@@ -295,18 +329,10 @@ def anexar_camada(image_id: str, saida: dict, job_id: str) -> None:
     d = DATA / "images" / image_id
     if not (d / "image.json").is_file():
         return
-    # a URL de download precisa ser absoluta (o initrd baixa por ela) — usa a
-    # base configurada em server.json, igual ao attach feito pela API
-    base = os.environ.get("NB3_BASE_URL", "")
-    if not base:
-        try:
-            base = (json.loads((DATA / "server.json").read_text()).get("base_url") or "").rstrip("/")
-        except (ValueError, OSError):
-            base = ""
     camada = {
         "md5": saida["md5"],
         "file": saida["file"],
-        "cdn_url": f"{base}/blobs/{saida['file']}",
+        "cdn_url": saida.get("url") or _url_local(saida["file"]),
         "size": saida.get("size"),
         "from_build": job_id,
     }
@@ -333,6 +359,7 @@ def processar_um() -> bool:
 
     try:
         saida = construir(job, QUEUE / "running")
+        saida = publicar(saida, QUEUE / "running" / f"{job['id']}.log")
         job["output"] = saida
         job["finished_at"] = time.time()
         destino.write_text(json.dumps(job, ensure_ascii=False, indent=1))

@@ -61,6 +61,7 @@ async def self_create_image(body: dict, request: Request) -> dict:
                 "self_service": True,
                 "build_quota": int(inv.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),
                 "invite": code,
+                "wallpaper_locked": bool(inv.get("wallpaper_locked", False)),
             },
         )
     except store.ImageError as e:

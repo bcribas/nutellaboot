@@ -6,6 +6,7 @@ const $ = (sel) => document.querySelector(sel);
 let schema = null;
 let values = {};
 let canEditLocked = false;
+let canEditWallpaper = true;
 
 function toast(msg, isError = false) {
   const el = document.createElement("div");
@@ -191,12 +192,18 @@ function renderForm() {
 function renderWallpaper(meta) {
   const box = $("#wallpreview");
   box.innerHTML = "";
+  // wallpaper travado pela organização: mostra, mas não deixa trocar
+  if (!canEditWallpaper) {
+    for (const id of ["#wallchoose", "#wallsend", "#wallremove"]) $(id).disabled = true;
+    $("#wallstatus").textContent = t("wallpaper_locked_msg");
+    $("#wallcard").classList.add("locked");
+  }
   if (!meta) {
     box.innerHTML = `<span class="muted">${t("wallpaper_none")}</span>`;
     $("#wallremove").disabled = true;
     return;
   }
-  $("#wallremove").disabled = false;
+  $("#wallremove").disabled = !canEditWallpaper;
   const img = document.createElement("img");
   img.src = `/boot/v3/${encodeURIComponent(api.imageId)}/wallpaper?v=${meta.md5}`;
   img.style.cssText = "max-width:320px;border-radius:8px;border:1px solid var(--line)";
@@ -279,6 +286,7 @@ async function main() {
     schema = data.schema;
     values = data.values;
     canEditLocked = data.can_edit_locked;
+    canEditWallpaper = data.can_edit_wallpaper !== false;
     $("#imginfo").textContent = `${data.image.fullname || data.image.id} · ${data.image.id}`;
     renderForm();
     renderWallpaper(data.wallpaper);

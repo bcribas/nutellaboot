@@ -10,6 +10,45 @@ para a própria imagem dentro de uma cota (é o que permite a quem criou uma
 imagem por convite instalar seus próprios pacotes). Os dois usam o mesmo worker
 sem root descrito abaixo.
 
+## Pela interface
+
+O jeito normal de pedir uma camada é pela seção **Camadas adicionais** do
+`/admin/`, sem tocar em `curl`. Ela tem duas abas.
+
+**Por modelo** — constrói uma vez e anexa a várias imagens. Preencha o nome da
+camada, escolha o modelo, liste os pacotes (separados por espaço ou vírgula) e
+marque, na lista abaixo, as imagens em que ela deve entrar. É o caminho para
+quando várias sedes precisam do mesmo pacote: uma construção só, anexada a
+todas.
+
+**Por imagem** — camada de uma imagem só. Escolha a imagem, o nome e os
+pacotes. A camada nasce já destinada àquela imagem.
+
+Nos dois casos o pedido entra numa fila e a lista abaixo mostra o andamento,
+atualizando sozinha enquanto houver construção em curso:
+
+| Estado | O que significa |
+|---|---|
+| na fila | aguardando o worker pegar |
+| construindo | rodando o `apt` dentro do sandbox |
+| pronta | camada gerada, com arquivo e tamanho |
+| falhou | erro na construção; a mensagem aparece ao lado |
+
+Quando fica **pronta**, aparece o botão **Anexar**, que pede as imagens de
+destino (já preenchido com as que você marcou). Anexar é o passo que faz a
+camada entrar no boot daquelas imagens.
+
+Na linha de cada imagem, na lista de imagens, há um botão **camadas**: ele
+abre as camadas já anexadas àquela imagem, com a URL de download de cada uma
+e um botão para **remover** a que não for mais necessária. A janela também
+mostra quantas construções aquela imagem já usou (e a cota, quando houver).
+
+Ao terminar, a camada é **publicada no servidor de arquivos** e é de lá que as
+máquinas baixam. Se a publicação falhar (servidor fora do ar, por exemplo), a
+camada continua servida pela própria máquina de gestão — o boot não quebra — e
+o painel **Publicação** oferece o botão "Reenviar pendentes". Veja a seção de
+publicação em `docs/operations.md`.
+
 ## O problema que isto resolve
 
 No NutellaBoot 2, atender a esse pedido era um processo manual de vários

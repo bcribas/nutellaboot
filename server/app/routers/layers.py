@@ -15,7 +15,7 @@ import time
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from .. import auth, fsdb
-from ..services import store
+from ..services import publish, store
 from ..settings import settings
 
 router = APIRouter(prefix="/api/v1")
@@ -36,6 +36,17 @@ def _validate_packages(pacotes) -> list[str]:
         if not PKG_RE.match(str(pkg)):
             raise HTTPException(400, f"nome de pacote inválido: {pkg}")
     return [str(x) for x in pacotes]
+
+
+def _layer_url(saida: dict) -> str:
+    """URL de download da camada: a publicada no servidor de arquivos quando
+    existe, senão a servida pela máquina de gestão."""
+    if saida.get("url"):
+        return saida["url"]
+    estado = publish.state(saida["file"])
+    if estado and estado.get("status") == "done" and estado.get("url"):
+        return estado["url"]
+    return f"{settings.base_url}/blobs/{saida['file']}"
 
 
 def _builds_for_image(image_id: str) -> int:
@@ -207,7 +218,9 @@ async def attach(job_id: str, body: dict, p=Depends(auth.require_admin)) -> dict
     camada = {
         "md5": saida["md5"],
         "file": saida["file"],
-        "cdn_url": f"{settings.base_url}/blobs/{saida['file']}",
+        # se a camada já foi publicada no servidor de arquivos, é de lá que as
+        # máquinas baixam; senão, a própria máquina de gestão serve
+        "cdn_url": _layer_url(saida),
         "size": saida.get("size"),
         "from_build": job_id,
     }

@@ -73,6 +73,31 @@ def set_template_layers(name: str, layers: list[dict]) -> None:
         fsdb.write_json(template_dir(name) / "template.json", tpl)
 
 
+def get_schema(name: str) -> dict:
+    return fsdb.read_json(template_dir(name) / "schema.json", {"fields": []}) or {"fields": []}
+
+
+def set_schema_locks(name: str, locks: dict) -> dict:
+    """Liga/desliga o cadeado de campos do template.
+
+    Só mexe na chave `locked` de cada campo — o resto do schema (tipos,
+    opções, rótulos) fica intacto. Vale para todas as imagens Oficiais que
+    usam este template; imagens Livres continuam ignorando as travas.
+    """
+    d = template_dir(name)
+    with fsdb.locked(d):
+        schema = fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []}
+        conhecidos = {f["key"] for f in schema.get("fields", [])}
+        desconhecidos = set(locks) - conhecidos
+        if desconhecidos:
+            raise ImageError(f"campos que não existem no template: {', '.join(sorted(desconhecidos))}")
+        for field in schema.get("fields", []):
+            if field["key"] in locks:
+                field["locked"] = bool(locks[field["key"]])
+        fsdb.write_json(d / "schema.json", schema)
+    return schema
+
+
 def set_template_meta(name: str, *, public: bool | None = None, description: str | None = None) -> None:
     with fsdb.locked(template_dir(name)):
         tpl = fsdb.read_json(template_dir(name) / "template.json", {}) or {}
@@ -216,7 +241,7 @@ def patch_image(image_id: str, fields: dict) -> dict:
     d = image_dir(image_id)
     with fsdb.locked(d):
         info = fsdb.read_json(d / "image.json") or {}
-        for k in ("fullname", "unlocked", "template"):
+        for k in ("fullname", "unlocked", "template", "wallpaper_locked", "build_quota"):
             if k in fields and fields[k] is not None:
                 if k == "template" and not template_exists(fields[k]):
                     raise ImageError(f"template '{fields[k]}' não existe")

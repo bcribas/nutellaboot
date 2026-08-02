@@ -23,6 +23,7 @@ async def create_invite(body: dict, p=Depends(auth.require_admin)) -> dict:
         note=str(body.get("note", "")),
         count=int(body.get("count", 1)),
         unlocked=bool(body.get("unlocked", True)),
+        wallpaper_locked=bool(body.get("wallpaper_locked", False)),
     )
     return {"invites": novos}
 

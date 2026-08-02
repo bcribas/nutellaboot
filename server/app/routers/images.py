@@ -19,7 +19,11 @@ router = APIRouter(prefix="/api/v1")
 async def create_image(body: ImageCreate, p=Depends(auth.require_admin)) -> dict:
     try:
         return store.create_image(
-            body.id, body.fullname, body.template, unlocked=body.unlocked
+            body.id,
+            body.fullname,
+            body.template,
+            unlocked=body.unlocked,
+            extra={"wallpaper_locked": bool(body.wallpaper_locked)} if body.wallpaper_locked else None,
         )
     except store.ImageError as e:
         raise HTTPException(400, str(e))
@@ -167,6 +171,43 @@ async def list_templates(p=Depends(auth.require_admin)) -> dict:
             {"name": n, "public": store.template_is_public(n)} for n in store.list_templates()
         ]
     }
+
+
+@router.get("/templates/{name}/schema")
+async def get_template_schema(name: str, p=Depends(auth.require_admin)) -> dict:
+    """Campos do template com o estado do cadeado — alimenta a tela onde o
+    admin escolhe o que as sedes podem ou não mudar."""
+    if not store.template_exists(name):
+        raise HTTPException(404, "template não existe")
+    schema = store.get_schema(name)
+    return {
+        "name": name,
+        "fields": [
+            {
+                "key": f["key"],
+                "type": f.get("type"),
+                "label": f.get("label"),
+                "locked": bool(f.get("locked")),
+            }
+            for f in schema.get("fields", [])
+        ],
+    }
+
+
+@router.put("/templates/{name}/schema/locks")
+async def put_schema_locks(name: str, body: dict, p=Depends(auth.require_admin)) -> dict:
+    """Liga/desliga o cadeado de campos. Vale para as imagens Oficiais deste
+    template (as Livres continuam editando tudo)."""
+    if not store.template_exists(name):
+        raise HTTPException(404, "template não existe")
+    locks = body.get("locks")
+    if not isinstance(locks, dict) or not locks:
+        raise HTTPException(400, "esperava {locks: {CAMPO: true|false}}")
+    try:
+        store.set_schema_locks(name, locks)
+    except store.ImageError as e:
+        raise HTTPException(400, str(e))
+    return await get_template_schema(name, p)
 
 
 @router.patch("/templates/{name}")

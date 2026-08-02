@@ -11,6 +11,7 @@ from .routers import (
     layers,
     machines,
     public,
+    publish,
     roster,
     webhooks,
 )
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
     app.include_router(layers.router)
     app.include_router(invites.router)
     app.include_router(public.router)
+    app.include_router(publish.router)
 
     # squashfs construídos localmente (camadas extras) ficam disponíveis para
     # o boot baixar, com o md5 conferido pelo manifest.

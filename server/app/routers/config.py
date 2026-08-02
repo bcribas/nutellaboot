@@ -17,10 +17,19 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 JPEG_MAGIC = b"\xff\xd8\xff"
 
 
+def _check_wallpaper_editable(image: str, p) -> None:
+    """Wallpaper travado é decisão da organização (como os campos `locked`):
+    só a administração troca."""
+    info = store.get_image(image) or {}
+    if info.get("wallpaper_locked") and p.kind != "admin":
+        raise HTTPException(400, "o papel de parede desta imagem foi definido pela organização")
+
+
 @router.get("/images/{image}/config")
 async def get_config(image: str, p=Depends(auth.require_image_access())) -> dict:
     info = store.get_image(image) or {}
     wallpaper = fsdb.read_json(store.image_dir(image) / "wallpaper.json")
+    can_edit_locked = p.kind == "admin" or bool(info.get("unlocked"))
     return {
         "image": {
             "id": image,
@@ -31,7 +40,9 @@ async def get_config(image: str, p=Depends(auth.require_image_access())) -> dict
         "schema": cfg.schema_for(image),
         "values": cfg.effective_values(image),
         "wallpaper": wallpaper,
-        "can_edit_locked": p.kind == "admin" or bool(info.get("unlocked")),
+        "can_edit_locked": can_edit_locked,
+        # wallpaper travado: definido pela organização, o dono não troca
+        "can_edit_wallpaper": p.kind == "admin" or not info.get("wallpaper_locked"),
     }
 
 
@@ -57,6 +68,7 @@ async def put_wallpaper(
 ) -> dict:
     """Recebe o arquivo (o nb2 pedia uma URL, baixava no servidor na hora de
     salvar e derrubava o salvamento inteiro quando a URL falhava)."""
+    _check_wallpaper_editable(image, p)
     data = await file.read(MAX_WALLPAPER_BYTES + 1)
     if len(data) > MAX_WALLPAPER_BYTES:
         raise HTTPException(413, f"arquivo maior que {MAX_WALLPAPER_BYTES // 2**20} MB")
@@ -83,6 +95,7 @@ async def put_wallpaper(
 async def delete_wallpaper(
     image: str, p=Depends(auth.require_image_access(service_scope="config:write"))
 ) -> None:
+    _check_wallpaper_editable(image, p)
     d = store.image_dir(image)
     with fsdb.locked(d):
         (d / "wallpaper.png").unlink(missing_ok=True)
