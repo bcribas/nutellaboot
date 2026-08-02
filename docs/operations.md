@@ -464,6 +464,11 @@ configuração. Pior: na máquina, o download do wallpaper acontecia no boot e,
 quando falhava, parava num `Continue anyway? (Y/n)` esperando alguém digitar.
 Hoje, falha de wallpaper só registra um aviso e o boot segue.
 
+Se os botões de enviar e remover aparecerem desabilitados, o papel de parede
+daquela imagem foi **travado pela organização** na criação (veja "Uma de cada
+vez", na seção 2). Nesse caso só a administração troca — o que costuma ser
+proposital em eventos, para todas as salas ficarem iguais.
+
 ### Senha de emergência da tela de bloqueio
 
 Definida no configureitor, guardada apenas como hash (`salt$sha256`) e enviada
