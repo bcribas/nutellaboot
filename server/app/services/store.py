@@ -41,6 +41,22 @@ def list_templates() -> list[str]:
     return sorted(p.name for p in base.iterdir() if (p / "template.json").is_file())
 
 
+def template_is_public(name: str) -> bool:
+    """Templates marcados `public: true` são os únicos que a criação por
+    convite pode usar — protege os templates bloqueados de prova."""
+    tpl = fsdb.read_json(template_dir(name) / "template.json", {}) or {}
+    return bool(tpl.get("public"))
+
+
+def list_public_templates() -> list[dict]:
+    out = []
+    for name in list_templates():
+        if template_is_public(name):
+            tpl = fsdb.read_json(template_dir(name) / "template.json", {}) or {}
+            out.append({"name": name, "description": tpl.get("description", "")})
+    return out
+
+
 def get_template(name: str) -> dict | None:
     tpl = fsdb.read_json(template_dir(name) / "template.json")
     if tpl is None:
@@ -54,6 +70,16 @@ def set_template_layers(name: str, layers: list[dict]) -> None:
     with fsdb.locked(template_dir(name)):
         tpl = fsdb.read_json(template_dir(name) / "template.json", {}) or {}
         tpl["layers"] = layers
+        fsdb.write_json(template_dir(name) / "template.json", tpl)
+
+
+def set_template_meta(name: str, *, public: bool | None = None, description: str | None = None) -> None:
+    with fsdb.locked(template_dir(name)):
+        tpl = fsdb.read_json(template_dir(name) / "template.json", {}) or {}
+        if public is not None:
+            tpl["public"] = bool(public)
+        if description is not None:
+            tpl["description"] = str(description)
         fsdb.write_json(template_dir(name) / "template.json", tpl)
 
 
@@ -96,8 +122,12 @@ def create_image(
     template: str,
     *,
     unlocked: bool = False,
+    extra: dict | None = None,
 ) -> dict:
-    """Cria a imagem e devolve dict com credenciais em claro (única vez)."""
+    """Cria a imagem e devolve dict com credenciais em claro (única vez).
+
+    `extra` mescla campos adicionais no image.json (ex.: self_service,
+    build_quota, criada por auto-atendimento)."""
     if not IMAGE_ID_RE.match(image_id):
         raise ImageError(
             "id inválido: use 2-32 caracteres [a-z0-9._-], começando por letra ou dígito"
@@ -121,6 +151,7 @@ def create_image(
                 "template": template,
                 "namespace": namespace,
                 "unlocked": bool(unlocked),
+                **(extra or {}),
             },
         )
         fsdb.write_text(d / "token", token + "\n", mode=0o600)

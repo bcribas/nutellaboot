@@ -2,7 +2,18 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 
-from .routers import boot, config, health, images, layers, machines, roster, webhooks
+from .routers import (
+    boot,
+    config,
+    health,
+    images,
+    invites,
+    layers,
+    machines,
+    public,
+    roster,
+    webhooks,
+)
 from .settings import REPO_ROOT, VERSION, settings
 
 
@@ -34,6 +45,8 @@ def create_app() -> FastAPI:
     app.include_router(roster.router)
     app.include_router(webhooks.router)
     app.include_router(layers.router)
+    app.include_router(invites.router)
+    app.include_router(public.router)
 
     # squashfs construídos localmente (camadas extras) ficam disponíveis para
     # o boot baixar, com o md5 conferido pelo manifest.

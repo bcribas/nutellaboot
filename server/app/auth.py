@@ -91,6 +91,15 @@ def identify_machine(machine_key: str | None, image_id: str) -> Principal | None
     return None
 
 
+def image_owner(image_id: str, token: str | None) -> bool:
+    """True se o token é o da própria imagem (dono). Usado para deixar o dono
+    disparar build de camada da SUA imagem, sem chave de admin."""
+    if not token:
+        return False
+    stored = (fsdb.read_text(_image_dir(image_id) / "token") or "").strip()
+    return bool(stored) and secrets.compare_digest(token.strip(), stored)
+
+
 def boot_key_required(image_id: str) -> bool:
     """A imagem exige chave de boot? (existe boot.key no diretório dela)
 

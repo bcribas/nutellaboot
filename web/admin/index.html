@@ -66,6 +66,35 @@
       </div>
       <div id="imglist" class="muted" data-i18n="loading"></div>
     </div>
+
+    <div class="card">
+      <h2 data-i18n="invites"></h2>
+      <p class="help muted" data-i18n="invites_help"></p>
+      <div class="actions" style="flex-wrap:wrap; gap:12px; align-items:flex-end">
+        <label class="fld" style="max-width:120px"><span data-i18n="invite_count"></span>
+          <input type="number" id="inv_count" value="1" min="1"></label>
+        <label class="fld" style="max-width:140px"><span data-i18n="invite_max_images"></span>
+          <input type="number" id="inv_max" value="1" min="1"></label>
+        <label class="fld" style="max-width:170px"><span data-i18n="invite_build_quota"></span>
+          <input type="number" id="inv_quota" value="5" min="0"></label>
+        <label class="fld" style="max-width:200px"><span data-i18n="create_template"></span>
+          <select id="inv_tpl"></select></label>
+        <label class="fld" style="flex:1; min-width:160px"><span data-i18n="request_note"></span>
+          <input type="text" id="inv_note"></label>
+        <button type="button" id="inv_gen" class="primary" data-i18n="invite_generate"></button>
+      </div>
+      <div id="invlist" class="muted" style="margin-top:12px" data-i18n="loading"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="requests_admin"></h2>
+      <div id="reqlist" class="muted" data-i18n="loading"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="template"></h2>
+      <div id="tpllist"></div>
+    </div>
   </div>
 </main>
 

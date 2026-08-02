@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NutellaBoot 3 — Criar imagem</title>
+<link rel="icon" href="/common/favicon.png">
+<link rel="stylesheet" href="/common/style.css">
+<link rel="preload" as="fetch" href="/common/locales/pt.json" crossorigin="anonymous">
+<link rel="preload" as="fetch" href="/common/locales/en.json" crossorigin="anonymous">
+<link rel="preload" as="fetch" href="/common/locales/es.json" crossorigin="anonymous">
+<style>
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs button.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+  .pane { display: none; }
+  .pane.on { display: block; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="create_title"></h1>
+  <span class="spacer"></span>
+  <a class="btn small" href="/">◂ NutellaBoot</a>
+  <span id="lang"></span>
+</header>
+
+<main>
+  <p class="intro" data-i18n="create_intro"></p>
+
+  <div class="tabs">
+    <button type="button" id="tab_code" class="on" data-i18n="create_have_code"></button>
+    <button type="button" id="tab_req" data-i18n="create_no_code"></button>
+  </div>
+
+  <!-- com código -->
+  <section class="card pane on" id="pane_code">
+    <div class="field">
+      <label class="flabel" for="code" data-i18n="create_code"></label>
+      <input type="text" id="code" placeholder="NB3-XXXX-XXXX" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label class="flabel" for="cname" data-i18n="create_name"></label>
+      <div class="help" data-i18n="create_name_help"></div>
+      <input type="text" id="cname" placeholder="meu-laboratorio" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label class="flabel" for="cfull" data-i18n="create_fullname"></label>
+      <input type="text" id="cfull" autocomplete="off">
+    </div>
+    <div class="field" id="tplfield">
+      <label class="flabel" for="ctpl" data-i18n="create_template"></label>
+      <select id="ctpl"></select>
+    </div>
+    <div class="actions">
+      <button type="button" id="go" class="primary" data-i18n="create_go"></button>
+      <span id="code_status" class="muted"></span>
+    </div>
+    <div id="result"></div>
+  </section>
+
+  <!-- sem código: pedido -->
+  <section class="card pane" id="pane_req">
+    <p class="help muted" data-i18n="request_intro"></p>
+    <div class="field">
+      <label class="flabel" for="rname" data-i18n="request_wanted"></label>
+      <input type="text" id="rname" autocomplete="off">
+    </div>
+    <div class="field">
+      <label class="flabel" for="rcontact" data-i18n="request_contact"></label>
+      <input type="text" id="rcontact" autocomplete="off">
+    </div>
+    <div class="field">
+      <label class="flabel" for="rnote" data-i18n="request_note"></label>
+      <textarea id="rnote"></textarea>
+    </div>
+    <div class="actions">
+      <button type="button" id="send" class="primary" data-i18n="request_send"></button>
+      <span id="req_status" class="muted"></span>
+    </div>
+  </section>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

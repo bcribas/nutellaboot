@@ -126,6 +126,36 @@ def conteudo_da_camada(squash: Path) -> list[str]:
     ]
 
 
+def test_worker_anexa_camada_sozinho(ambiente):
+    """Build com attach_to preenchido (caminho do auto-atendimento): o worker
+    anexa a camada à imagem ao terminar, sem passo manual do admin."""
+    data = ambiente["data"]
+    (data / "server.json").write_text(json.dumps({"base_url": "https://exemplo.test"}))
+    img = data / "images" / "labauto"
+    img.mkdir(parents=True)
+    (img / "image.json").write_text(json.dumps({"id": "labauto", "template": "tteste"}))
+    (img / "layers-extra.json").write_text("[]")
+
+    job = {
+        "id": "ja",
+        "name": "camada-auto",
+        "template": "tteste",
+        "packages": ["htop"],
+        "created_at": 0,
+        "image": "labauto",
+        "attach_to": ["labauto"],
+    }
+    proc = rodar_worker(ambiente, job)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    extras = json.loads((img / "layers-extra.json").read_text())
+    assert len(extras) == 1
+    assert extras[0]["file"].startswith("camada-auto-")
+    # a URL de download saiu absoluta, com a base do server.json
+    assert extras[0]["cdn_url"].startswith("https://exemplo.test/blobs/")
+    assert extras[0]["from_build"] == "ja"
+
+
 def test_build_completo_sem_root(ambiente):
     job = {
         "id": "j1",

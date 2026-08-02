@@ -288,6 +288,42 @@ def mover(job_id: str, de: str, para: str) -> Path:
     return destino
 
 
+def anexar_camada(image_id: str, saida: dict, job_id: str) -> None:
+    """Registra a camada pronta na imagem (camadas extras vêm ANTES no
+    manifest = prioridade no overlay). Escrita atômica, sem passar pela API —
+    o worker é confiável e local."""
+    d = DATA / "images" / image_id
+    if not (d / "image.json").is_file():
+        return
+    # a URL de download precisa ser absoluta (o initrd baixa por ela) — usa a
+    # base configurada em server.json, igual ao attach feito pela API
+    base = os.environ.get("NB3_BASE_URL", "")
+    if not base:
+        try:
+            base = (json.loads((DATA / "server.json").read_text()).get("base_url") or "").rstrip("/")
+        except (ValueError, OSError):
+            base = ""
+    camada = {
+        "md5": saida["md5"],
+        "file": saida["file"],
+        "cdn_url": f"{base}/blobs/{saida['file']}",
+        "size": saida.get("size"),
+        "from_build": job_id,
+    }
+    p = d / "layers-extra.json"
+    extras = []
+    if p.is_file():
+        try:
+            extras = json.loads(p.read_text())
+        except (ValueError, OSError):
+            extras = []
+    extras = [c for c in extras if c.get("file") != camada["file"]]
+    extras.insert(0, camada)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(extras, ensure_ascii=False, indent=1))
+    os.replace(tmp, p)
+
+
 def processar_um() -> bool:
     pendentes = sorted((QUEUE / "queue").glob("*.json")) if (QUEUE / "queue").is_dir() else []
     if not pendentes:
@@ -301,6 +337,10 @@ def processar_um() -> bool:
         job["finished_at"] = time.time()
         destino.write_text(json.dumps(job, ensure_ascii=False, indent=1))
         mover(job["id"], "running", "done")
+        # anexa sozinho às imagens marcadas em attach_to (auto-atendimento não
+        # depende de um passo manual do admin)
+        for image_id in job.get("attach_to") or []:
+            anexar_camada(image_id, saida, job["id"])
         print(f"job {job['id']} concluído: {saida['file']}")
     except Exception as e:  # noqa: BLE001
         job["error"] = str(e)

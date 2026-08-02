@@ -162,7 +162,23 @@ async def remove_seeder(image: str, ip: str, p=Depends(auth.require_image_access
 
 @router.get("/templates")
 async def list_templates(p=Depends(auth.require_admin)) -> dict:
-    return {"templates": store.list_templates()}
+    return {
+        "templates": [
+            {"name": n, "public": store.template_is_public(n)} for n in store.list_templates()
+        ]
+    }
+
+
+@router.patch("/templates/{name}")
+async def patch_template(name: str, body: dict, p=Depends(auth.require_admin)) -> dict:
+    """Marca um template como público (disponível para criação por convite) e
+    ajusta a descrição. Templates de prova bloqueados ficam privados."""
+    if not store.template_exists(name):
+        raise HTTPException(404, "template não existe")
+    store.set_template_meta(
+        name, public=body.get("public"), description=body.get("description")
+    )
+    return {"name": name, "public": store.template_is_public(name)}
 
 
 @router.get("/templates/{name}")

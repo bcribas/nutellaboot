@@ -1,8 +1,14 @@
 # Camadas extras (pacotes adicionais)
 
-Não é raro uma sede pedir um pacote a mais: um compilador de linguagem
+Não é raro precisar de um pacote a mais numa imagem: um compilador de linguagem
 específica, um simulador, uma IDE. Este documento explica como isso é
 atendido — e por que o caminho mudou.
+
+Há dois caminhos para pedir a construção: o da **administração**, que constrói
+para qualquer imagem sem limite; e o do **dono de uma imagem**, que constrói
+para a própria imagem dentro de uma cota (é o que permite a quem criou uma
+imagem por convite instalar seus próprios pacotes). Os dois usam o mesmo worker
+sem root descrito abaixo.
 
 ## O problema que isto resolve
 
@@ -131,6 +137,60 @@ Para ver o que a imagem tem hoje:
 ```bash
 curl "$SERVER/api/v1/images/26spsp/layers" -H "Authorization: Bearer $TOKEN"
 ```
+
+## O dono da imagem constrói a própria camada (com cota)
+
+Quem criou uma imagem por código de convite pode instalar seus próprios
+pacotes, sem chave de administração. A rota é por imagem e aceita o **token da
+imagem** (o mesmo do configureitor):
+
+```bash
+curl -X POST "$SERVER/api/v1/images/meu-lab/layerbuilds" \
+    -H "Authorization: Bearer $TOKEN_DA_IMAGEM" \
+    -H 'Content-Type: application/json' \
+    -d '{"name": "meus-extras", "packages": ["htop", "tmux"]}'
+```
+
+Diferenças em relação ao caminho da administração:
+
+- **Cota por imagem.** Cada imagem só constrói até `build_quota` camadas
+  (padrão 5, herdado do código de convite que a criou). A conta soma todas as
+  tentativas — inclusive as que falharam. Estourou, a resposta é `403`, e a
+  pessoa pede à administração para aumentar. A administração não tem cota.
+- **Anexação automática.** Não é preciso `attach_to` nem um passo de
+  `/attach`: a camada nasce marcada para esta imagem, e o worker a anexa
+  sozinho quando termina (camada extra, portanto com prioridade no overlay).
+- **Escopo fechado.** A camada só pode ir para a própria imagem; o token de uma
+  imagem não constrói nem anexa em outra.
+
+Acompanhe o andamento (dono ou administração):
+
+```bash
+curl "$SERVER/api/v1/images/meu-lab/layerbuilds" \
+    -H "Authorization: Bearer $TOKEN_DA_IMAGEM"
+```
+
+### Risco residual, e o que fazer com ele
+
+Deixar terceiros instalarem pacotes significa que o `apt` roda **no seu
+servidor**, a pedido de gente que você não conhece, buscando pacotes dos
+repositórios do Ubuntu. Isso é uma superfície real; a contenção é em camadas:
+
+- **cota por imagem** limita o volume por pessoa;
+- **um build por vez** — o worker processa a fila em série, então nem uma
+  rajada de pedidos vira uma rajada de `apt` simultâneos;
+- **nome de pacote validado** (`[a-z0-9][a-z0-9+._-]*`) — não há como injetar
+  opção de linha de comando nem `;`;
+- **sandbox sem root** com a poda automática descrita abaixo, que também impede
+  a camada de levar embora credenciais.
+
+Mesmo assim, **monitore**. Os jobs ficam visíveis em
+`data/layerbuilds/{queue,running,done,failed}/` e em `GET /api/v1/layerbuilds`
+(administração). Se um código ou uma imagem estiver abusando, você pode revogar
+o código (`DELETE /api/v1/invites/<código>`, que impede novas imagens) e zerar,
+na prática, a construção de uma imagem baixando a `build_quota` no `image.json`
+dela — como a cota conta todas as tentativas, uma cota abaixo do já usado
+bloqueia novos builds na hora.
 
 ## Pré-requisitos do host
 

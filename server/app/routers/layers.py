@@ -12,7 +12,7 @@ import re
 import secrets
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 
 from .. import auth, fsdb
 from ..services import store
@@ -27,6 +27,30 @@ ESTADOS = ("queue", "running", "done", "failed")
 
 def _dir(estado: str):
     return settings.data_root / "layerbuilds" / estado
+
+
+def _validate_packages(pacotes) -> list[str]:
+    if not isinstance(pacotes, list) or not pacotes:
+        raise HTTPException(400, "informe ao menos um pacote")
+    for pkg in pacotes:
+        if not PKG_RE.match(str(pkg)):
+            raise HTTPException(400, f"nome de pacote inválido: {pkg}")
+    return [str(x) for x in pacotes]
+
+
+def _builds_for_image(image_id: str) -> int:
+    """Conta as tentativas de build de uma imagem (todos os estados) — base da
+    quota do auto-atendimento."""
+    n = 0
+    for estado in ESTADOS:
+        d = _dir(estado)
+        if not d.is_dir():
+            continue
+        for f in d.glob("*.json"):
+            job = fsdb.read_json(f) or {}
+            if job.get("image") == image_id or image_id in (job.get("attach_to") or []):
+                n += 1
+    return n
 
 
 def _find(job_id: str) -> tuple[str, dict] | tuple[None, None]:
@@ -46,24 +70,93 @@ async def create_build(body: dict, p=Depends(auth.require_admin)) -> dict:
     if not store.template_exists(template):
         raise HTTPException(400, f"template '{template}' não existe")
 
-    pacotes = body.get("packages") or []
-    if not isinstance(pacotes, list) or not pacotes:
-        raise HTTPException(400, "informe ao menos um pacote")
-    for pkg in pacotes:
-        if not PKG_RE.match(str(pkg)):
-            raise HTTPException(400, f"nome de pacote inválido: {pkg}")
-
+    pacotes = _validate_packages(body.get("packages"))
     job = {
         "id": secrets.token_hex(6),
         "name": nome,
         "template": template,
-        "packages": [str(x) for x in pacotes],
+        "packages": pacotes,
         "requested_by": p.name,
         "created_at": time.time(),
         "attach_to": body.get("attach_to") or [],
     }
     fsdb.write_json(_dir("queue") / f"{job['id']}.json", job)
     return job
+
+
+@router.post("/images/{image}/layerbuilds", status_code=201)
+async def create_build_for_image(
+    image: str,
+    body: dict,
+    authorization: str | None = Header(None),
+    x_nb_machine_key: str | None = Header(None),
+) -> dict:
+    """Build de camada da PRÓPRIA imagem. Aceito do admin (sem limite) ou do
+    dono da imagem (token da imagem), respeitando a quota da imagem. A camada
+    é anexada automaticamente a esta imagem quando fica pronta."""
+    info = store.get_image(image)
+    if info is None:
+        raise HTTPException(404, "imagem não existe")
+
+    token = authorization[7:].strip() if authorization and authorization.startswith("Bearer ") else None
+    is_admin = bool(token) and auth.identify(token) and auth.identify(token).kind == "admin"
+    if not is_admin and not auth.image_owner(image, token):
+        raise HTTPException(401, "credencial inválida")
+
+    if not is_admin:
+        quota = int(info.get("build_quota", 0))
+        usados = _builds_for_image(image)
+        if usados >= quota:
+            raise HTTPException(
+                403, f"cota de builds da imagem esgotada ({usados}/{quota}); peça ao administrador"
+            )
+
+    nome = str(body.get("name", "")).strip()
+    if not NAME_RE.match(nome):
+        raise HTTPException(400, "nome inválido para a camada")
+    pacotes = _validate_packages(body.get("packages"))
+
+    job = {
+        "id": secrets.token_hex(6),
+        "name": nome,
+        "template": info.get("template", ""),
+        "packages": pacotes,
+        "requested_by": "admin" if is_admin else f"image:{image}",
+        "created_at": time.time(),
+        "image": image,
+        "attach_to": [image],  # anexa sozinho ao terminar
+    }
+    fsdb.write_json(_dir("queue") / f"{job['id']}.json", job)
+    return {**job, "quota": None if is_admin else int(info.get("build_quota", 0))}
+
+
+@router.get("/images/{image}/layerbuilds")
+async def list_builds_for_image(
+    image: str,
+    authorization: str | None = Header(None),
+    x_nb_machine_key: str | None = Header(None),
+) -> dict:
+    info = store.get_image(image)
+    if info is None:
+        raise HTTPException(404, "imagem não existe")
+    token = authorization[7:].strip() if authorization and authorization.startswith("Bearer ") else None
+    is_admin = bool(token) and auth.identify(token) and auth.identify(token).kind == "admin"
+    if not is_admin and not auth.image_owner(image, token):
+        raise HTTPException(401, "credencial inválida")
+
+    builds = []
+    for estado in ESTADOS:
+        d = _dir(estado)
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.json")):
+            job = fsdb.read_json(f) or {}
+            if job.get("image") == image or image in (job.get("attach_to") or []):
+                builds.append({"id": job.get("id"), "name": job.get("name"),
+                               "packages": job.get("packages"), "state": estado,
+                               "output": job.get("output"), "error": job.get("error")})
+    quota = int(info.get("build_quota", 0))
+    return {"builds": builds, "used": len(builds), "quota": None if is_admin else quota}
 
 
 @router.get("/layerbuilds")

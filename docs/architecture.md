@@ -6,12 +6,18 @@ quer apenas *usar* a API, vá direto para [api.md](api.md).
 
 ## Visão geral
 
-O NutellaBoot entrega o Maratona Linux a computadores emprestados: a máquina
-dá boot por um pendrive minúsculo, baixa o sistema do servidor (ou de um
-colega na rede local), monta tudo como um sistema de arquivos em camadas e
-entrega o desktop pronto para a prova. Durante o evento, o mesmo servidor
-recebe telemetria das máquinas e envia comandos para elas — inclusive o
-bloqueio de tela.
+O NutellaBoot é uma ferramenta de gestão de laboratórios com boot em rede: a
+máquina dá boot por um pendrive minúsculo, baixa um sistema Linux do servidor
+(ou de um colega na rede local), monta tudo como um sistema de arquivos em
+camadas e entrega o desktop pronto. Serve para provas, laboratórios de ensino e
+salas gerenciadas; a Maratona SBC de Programação é o uso de origem e aparece
+como exemplo ao longo do texto. Durante uma sessão, o mesmo servidor recebe
+telemetria das máquinas e envia comandos para elas — inclusive o bloqueio de
+tela.
+
+As imagens são criadas pela administração ou, com um **código de convite**, por
+pessoas de fora, que assim montam a própria imagem sem depender de aprovação a
+cada vez (ver a seção de autorização).
 
 São três camadas:
 
@@ -71,14 +77,16 @@ no meio de uma prova — abrir o arquivo e olhar sempre funciona.
 ```
 data/
 ├── server.json                  configuração global do servidor
+├── invites.json                 {"NB3-XXXX-XXXX": {max_images, used_images, build_quota, template, expires_at, note}}
+├── requests/<id>.json           pedidos de imagem (wanted_name, contact, note, status)
 ├── keys/
 │   ├── admin.json               {"keys":[{"id","sha256"}]}  — só hashes
 │   └── services.json            {"<nome>": {"sha256","scopes","images"}}
 ├── templates/<nome>/
-│   ├── template.json            {"layers":[{md5,file,cdn_url,size}]}
+│   ├── template.json            {"layers":[…], "public": bool, "description"}
 │   └── schema.json              formulário de configuração (rótulos pt/en/es)
 ├── images/<id>/
-│   ├── image.json               id, fullname, template, namespace, unlocked
+│   ├── image.json               id, fullname, template, namespace, unlocked; nas de auto-atendimento também self_service e build_quota
 │   ├── token                    nb3i_… — credencial do configureitor (0600)
 │   ├── machine.key              nb3m_… — credencial das máquinas (0600)
 │   ├── boot.key                 nb3b_… — credencial do pendrive (0600)
@@ -168,6 +176,35 @@ todas.
 
 O token de imagem só é reconhecido no contexto da própria imagem — apresentá-lo
 em outra rota não identifica ninguém.
+
+### O código de convite: autorização, não identidade
+
+A criação de imagens por pessoas de fora usa um **código de convite**
+(`NB3-XXXX-XXXX`, em `data/invites.json`). É importante ser honesto sobre o que
+ele é: um mecanismo de **autorização**, não de **autenticação de identidade**.
+Sem um provedor externo de identidade (e-mail verificado, OAuth, a conta do
+MOJ), o servidor não tem como saber *quem* é a pessoa do outro lado — o código
+*é* a credencial, exatamente como o token de imagem e a chave de boot. A
+"identidade" de quem cria uma imagem é, na prática, "a quem a administração
+entregou aquele código".
+
+Por isso o abuso é contido por **cota e limite de taxa**, e não por identidade:
+
+- o código só cria `max_images` imagens e cada imagem só constrói `build_quota`
+  camadas de pacotes (`server/app/services/invites.py`);
+- as rotas públicas (`server/app/routers/public.py`) passam por um limite de
+  taxa por IP (`server/app/services/ratelimit.py`), que só é confiável se o
+  proxy repassar `X-Forwarded-For` — ver [operations.md](operations.md);
+- nomes reservados (dígito inicial) e templates não-públicos são recusados na
+  criação por convite.
+
+Imagens criadas assim recebem `self_service: true` e a `build_quota` herdada do
+código no `image.json`. O dono da imagem (o token dela) pode disparar builds de
+camada da própria imagem até a cota — ver [layer-builds.md](layer-builds.md).
+
+Quem não tem código deixa um pedido (`data/requests/<id>.json`), que a
+administração aprova emitindo um código ou recusa. O pedido não cria nada
+sozinho.
 
 ### A chave de boot
 

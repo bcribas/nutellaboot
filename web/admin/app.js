@@ -144,15 +144,150 @@ async function load() {
     api.get("/api/v1/templates", A),
   ]);
   images = imgs.images;
-  templates = tpls.templates;
+  // /templates agora devolve [{name, public}]
+  templates = tpls.templates.map((tpl) => (typeof tpl === "string" ? { name: tpl, public: false } : tpl));
   const sel = $("#newtpl");
   sel.innerHTML = "";
-  for (const name of templates) {
+  for (const tpl of templates) {
     const o = document.createElement("option");
-    o.value = o.textContent = name;
+    o.value = o.textContent = tpl.name;
     sel.appendChild(o);
   }
+  // template opcional do convite (vazio = a pessoa escolhe entre os públicos)
+  const invsel = $("#inv_tpl");
+  if (invsel) {
+    invsel.innerHTML = '<option value="">—</option>';
+    for (const tpl of templates) {
+      const o = document.createElement("option");
+      o.value = o.textContent = tpl.name;
+      invsel.appendChild(o);
+    }
+  }
   renderImages();
+  renderTemplates();
+  loadInvites();
+  loadRequests();
+}
+
+function renderTemplates() {
+  const box = $("#tpllist");
+  if (!box) return;
+  box.innerHTML = "";
+  const table = document.createElement("table");
+  for (const tpl of templates) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="mono">${tpl.name}</td>
+      <td><span class="pill ${tpl.public ? "ok" : ""}">${
+        tpl.public ? t("template_public") : "—"
+      }</span></td>`;
+    const td = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.className = "small";
+    btn.textContent = tpl.public ? t("make_private") : t("make_public");
+    btn.onclick = async () => {
+      await api.patch(`/api/v1/templates/${tpl.name}`, { public: !tpl.public }, A);
+      load();
+    };
+    td.appendChild(btn);
+    tr.appendChild(td);
+    table.appendChild(tr);
+  }
+  box.appendChild(table);
+}
+
+async function loadInvites() {
+  const box = $("#invlist");
+  if (!box) return;
+  const data = await api.get("/api/v1/invites", A);
+  box.innerHTML = "";
+  if (!data.invites.length) {
+    box.className = "muted";
+    box.textContent = "—";
+    return;
+  }
+  box.className = "";
+  const table = document.createElement("table");
+  for (const inv of data.invites) {
+    const tr = document.createElement("tr");
+    const td0 = document.createElement("td");
+    td0.appendChild(copyable(t("create_code"), inv.code));
+    tr.appendChild(td0);
+    const meta = document.createElement("td");
+    meta.className = "muted";
+    meta.textContent = `${inv.remaining} ${t("invite_remaining")}${inv.template ? " · " + inv.template : ""}${inv.note ? " · " + inv.note : ""}`;
+    tr.appendChild(meta);
+    const td2 = document.createElement("td");
+    const rev = document.createElement("button");
+    rev.className = "small danger";
+    rev.textContent = t("invite_revoke");
+    rev.onclick = async () => {
+      await api.del(`/api/v1/invites/${inv.code}`, A);
+      loadInvites();
+    };
+    td2.appendChild(rev);
+    tr.appendChild(td2);
+    table.appendChild(tr);
+  }
+  box.appendChild(table);
+}
+
+async function generateInvite() {
+  const body = {
+    count: parseInt($("#inv_count").value) || 1,
+    max_images: parseInt($("#inv_max").value) || 1,
+    build_quota: parseInt($("#inv_quota").value) || 5,
+    template: $("#inv_tpl").value || undefined,
+    note: $("#inv_note").value.trim(),
+  };
+  const r = await api.post("/api/v1/invites", body, A);
+  for (const inv of r.invites) {
+    document.querySelector("main").prepend(
+      credentialsCard({ id: inv.code, token: inv.code }, t("invites"))
+    );
+  }
+  loadInvites();
+}
+
+async function loadRequests() {
+  const box = $("#reqlist");
+  if (!box) return;
+  const data = await api.get("/api/v1/requests", A);
+  const pend = data.requests.filter((r) => r.status === "pending");
+  box.innerHTML = "";
+  if (!pend.length) {
+    box.className = "muted";
+    box.textContent = t("requests_none");
+    return;
+  }
+  box.className = "";
+  const table = document.createElement("table");
+  for (const req of pend) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><b>${req.wanted_name}</b><br><span class="muted mono">${req.contact}</span></td>
+      <td class="muted">${req.note || ""}</td>`;
+    const td = document.createElement("td");
+    const ap = document.createElement("button");
+    ap.className = "small primary";
+    ap.textContent = t("request_approve_code");
+    ap.onclick = async () => {
+      const r = await api.post(`/api/v1/requests/${req.id}/approve`, { action: "issue_code" }, A);
+      document.querySelector("main").prepend(
+        credentialsCard({ id: r.issued.code, token: r.issued.code }, t("invites"))
+      );
+      loadRequests();
+    };
+    const rj = document.createElement("button");
+    rj.className = "small danger";
+    rj.textContent = t("request_reject");
+    rj.onclick = async () => {
+      await api.post(`/api/v1/requests/${req.id}/reject`, {}, A);
+      loadRequests();
+    };
+    td.append(ap, " ", rj);
+    tr.appendChild(td);
+    table.appendChild(tr);
+  }
+  box.appendChild(table);
 }
 
 async function createImage() {
@@ -227,6 +362,7 @@ async function main() {
   $("#bulkcsv").onclick = downloadCsv;
   $("#reload").onclick = load;
   $("#filter").oninput = renderImages;
+  $("#inv_gen").onclick = generateInvite;
   $("#logout").onclick = () => {
     api.clearAdminKey();
     location.reload();

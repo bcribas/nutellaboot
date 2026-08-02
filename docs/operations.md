@@ -1,14 +1,18 @@
 # Manual de operação
 
-Este é o documento do dia a dia: preparar a temporada, criar as imagens das
-sedes, entregar a configuração para as pessoas e conduzir a prova.
+Este é o documento do dia a dia: preparar o serviço, criar imagens, entregar a
+configuração para as pessoas e conduzir uma sessão (uma prova, um laboratório,
+uma sala gerenciada). O NutellaBoot 3 é uma ferramenta de gestão de
+laboratórios com boot em rede; a Maratona SBC de Programação é o uso de origem
+e aparece aqui como exemplo, não como o único cenário.
 
 Todos os comandos assumem que você está na raiz do repositório
 (`nutellaboot3/`). Onde precisa de `sudo`, está dito por quê.
 
-## 1. Preparar a temporada
+## 1. Preparar o serviço
 
-Isso se faz uma vez por ano, quando sai a nova imagem do Maratona Linux.
+Isso se faz uma vez por temporada, quando sai a nova imagem base do sistema
+(no caso da maratona, o Maratona Linux do ano).
 
 ### 1.1 Criar o template
 
@@ -27,8 +31,8 @@ formulário — copie de outro template ou gere com
 
 ### 1.2 Gerar a camada base
 
-Transforma a imagem-mestre do Maratona Linux num `.squash` e registra no
-template:
+Transforma a imagem-mestre do sistema (por exemplo, o Maratona Linux) num
+`.squash` e registra no template:
 
 ```bash
 sudo tools/nb3-gerar-squash \
@@ -92,18 +96,25 @@ Depois de gravado, o pendrive é uma partição FAT normal: monte em qualquer
 computador e edite `nutellaboot.conf` (sede, chave de boot) e `wifi.conf`
 (redes) com um editor de texto.
 
-## 2. Criar as imagens das sedes
+## 2. Criar imagens
+
+Uma **imagem** é um sistema que as máquinas de uma sala baixam ao ligar. Há
+três formas de criar: a administração cria uma a uma ou em massa; e pessoas de
+fora criam a própria imagem com um **código de convite** — sem passar por você
+a cada vez.
 
 ### Namespace reservado
 
-Nomes que **começam com dígito** são reservados à administração da maratona.
-É a convenção do ano: `26brbr`, `26spsp`, `26mgbh`. O servidor marca essas
-imagens como `contest`; as demais (`ifsp`, `unb-apc`, `curso-algoritmos`) ficam
-como `personal` e são as que você entrega para professores e instituições.
+Nomes que **começam com dígito** são reservados à administração. É a convenção
+usada em eventos — na maratona, o ano na frente: `26brbr`, `26spsp`, `26mgbh`.
+O servidor marca essas imagens como `contest`; as demais (`ifsp`, `unb-apc`,
+`curso-algoritmos`) ficam como `personal`, e são as que professores e
+instituições criam ou recebem.
 
-A regra está em `data/server.json` (`reserved_prefix_regex`), e a criação é
-sempre feita por quem tem chave de administração — o namespace existe para
-deixar claro, na listagem, o que é oficial e o que é de terceiros.
+A regra está em `data/server.json` (`reserved_prefix_regex`, padrão `^[0-9]`).
+Só quem tem chave de administração cria nomes reservados; a criação por convite
+recusa qualquer nome que comece com dígito. O namespace deixa claro, na
+listagem, o que é oficial e o que é de terceiros.
 
 ### Uma de cada vez
 
@@ -149,15 +160,112 @@ cópia local do site. Tokens e senhas antigas **não** são importados: a senha 
 seeder do nb2 era `md5("qwer <sede>")`, derivável por qualquer pessoa. Cada
 imagem recebe credenciais novas, exportadas em CSV.
 
+### Deixar outras pessoas criarem a própria imagem
+
+Nem toda imagem precisa passar por você. Um professor, um laboratório ou uma
+instituição pode criar a própria imagem com um **código de convite**. O código
+é a credencial: quem o recebe cria sozinho, dentro de uma cota que você define.
+
+**Passo 1 — marque ao menos um template como público.** Só templates públicos
+podem ser usados na criação por convite (os templates de prova bloqueados ficam
+privados, fora do alcance de terceiros). No `/admin/`, na seção de templates,
+clique em "Tornar público". Ou pela API:
+
+```bash
+curl -X PATCH "$SERVER/api/v1/templates/generico" \
+    -H "Authorization: Bearer $NB3_ADMIN_KEY" \
+    -H 'Content-Type: application/json' \
+    -d '{"public": true, "description": "Ubuntu genérico para laboratórios"}'
+```
+
+**Passo 2 — gere os códigos e entregue.** No `/admin/`, na seção **Convites**,
+escolha quantos códigos, quantas imagens cada um permite e a cota de camadas
+por imagem, e clique em gerar. Ou pela API:
+
+```bash
+curl -X POST "$SERVER/api/v1/invites" \
+    -H "Authorization: Bearer $NB3_ADMIN_KEY" \
+    -H 'Content-Type: application/json' \
+    -d '{"count": 10, "max_images": 1, "build_quota": 5}'
+```
+
+Cada código sai no formato `NB3-XXXX-XXXX`. Os campos: `count` (quantos códigos
+gerar), `max_images` (quantas imagens o código cria, padrão 1), `build_quota`
+(quantas camadas de pacotes cada imagem criada pode construir, padrão 5),
+`template` (opcional — fixa o template, senão a pessoa escolhe entre os
+públicos) e `expires_at` (opcional, epoch). Entregue o código por um canal
+privado.
+
+**Passo 3 — a pessoa cria.** Ela abre `/criar/`, na aba "Tenho um código de
+convite", cola o código, escolhe um nome (que **não** pode começar com dígito),
+um nome de exibição e o template público. Ao criar, a tela devolve — **uma
+única vez** — o token, a chave de boot, a chave de máquina e os links prontos do
+configureitor e do painel. A partir daí ela cuida da própria imagem, e pode até
+instalar pacotes extras (ver [layer-builds.md](layer-builds.md)), dentro da
+cota do código.
+
+Para revisar ou revogar códigos, use a lista na seção Convites do `/admin/` (o
+botão "Revogar") ou `DELETE /api/v1/invites/<código>`.
+
+### Fila de pedidos (para quem não tem código)
+
+Quem não recebeu um código pode pedir acesso. Na aba "Não tenho código" de
+`/criar/`, a pessoa informa o nome desejado, um contato e uma justificativa. O
+pedido cai na fila.
+
+No `/admin/`, a seção **Pedidos** lista os pendentes. Em cada um você:
+
+- **Aprova enviando um código** — o servidor gera um convite e você repassa o
+  código para o contato informado; ou
+- **Recusa**.
+
+Pela API, os pedidos ficam em `GET /api/v1/requests`, e a decisão é
+`POST /api/v1/requests/<id>/approve` (com `{"action":"issue_code"}` para emitir
+um código, ou os campos da imagem para criar direto) ou
+`POST /api/v1/requests/<id>/reject`.
+
+### Conter abuso
+
+A criação por convite é aberta à internet, então vale saber como ela se
+protege — e um ajuste de proxy que você precisa garantir.
+
+- **Sem código, não cria.** A rota pública de criação exige um código válido;
+  não há criação anônima.
+- **Cota por código e por imagem.** O código esgota depois de `max_images`
+  criações; cada imagem criada só constrói `build_quota` camadas de pacotes.
+  Estourou, a pessoa pede à administração para aumentar (ou você gera outro
+  código).
+- **Namespace reservado.** Nomes começando com dígito são recusados na criação
+  por convite — continuam só da administração.
+- **Templates públicos, só os marcados.** Quem é de fora nunca parte de um
+  template de prova bloqueado.
+- **Limite de taxa por IP.** As rotas públicas (`/api/v1/public/images` e
+  `/api/v1/public/requests`) têm um limite por IP; uma rajada leva `429`.
+
+> **Ressalva importante de operação.** O limite de taxa enxerga o IP de quem
+> chega ao servidor. Atrás do proxy, esse IP é o do próprio proxy
+> (`127.0.0.1`), e o limite passaria a ser global em vez de por IP. Para o
+> limite funcionar de verdade, o nginx precisa repassar o IP real:
+>
+> ```nginx
+> location / {
+>     proxy_pass http://127.0.0.1:8890;
+>     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+> }
+> ```
+>
+> O servidor usa o primeiro endereço de `X-Forwarded-For` como chave do limite.
+
 ## 3. Entregar a configuração para as pessoas
 
 ### A página inicial
 
 O endereço raiz do servidor (`https://nutellaboot.naquadah.com.br/`) é a porta
-de entrada para todo mundo, em português, inglês e espanhol. Ela tem três
-cartões: **coordenador de sede** (cola o identificador e o token da imagem e
-abre a configuração ou o painel), **administração** (cola a chave de admin e
-entra em `/admin/`) e **documentação**. É para lá que você manda as pessoas.
+de entrada para todo mundo, em português, inglês e espanhol. Ela tem quatro
+cartões: **coordenador** (cola o identificador e o token de uma imagem que já
+existe e abre a configuração ou o painel), **quero uma imagem própria** (leva
+para `/criar/`), **administração** (cola a chave de admin e entra em `/admin/`)
+e **documentação**. É para lá que você manda as pessoas.
 
 ### Pegar o token e o link de uma imagem
 
@@ -184,7 +292,7 @@ detectado pelo navegador e pode ser trocado no canto superior direito.
 
 | Campo | O que faz |
 |---|---|
-| Login automático | entra direto no usuário `icpc` (bloqueado: obrigatório na maratona) |
+| Login automático | entra direto no usuário `icpc` (pode ser bloqueado pela organização) |
 | Limpar a home a cada boot | apaga os arquivos do usuário a cada partida |
 | Fuso horário | fuso das máquinas da sede |
 | Layouts de teclado | ordem dos layouts; o primeiro é o padrão |
@@ -198,9 +306,9 @@ detectado pelo navegador e pode ser trocado no canto superior direito.
 | Senha para destravar a tela | senha local de emergência |
 
 Campos marcados como **bloqueados** aparecem em cinza com a etiqueta "Definido
-pela organização da maratona": são as decisões que não podem variar por sede.
-Só a administração muda — ou imagens marcadas como `unlocked`, que é o
-equivalente ao antigo perfil "-desbloqueado".
+pela organização": são as decisões que não podem variar por sala (numa prova,
+por exemplo, o firewall e as permissões). Só a administração muda — ou imagens
+marcadas como `unlocked`, que é o equivalente ao antigo perfil "-desbloqueado".
 
 ### Wallpaper: agora é upload
 

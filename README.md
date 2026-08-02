@@ -1,13 +1,16 @@
 # NutellaBoot 3
 
-Sistema de boot em rede da **Maratona SBC de Programação**. Um pendrive de
-400 MB liga a máquina, e ela baixa o Maratona Linux inteiro do servidor,
-monta em camadas e entrega o ambiente de prova pronto — com telemetria,
-bloqueio de tela remoto e configuração por sede.
+**Gestão de laboratórios com boot em rede.** Um pendrive de 400 MB liga a
+máquina, e ela baixa um sistema Linux inteiro do servidor, monta em camadas e
+entrega o ambiente pronto — com telemetria, bloqueio de tela remoto e
+configuração por sala. Serve para provas, laboratórios de ensino e salas
+gerenciadas; a **Maratona SBC de Programação** é um dos usos (e a origem do
+projeto).
 
 É a terceira geração do sistema. As duas anteriores rodaram por anos em
-dezenas de sedes; esta reescreve o servidor em Python, enxuga o cliente e
-fecha as pontas soltas que doíam na operação.
+dezenas de sedes de maratona; esta reescreve o servidor em Python, enxuga o
+cliente, fecha as pontas soltas que doíam na operação e abre a criação de
+imagens para além da administração (por código de convite).
 
 ```
 pendrive              servidor                         máquina da sala
@@ -57,9 +60,22 @@ curl -X POST --data "key=$(cat data/images/testes3/boot.key)" \
 ```
 
 Telas: `/` (página inicial que guia cada público e monta os links a partir do
-id + token), `/admin/` (imagens e credenciais), `/configureitor/?id=…&tk=…`
-(configuração da sede), `/hotconfig/?id=…&tk=…` (painel do laboratório),
-`/lock/` (temas da tela de bloqueio), `/api/v1/docs` (API navegável).
+id + token), `/criar/` (criar a própria imagem com código de convite, ou pedir
+acesso), `/admin/` (imagens, credenciais, convites e pedidos),
+`/configureitor/?id=…&tk=…` (configuração da imagem), `/hotconfig/?id=…&tk=…`
+(painel do laboratório), `/lock/` (temas da tela de bloqueio), `/api/v1/docs`
+(API navegável).
+
+## Quem cria imagens
+
+- **Administração** cria qualquer imagem (inclusive nomes reservados, que
+  começam com dígito — usados para eventos/contests como a Maratona) e gera
+  **códigos de convite**.
+- **Qualquer pessoa com um código** cria a própria imagem em `/criar/`, dentro
+  da cota do código, e pode até instalar pacotes extras (build de camada, com
+  quota por imagem). Sem código, deixa um **pedido** que a administração
+  aprova. Isso é contido por cota + rate limit + namespace reservado — ver
+  `docs/operations.md`.
 
 ## Mapa do repositório
 
