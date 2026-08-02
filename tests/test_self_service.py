@@ -223,3 +223,130 @@ def test_pacote_invalido_no_build_por_imagem(client, base, ha):
         headers={"Authorization": f"Bearer {img['token']}"},
     )
     assert r.status_code == 400
+
+
+# --- perfil da imagem: Oficial (travada) vs Livre (tudo liberado) ---
+
+
+@pytest.fixture
+def base_com_schema(data_root, admin_key):
+    """Template público com um campo travado (MINRAM), como o da maratona."""
+    from server.app.services.default_schema import build_default_schema
+
+    fsdb.write_json(data_root / "server.json", {"reserved_prefix_regex": "^[0-9]"})
+    fsdb.write_json(
+        data_root / "templates" / "generico" / "template.json", {"layers": [], "public": True}
+    )
+    fsdb.write_json(data_root / "templates" / "generico" / "schema.json", build_default_schema())
+    return admin_key
+
+
+def _cria_por_convite(client, ha, image_id, **invite_kwargs):
+    code = client.post(
+        "/api/v1/invites", json={"template": "generico", **invite_kwargs}, headers=ha
+    ).json()["invites"][0]["code"]
+    return client.post("/api/v1/public/images", json={"code": code, "id": image_id}).json()
+
+
+def test_autoatendimento_nasce_livre_e_dono_edita_campo_travado(client, base_com_schema, ha):
+    """O ponto central: quem cria a própria imagem manda nela inteira —
+    inclusive nos campos que são obrigatórios nas imagens oficiais."""
+    img = _cria_por_convite(client, ha, "labrivre")
+    assert store.get_image("labrivre")["unlocked"] is True
+
+    howner = {"Authorization": f"Bearer {img['token']}"}
+    # MINRAM, DISABLE_FIREWALL, ALLOWUSBMOUNT e DEFAULTBROWSERURL são locked no
+    # schema padrão — na imagem Livre o dono muda todos
+    r = client.put(
+        "/api/v1/images/labrivre/config",
+        json={
+            "values": {
+                "MINRAM": "4096",
+                "DISABLE_FIREWALL": True,
+                "ALLOWUSBMOUNT": True,
+                "DEFAULTBROWSERURL": "https://meujuiz.exemplo",
+            }
+        },
+        headers=howner,
+    )
+    assert r.status_code == 200, r.text
+    vals = r.json()["values"]
+    assert vals["MINRAM"] == "4096"
+    assert vals["DISABLE_FIREWALL"] is True
+    assert vals["ALLOWUSBMOUNT"] is True
+    assert vals["DEFAULTBROWSERURL"] == "https://meujuiz.exemplo"
+    # e o configureitor libera a edição na tela
+    assert client.get("/api/v1/images/labrivre/config", headers=howner).json()["can_edit_locked"] is True
+
+
+def test_convite_oficial_gera_imagem_travada(client, base_com_schema, ha):
+    img = _cria_por_convite(client, ha, "laboficial", unlocked=False)
+    assert store.get_image("laboficial")["unlocked"] is False
+
+    howner = {"Authorization": f"Bearer {img['token']}"}
+    r = client.put(
+        "/api/v1/images/laboficial/config", json={"values": {"MINRAM": "4096"}}, headers=howner
+    )
+    assert r.status_code == 400
+    assert "bloqueado" in r.json()["detail"]
+    assert client.get("/api/v1/images/laboficial/config", headers=howner).json()["can_edit_locked"] is False
+
+    # o admin continua podendo
+    assert client.put(
+        "/api/v1/images/laboficial/config", json={"values": {"MINRAM": "4096"}}, headers=ha
+    ).status_code == 200
+
+
+def test_admin_alterna_perfil_da_imagem(client, base_com_schema, ha):
+    """Voltar uma imagem para 'tudo liberado' (e vice-versa) com um clique."""
+    r = client.post(
+        "/api/v1/images",
+        json={"id": "oficialx", "fullname": "Oficial X", "template": "generico"},
+        headers=ha,
+    )
+    token = r.json()["token"]
+    howner = {"Authorization": f"Bearer {token}"}
+    # nasce Oficial: dono não mexe no firewall
+    assert client.put(
+        "/api/v1/images/oficialx/config", json={"values": {"DISABLE_FIREWALL": True}}, headers=howner
+    ).status_code == 400
+
+    # admin libera tudo
+    assert client.patch("/api/v1/images/oficialx", json={"unlocked": True}, headers=ha).status_code == 200
+    assert client.put(
+        "/api/v1/images/oficialx/config", json={"values": {"DISABLE_FIREWALL": True}}, headers=howner
+    ).status_code == 200
+
+    # e consegue travar de volta
+    client.patch("/api/v1/images/oficialx", json={"unlocked": False}, headers=ha)
+    assert client.put(
+        "/api/v1/images/oficialx/config", json={"values": {"MINRAM": "0"}}, headers=howner
+    ).status_code == 400
+
+
+def test_imagem_oficial_da_maratona_continua_travada(client, base_com_schema, ha):
+    """Sedes criadas pelo admin (namespace reservado) não podem mexer nos
+    campos obrigatórios — é o comportamento que a maratona depende."""
+    r = client.post(
+        "/api/v1/images",
+        json={"id": "26brbr", "fullname": "Finals", "template": "generico"},
+        headers=ha,
+    )
+    assert r.json()["namespace"] == "contest"
+    howner = {"Authorization": f"Bearer {r.json()['token']}"}
+    for campo, valor in (
+        ("MINRAM", "0"),
+        ("DISABLE_FIREWALL", True),
+        ("ALLOWUSBMOUNT", True),
+        ("DEFAULTBROWSERURL", "https://qualquer"),
+    ):
+        resp = client.put(
+            "/api/v1/images/26brbr/config", json={"values": {campo: valor}}, headers=howner
+        )
+        assert resp.status_code == 400, f"{campo} deveria estar travado"
+
+
+def test_convite_mostra_o_perfil_na_listagem(client, base_com_schema, ha):
+    client.post("/api/v1/invites", json={"unlocked": False, "note": "sub-sede"}, headers=ha)
+    inv = client.get("/api/v1/invites", headers=ha).json()["invites"][0]
+    assert inv["unlocked"] is False

@@ -307,8 +307,31 @@ detectado pelo navegador e pode ser trocado no canto superior direito.
 
 Campos marcados como **bloqueados** aparecem em cinza com a etiqueta "Definido
 pela organização": são as decisões que não podem variar por sala (numa prova,
-por exemplo, o firewall e as permissões). Só a administração muda — ou imagens
-marcadas como `unlocked`, que é o equivalente ao antigo perfil "-desbloqueado".
+por exemplo, o firewall e as permissões).
+
+### Perfil da imagem: Oficial ou Livre
+
+Quais campos ficam bloqueados depende do **perfil** da imagem:
+
+| Perfil | Quem edita os campos obrigatórios | Uso típico |
+|---|---|---|
+| **Oficial** | só a administração | sedes de prova: RAM mínima, firewall, uso de pendrive e página inicial são iguais em todas |
+| **Livre** | o próprio dono da imagem | laboratórios e cursos: a pessoa manda na imagem inteira |
+
+Como se define:
+
+- **Criando pelo `/admin/`**: o formulário tem um seletor de perfil (padrão
+  Oficial). A criação em massa (TSV) sempre gera imagens Oficiais.
+- **Convites**: ao gerar um código você escolhe o perfil que as imagens dele
+  vão ter — o padrão é **Livre** (quem cria a própria imagem manda nela). Marque
+  Oficial se estiver convidando uma sub-sede que precisa seguir as regras.
+- **Trocando depois**: na lista de imagens do `/admin/` cada linha mostra uma
+  pílula **Oficial/Livre** e um botão que alterna — é assim que você "volta uma
+  imagem com tudo liberado", sem recriar nada nem invalidar links.
+
+Quais campos são obrigatórios em cada perfil é decisão do **template** (campos
+marcados `locked` no `schema.json`), não da imagem. Ou seja: dá para ter um
+template de prova rígido e um template de laboratório mais frouxo.
 
 ### Wallpaper: agora é upload
 

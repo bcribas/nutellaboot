@@ -47,8 +47,13 @@ def create(
     expires_at: float | None = None,
     note: str = "",
     count: int = 1,
+    unlocked: bool = True,
 ) -> list[dict]:
-    """Gera `count` códigos e devolve a lista (com o código em claro)."""
+    """Gera `count` códigos e devolve a lista (com o código em claro).
+
+    `unlocked` define o perfil da imagem que o código vai criar: Livre (padrão
+    — o dono edita tudo) ou Oficial (os campos obrigatórios do template ficam
+    travados, como nas imagens de prova)."""
     novos = []
     with fsdb.locked(settings.data_root):
         data = _load()
@@ -63,6 +68,7 @@ def create(
                 "template": template,
                 "expires_at": expires_at,
                 "note": note,
+                "unlocked": bool(unlocked),
                 "created_at": time.time(),
             }
             novos.append({"code": code, **data[code]})

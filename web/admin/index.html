@@ -41,6 +41,14 @@
         <div class="flabel" data-i18n="template"></div>
         <select id="newtpl" style="max-width:320px"></select>
       </div>
+      <div class="field">
+        <div class="flabel" data-i18n="profile"></div>
+        <div class="help" data-i18n="profile_help"></div>
+        <select id="newprofile" style="max-width:320px">
+          <option value="official" data-i18n="profile_official"></option>
+          <option value="free" data-i18n="profile_free"></option>
+        </select>
+      </div>
       <div class="actions">
         <button type="button" id="create" class="primary" data-i18n="create"></button>
       </div>
@@ -79,6 +87,11 @@
           <input type="number" id="inv_quota" value="5" min="0"></label>
         <label class="fld" style="max-width:200px"><span data-i18n="create_template"></span>
           <select id="inv_tpl"></select></label>
+        <label class="fld" style="max-width:220px"><span data-i18n="profile"></span>
+          <select id="inv_profile">
+            <option value="free" data-i18n="profile_free"></option>
+            <option value="official" data-i18n="profile_official"></option>
+          </select></label>
         <label class="fld" style="flex:1; min-width:160px"><span data-i18n="request_note"></span>
           <input type="text" id="inv_note"></label>
         <button type="button" id="inv_gen" class="primary" data-i18n="invite_generate"></button>

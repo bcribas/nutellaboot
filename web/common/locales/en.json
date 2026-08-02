@@ -171,5 +171,13 @@
   "request_reject": "Reject",
   "template_public": "Available for self-service",
   "make_public": "Make public",
-  "make_private": "Make private"
+  "make_private": "Make private",
+  "profile": "Profile",
+  "profile_official": "Official (mandatory fields locked)",
+  "profile_free": "Free (the owner edits everything)",
+  "profile_official_short": "Official",
+  "profile_free_short": "Free",
+  "make_free": "Unlock everything",
+  "make_official": "Make official",
+  "profile_help": "On official images, fields like minimum RAM, firewall, USB drives and home page can only be changed by administration."
 }

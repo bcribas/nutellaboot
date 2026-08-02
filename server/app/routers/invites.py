@@ -22,6 +22,7 @@ async def create_invite(body: dict, p=Depends(auth.require_admin)) -> dict:
         expires_at=body.get("expires_at"),
         note=str(body.get("note", "")),
         count=int(body.get("count", 1)),
+        unlocked=bool(body.get("unlocked", True)),
     )
     return {"invites": novos}
 
@@ -58,6 +59,7 @@ async def approve_request(rid: str, body: dict, p=Depends(auth.require_admin)) -
             build_quota=int(body.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),
             template=body.get("template"),
             note=f"pedido {rid}: {req.get('wanted_name', '')}",
+            unlocked=bool(body.get("unlocked", True)),
         )[0]
         requests.set_status(rid, "approved", {"issued_code": code["code"]})
         return {"issued": code}
@@ -72,6 +74,7 @@ async def approve_request(rid: str, body: dict, p=Depends(auth.require_admin)) -
             image_id,
             body.get("fullname", req.get("wanted_name", "")),
             template,
+            unlocked=bool(body.get("unlocked", True)),
             extra={"self_service": True, "build_quota": int(body.get("build_quota", invites.DEFAULT_BUILD_QUOTA))},
         )
     except store.ImageError as e:

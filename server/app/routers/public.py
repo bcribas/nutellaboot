@@ -52,6 +52,11 @@ async def self_create_image(body: dict, request: Request) -> dict:
             image_id,
             str(body.get("fullname", "")),
             template,
+            # Perfil Livre por padrão: quem cria a própria imagem manda nela
+            # inteira (RAM mínima, firewall, pendrive, página inicial...). O
+            # convite pode ter sido emitido como Oficial, e aí as travas do
+            # template valem.
+            unlocked=bool(inv.get("unlocked", True)),
             extra={
                 "self_service": True,
                 "build_quota": int(inv.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),

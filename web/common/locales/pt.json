@@ -171,5 +171,13 @@
   "request_reject": "Recusar",
   "template_public": "Disponível para auto-atendimento",
   "make_public": "Tornar público",
-  "make_private": "Tornar privado"
+  "make_private": "Tornar privado",
+  "profile": "Perfil",
+  "profile_official": "Oficial (campos obrigatórios travados)",
+  "profile_free": "Livre (o dono edita tudo)",
+  "profile_official_short": "Oficial",
+  "profile_free_short": "Livre",
+  "make_free": "Liberar tudo",
+  "make_official": "Tornar oficial",
+  "profile_help": "Em imagens oficiais, campos como RAM mínima, firewall, uso de pendrive e página inicial só a administração muda."
 }

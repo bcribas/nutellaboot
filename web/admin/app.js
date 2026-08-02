@@ -95,14 +95,27 @@ function renderImages() {
   for (const img of list) {
     const tr = document.createElement("tr");
     const reserved = img.namespace === "contest";
+    const livre = Boolean(img.unlocked);
     tr.innerHTML = `
       <td class="mono">${img.id}</td>
       <td>${img.fullname || ""}</td>
       <td class="muted">${img.template || ""}</td>
       <td><span class="pill ${reserved ? "warn" : ""}">${
         reserved ? t("reserved_namespace") : t("personal_namespace")
-      }</span></td>`;
+      }</span>
+      <span class="pill ${livre ? "ok" : ""}" title="${
+        livre ? t("profile_free") : t("profile_official")
+      }">${livre ? t("profile_free_short") : t("profile_official_short")}</span></td>`;
     const actions = document.createElement("td");
+    // alterna Oficial <-> Livre: é assim que se "volta uma imagem com tudo
+    // liberado" sem recriar nada
+    const perfil = document.createElement("button");
+    perfil.className = "small";
+    perfil.textContent = livre ? t("make_official") : t("make_free");
+    perfil.onclick = async () => {
+      await api.patch(`/api/v1/images/${img.id}`, { unlocked: !livre }, A);
+      load();
+    };
     const ver = document.createElement("button");
     ver.className = "small";
     ver.textContent = t("view_credentials");
@@ -130,7 +143,7 @@ function renderImages() {
       await api.del(`/api/v1/images/${img.id}`, A);
       load();
     };
-    actions.append(ver, " ", rot, " ", del);
+    actions.append(perfil, " ", ver, " ", rot, " ", del);
     tr.appendChild(actions);
     tbody.appendChild(tr);
   }
@@ -214,7 +227,8 @@ async function loadInvites() {
     tr.appendChild(td0);
     const meta = document.createElement("td");
     meta.className = "muted";
-    meta.textContent = `${inv.remaining} ${t("invite_remaining")}${inv.template ? " · " + inv.template : ""}${inv.note ? " · " + inv.note : ""}`;
+    const perfil = inv.unlocked === false ? t("profile_official_short") : t("profile_free_short");
+    meta.textContent = `${inv.remaining} ${t("invite_remaining")} · ${perfil}${inv.template ? " · " + inv.template : ""}${inv.note ? " · " + inv.note : ""}`;
     tr.appendChild(meta);
     const td2 = document.createElement("td");
     const rev = document.createElement("button");
@@ -238,6 +252,7 @@ async function generateInvite() {
     build_quota: parseInt($("#inv_quota").value) || 5,
     template: $("#inv_tpl").value || undefined,
     note: $("#inv_note").value.trim(),
+    unlocked: $("#inv_profile").value === "free",
   };
   const r = await api.post("/api/v1/invites", body, A);
   for (const inv of r.invites) {
@@ -294,9 +309,10 @@ async function createImage() {
   const id = $("#newid").value.trim();
   const fullname = $("#newname").value.trim();
   const template = $("#newtpl").value;
+  const unlocked = $("#newprofile").value === "free";
   if (!id) return;
   try {
-    const info = await api.post("/api/v1/images", { id, fullname, template }, A);
+    const info = await api.post("/api/v1/images", { id, fullname, template, unlocked }, A);
     document.querySelector("main").prepend(credentialsCard(info));
     $("#newid").value = $("#newname").value = "";
     load();

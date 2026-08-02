@@ -171,5 +171,13 @@
   "request_reject": "Rechazar",
   "template_public": "Disponible para autoservicio",
   "make_public": "Hacer público",
-  "make_private": "Hacer privado"
+  "make_private": "Hacer privado",
+  "profile": "Perfil",
+  "profile_official": "Oficial (campos obligatorios bloqueados)",
+  "profile_free": "Libre (el dueño edita todo)",
+  "profile_official_short": "Oficial",
+  "profile_free_short": "Libre",
+  "make_free": "Liberar todo",
+  "make_official": "Hacer oficial",
+  "profile_help": "En imágenes oficiales, campos como RAM mínima, cortafuegos, uso de USB y página inicial solo los cambia la administración."
 }
