@@ -25,10 +25,10 @@ def base(data_root, admin_key):
     fsdb.write_json(data_root / "server.json", {"reserved_prefix_regex": "^[0-9]"})
     # template público (auto-atendimento) e um privado (prova)
     fsdb.write_json(
-        data_root / "templates" / "generico" / "template.json", {"layers": [], "public": True}
+        data_root / "models" / "generico" / "model.json", {"layers": [], "public": True}
     )
     fsdb.write_json(
-        data_root / "templates" / "prova" / "template.json", {"layers": [], "public": False}
+        data_root / "models" / "prova" / "model.json", {"layers": [], "public": False}
     )
     return admin_key
 
@@ -61,11 +61,11 @@ def test_convite_exige_admin(client, base):
 
 
 def test_cria_imagem_com_codigo(client, base, ha):
-    code = client.post("/api/v1/invites", json={"template": "generico"}, headers=ha).json()[
+    code = client.post("/api/v1/invites", json={"model": "generico"}, headers=ha).json()[
         "invites"
     ][0]["code"]
     r = client.post(
-        "/api/v1/public/images",
+        "/api/v1/public/site-images",
         json={"code": code, "id": "faculdadex", "fullname": "Faculdade X"},
     )
     assert r.status_code == 201, r.text
@@ -74,49 +74,49 @@ def test_cria_imagem_com_codigo(client, base, ha):
     assert body["boot_key"].startswith("nb3b_")
     assert "configureitor_url" in body
     # marca de auto-atendimento e cota de build herdada
-    info = store.get_image("faculdadex")
+    info = store.get_site_image("faculdadex")
     assert info["self_service"] is True
     assert info["build_quota"] == invites.DEFAULT_BUILD_QUOTA
 
 
 def test_sem_codigo_nao_cria(client, base):
-    r = client.post("/api/v1/public/images", json={"id": "semcodigo", "template": "generico"})
+    r = client.post("/api/v1/public/site-images", json={"id": "semcodigo", "model": "generico"})
     assert r.status_code == 403
 
 
 def test_codigo_invalido_recusado(client, base):
     r = client.post(
-        "/api/v1/public/images",
-        json={"code": "NB3-XXXX-XXXX", "id": "x", "template": "generico"},
+        "/api/v1/public/site-images",
+        json={"code": "NB3-XXXX-XXXX", "id": "x", "model": "generico"},
     )
     assert r.status_code == 403
 
 
 def test_codigo_respeita_cota(client, base, ha):
     code = client.post(
-        "/api/v1/invites", json={"template": "generico", "max_images": 1}, headers=ha
+        "/api/v1/invites", json={"model": "generico", "max_images": 1}, headers=ha
     ).json()["invites"][0]["code"]
-    assert client.post("/api/v1/public/images", json={"code": code, "id": "img1"}).status_code == 201
+    assert client.post("/api/v1/public/site-images", json={"code": code, "id": "img1"}).status_code == 201
     # segunda com o mesmo código estoura a cota
-    r = client.post("/api/v1/public/images", json={"code": code, "id": "img2"})
+    r = client.post("/api/v1/public/site-images", json={"code": code, "id": "img2"})
     assert r.status_code == 403
     assert "limite" in r.json()["detail"]
 
 
 def test_codigo_expirado_recusado(client, base, data_root):
-    invites.create(template="generico", expires_at=time.time() - 10)
+    invites.create(model="generico", expires_at=time.time() - 10)
     code = invites.list_all()[0]["code"]
-    r = client.post("/api/v1/public/images", json={"code": code, "id": "img"})
+    r = client.post("/api/v1/public/site-images", json={"code": code, "id": "img"})
     assert r.status_code == 403
     assert "expirado" in r.json()["detail"]
 
 
 def test_nome_reservado_barrado(client, base, ha):
-    code = client.post("/api/v1/invites", json={"template": "generico"}, headers=ha).json()[
+    code = client.post("/api/v1/invites", json={"model": "generico"}, headers=ha).json()[
         "invites"
     ][0]["code"]
     # nomes começando por dígito são da administração (ano da maratona)
-    r = client.post("/api/v1/public/images", json={"code": code, "id": "26brbr"})
+    r = client.post("/api/v1/public/site-images", json={"code": code, "id": "26brbr"})
     assert r.status_code == 403
     assert "reservado" in r.json()["detail"]
 
@@ -125,13 +125,13 @@ def test_template_privado_barrado(client, base, ha):
     # código sem template fixo, pessoa tenta usar o template de prova (privado)
     code = client.post("/api/v1/invites", json={}, headers=ha).json()["invites"][0]["code"]
     r = client.post(
-        "/api/v1/public/images", json={"code": code, "id": "abusox", "template": "prova"}
+        "/api/v1/public/site-images", json={"code": code, "id": "abusox", "model": "prova"}
     )
     assert r.status_code == 400
 
 
 def test_public_templates_so_publicos(client, base):
-    nomes = [t["name"] for t in client.get("/api/v1/public/templates").json()["templates"]]
+    nomes = [t["name"] for t in client.get("/api/v1/public/models").json()["models"]]
     assert "generico" in nomes
     assert "prova" not in nomes
 
@@ -171,14 +171,14 @@ def test_pedido_exige_nome_e_contato(client, base):
 
 def test_dono_da_imagem_faz_build_dentro_da_cota(client, base, ha, data_root):
     code = client.post(
-        "/api/v1/invites", json={"template": "generico", "build_quota": 2}, headers=ha
+        "/api/v1/invites", json={"model": "generico", "build_quota": 2}, headers=ha
     ).json()["invites"][0]["code"]
-    img = client.post("/api/v1/public/images", json={"code": code, "id": "labz"}).json()
+    img = client.post("/api/v1/public/site-images", json={"code": code, "id": "labz"}).json()
     howner = {"Authorization": f"Bearer {img['token']}"}
 
     for i in range(2):
         r = client.post(
-            "/api/v1/images/labz/layerbuilds",
+            "/api/v1/site-images/labz/layerbuilds",
             json={"name": f"camada{i}", "packages": ["htop"]},
             headers=howner,
         )
@@ -188,7 +188,7 @@ def test_dono_da_imagem_faz_build_dentro_da_cota(client, base, ha, data_root):
 
     # terceira estoura a cota
     r = client.post(
-        "/api/v1/images/labz/layerbuilds",
+        "/api/v1/site-images/labz/layerbuilds",
         json={"name": "camada3", "packages": ["htop"]},
         headers=howner,
     )
@@ -198,27 +198,27 @@ def test_dono_da_imagem_faz_build_dentro_da_cota(client, base, ha, data_root):
 
 def test_admin_nao_tem_cota_de_build(client, base, ha, data_root):
     code = client.post(
-        "/api/v1/invites", json={"template": "generico", "build_quota": 0}, headers=ha
+        "/api/v1/invites", json={"model": "generico", "build_quota": 0}, headers=ha
     ).json()["invites"][0]["code"]
-    client.post("/api/v1/public/images", json={"code": code, "id": "labq"})
+    client.post("/api/v1/public/site-images", json={"code": code, "id": "labq"})
     # dono não consegue (cota 0), admin sim
     hbad = {"Authorization": "Bearer nb3i_errado"}
     assert client.post(
-        "/api/v1/images/labq/layerbuilds", json={"name": "cc", "packages": ["htop"]}, headers=hbad
+        "/api/v1/site-images/labq/layerbuilds", json={"name": "cc", "packages": ["htop"]}, headers=hbad
     ).status_code == 401
     r = client.post(
-        "/api/v1/images/labq/layerbuilds", json={"name": "cc", "packages": ["htop"]}, headers=ha
+        "/api/v1/site-images/labq/layerbuilds", json={"name": "cc", "packages": ["htop"]}, headers=ha
     )
     assert r.status_code == 201
 
 
 def test_pacote_invalido_no_build_por_imagem(client, base, ha):
-    code = client.post("/api/v1/invites", json={"template": "generico"}, headers=ha).json()[
+    code = client.post("/api/v1/invites", json={"model": "generico"}, headers=ha).json()[
         "invites"
     ][0]["code"]
-    img = client.post("/api/v1/public/images", json={"code": code, "id": "labp"}).json()
+    img = client.post("/api/v1/public/site-images", json={"code": code, "id": "labp"}).json()
     r = client.post(
-        "/api/v1/images/labp/layerbuilds",
+        "/api/v1/site-images/labp/layerbuilds",
         json={"name": "cc", "packages": ["htop; rm -rf /"]},
         headers={"Authorization": f"Bearer {img['token']}"},
     )
@@ -235,30 +235,30 @@ def base_com_schema(data_root, admin_key):
 
     fsdb.write_json(data_root / "server.json", {"reserved_prefix_regex": "^[0-9]"})
     fsdb.write_json(
-        data_root / "templates" / "generico" / "template.json", {"layers": [], "public": True}
+        data_root / "models" / "generico" / "model.json", {"layers": [], "public": True}
     )
-    fsdb.write_json(data_root / "templates" / "generico" / "schema.json", build_default_schema())
+    fsdb.write_json(data_root / "models" / "generico" / "schema.json", build_default_schema())
     return admin_key
 
 
 def _cria_por_convite(client, ha, image_id, **invite_kwargs):
     code = client.post(
-        "/api/v1/invites", json={"template": "generico", **invite_kwargs}, headers=ha
+        "/api/v1/invites", json={"model": "generico", **invite_kwargs}, headers=ha
     ).json()["invites"][0]["code"]
-    return client.post("/api/v1/public/images", json={"code": code, "id": image_id}).json()
+    return client.post("/api/v1/public/site-images", json={"code": code, "id": image_id}).json()
 
 
 def test_autoatendimento_nasce_livre_e_dono_edita_campo_travado(client, base_com_schema, ha):
     """O ponto central: quem cria a própria imagem manda nela inteira —
     inclusive nos campos que são obrigatórios nas imagens oficiais."""
     img = _cria_por_convite(client, ha, "labrivre")
-    assert store.get_image("labrivre")["unlocked"] is True
+    assert store.get_site_image("labrivre")["unlocked"] is True
 
     howner = {"Authorization": f"Bearer {img['token']}"}
     # MINRAM, DISABLE_FIREWALL, ALLOWUSBMOUNT e DEFAULTBROWSERURL são locked no
     # schema padrão — na imagem Livre o dono muda todos
     r = client.put(
-        "/api/v1/images/labrivre/config",
+        "/api/v1/site-images/labrivre/config",
         json={
             "values": {
                 "MINRAM": "4096",
@@ -276,51 +276,51 @@ def test_autoatendimento_nasce_livre_e_dono_edita_campo_travado(client, base_com
     assert vals["ALLOWUSBMOUNT"] is True
     assert vals["DEFAULTBROWSERURL"] == "https://meujuiz.exemplo"
     # e o configureitor libera a edição na tela
-    assert client.get("/api/v1/images/labrivre/config", headers=howner).json()["can_edit_locked"] is True
+    assert client.get("/api/v1/site-images/labrivre/config", headers=howner).json()["can_edit_locked"] is True
 
 
 def test_convite_oficial_gera_imagem_travada(client, base_com_schema, ha):
     img = _cria_por_convite(client, ha, "laboficial", unlocked=False)
-    assert store.get_image("laboficial")["unlocked"] is False
+    assert store.get_site_image("laboficial")["unlocked"] is False
 
     howner = {"Authorization": f"Bearer {img['token']}"}
     r = client.put(
-        "/api/v1/images/laboficial/config", json={"values": {"MINRAM": "4096"}}, headers=howner
+        "/api/v1/site-images/laboficial/config", json={"values": {"MINRAM": "4096"}}, headers=howner
     )
     assert r.status_code == 400
     assert "bloqueado" in r.json()["detail"]
-    assert client.get("/api/v1/images/laboficial/config", headers=howner).json()["can_edit_locked"] is False
+    assert client.get("/api/v1/site-images/laboficial/config", headers=howner).json()["can_edit_locked"] is False
 
     # o admin continua podendo
     assert client.put(
-        "/api/v1/images/laboficial/config", json={"values": {"MINRAM": "4096"}}, headers=ha
+        "/api/v1/site-images/laboficial/config", json={"values": {"MINRAM": "4096"}}, headers=ha
     ).status_code == 200
 
 
 def test_admin_alterna_perfil_da_imagem(client, base_com_schema, ha):
     """Voltar uma imagem para 'tudo liberado' (e vice-versa) com um clique."""
     r = client.post(
-        "/api/v1/images",
-        json={"id": "oficialx", "fullname": "Oficial X", "template": "generico"},
+        "/api/v1/site-images",
+        json={"id": "oficialx", "fullname": "Oficial X", "model": "generico"},
         headers=ha,
     )
     token = r.json()["token"]
     howner = {"Authorization": f"Bearer {token}"}
     # nasce Oficial: dono não mexe no firewall
     assert client.put(
-        "/api/v1/images/oficialx/config", json={"values": {"DISABLE_FIREWALL": True}}, headers=howner
+        "/api/v1/site-images/oficialx/config", json={"values": {"DISABLE_FIREWALL": True}}, headers=howner
     ).status_code == 400
 
     # admin libera tudo
-    assert client.patch("/api/v1/images/oficialx", json={"unlocked": True}, headers=ha).status_code == 200
+    assert client.patch("/api/v1/site-images/oficialx", json={"unlocked": True}, headers=ha).status_code == 200
     assert client.put(
-        "/api/v1/images/oficialx/config", json={"values": {"DISABLE_FIREWALL": True}}, headers=howner
+        "/api/v1/site-images/oficialx/config", json={"values": {"DISABLE_FIREWALL": True}}, headers=howner
     ).status_code == 200
 
     # e consegue travar de volta
-    client.patch("/api/v1/images/oficialx", json={"unlocked": False}, headers=ha)
+    client.patch("/api/v1/site-images/oficialx", json={"unlocked": False}, headers=ha)
     assert client.put(
-        "/api/v1/images/oficialx/config", json={"values": {"MINRAM": "0"}}, headers=howner
+        "/api/v1/site-images/oficialx/config", json={"values": {"MINRAM": "0"}}, headers=howner
     ).status_code == 400
 
 
@@ -328,8 +328,8 @@ def test_imagem_oficial_da_maratona_continua_travada(client, base_com_schema, ha
     """Sedes criadas pelo admin (namespace reservado) não podem mexer nos
     campos obrigatórios — é o comportamento que a maratona depende."""
     r = client.post(
-        "/api/v1/images",
-        json={"id": "26brbr", "fullname": "Finals", "template": "generico"},
+        "/api/v1/site-images",
+        json={"id": "26brbr", "fullname": "Finals", "model": "generico"},
         headers=ha,
     )
     assert r.json()["namespace"] == "contest"
@@ -341,7 +341,7 @@ def test_imagem_oficial_da_maratona_continua_travada(client, base_com_schema, ha
         ("DEFAULTBROWSERURL", "https://qualquer"),
     ):
         resp = client.put(
-            "/api/v1/images/26brbr/config", json={"values": {campo: valor}}, headers=howner
+            "/api/v1/site-images/26brbr/config", json={"values": {campo: valor}}, headers=howner
         )
         assert resp.status_code == 400, f"{campo} deveria estar travado"
 

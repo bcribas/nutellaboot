@@ -49,6 +49,28 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
    desmonta antes de qualquer coisa de rede, avisando na tela. Não adicione
    leituras do pendrive depois desse ponto.
 
+10. **`/api/v1/images/...` continua respondendo, para sempre.** O agente de
+    telemetria (`client/telemetry/usr/share/mlog/agent.sh`) monta
+    `"$NB_SERVER/api/v1/images/$IMAGEROOT"` e esse arquivo vai DENTRO da camada
+    squashfs publicada: máquinas já instaladas chamam o caminho antigo, e não
+    há como atualizá-las remotamente sem telemetria — que é justamente o que
+    quebraria. O alias vive em `LegacyImagePathMiddleware`
+    (`server/app/main.py`) e há teste-guarda em `tests/test_legacy_paths.py`.
+    O mesmo vale para o contrato de boot (`/boot/v3/*`, `IMAGEROOT`,
+    `nutellaboot.conf`, `NB_*`) e para os links já distribuídos
+    (`/configureitor/?id=&tk=`).
+
+## Nomenclatura
+
+- **modelo** (`model`, `data/models/<n>/model.json`): o que se configura uma
+  vez — camadas (telemetria, wifi, pacotes) e o formulário (`schema.json` com
+  os cadeados por campo).
+- **site-image** (`data/site-images/<id>/`): a imagem derivada de um modelo,
+  uma por sala/sede, com token, chaves e configuração próprias.
+
+O nome antigo era *template*/*image*; a migração está em
+`tools/nb3-migrate-names` (idempotente, com `--dry-run`).
+
 ## Credenciais (quatro classes)
 
 | Prefixo | Quem usa | Onde fica |

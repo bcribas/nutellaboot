@@ -99,7 +99,7 @@ function renderImages() {
     tr.innerHTML = `
       <td class="mono">${img.id}</td>
       <td>${img.fullname || ""}</td>
-      <td class="muted">${img.template || ""}</td>
+      <td class="muted">${img.model || ""}</td>
       <td><span class="pill ${reserved ? "warn" : ""}">${
         reserved ? t("reserved_namespace") : t("personal_namespace")
       }</span>
@@ -113,7 +113,7 @@ function renderImages() {
     perfil.className = "small";
     perfil.textContent = livre ? t("make_official") : t("make_free");
     perfil.onclick = async () => {
-      await api.patch(`/api/v1/images/${img.id}`, { unlocked: !livre }, A);
+      await api.patch(`/api/v1/site-images/${img.id}`, { unlocked: !livre }, A);
       load();
     };
     const cam = document.createElement("button");
@@ -126,7 +126,7 @@ function renderImages() {
     ver.onclick = async () => {
       // lê as credenciais atuais sem rotacionar nada (não invalida links já
       // distribuídos) — é o caminho fácil para pegar o token e o link da sede
-      const cred = await api.get(`/api/v1/images/${img.id}/credentials`, A);
+      const cred = await api.get(`/api/v1/site-images/${img.id}/credentials`, A);
       document.querySelector("main").prepend(credentialsCard(cred, t("view_credentials")));
       window.scrollTo({ top: 0, behavior: "smooth" });
     };
@@ -134,7 +134,7 @@ function renderImages() {
     rot.className = "small";
     rot.textContent = t("rotate_token");
     rot.onclick = async () => {
-      const r = await api.post(`/api/v1/images/${img.id}/token/rotate`, undefined, A);
+      const r = await api.post(`/api/v1/site-images/${img.id}/token/rotate`, undefined, A);
       document.querySelector("main").prepend(
         credentialsCard({ id: img.id, token: r.token }, t("rotate_token"))
       );
@@ -144,7 +144,7 @@ function renderImages() {
     del.textContent = t("delete");
     del.onclick = async () => {
       if (!confirm(t("confirm_delete", { id: img.id }))) return;
-      await api.del(`/api/v1/images/${img.id}`, A);
+      await api.del(`/api/v1/site-images/${img.id}`, A);
       load();
     };
     actions.append(perfil, " ", cam, " ", ver, " ", rot, " ", del);
@@ -157,12 +157,12 @@ function renderImages() {
 
 async function load() {
   const [imgs, tpls] = await Promise.all([
-    api.get("/api/v1/images", A),
-    api.get("/api/v1/templates", A),
+    api.get("/api/v1/site-images", A),
+    api.get("/api/v1/models", A),
   ]);
   images = imgs.images;
-  // /templates agora devolve [{name, public}]
-  templates = tpls.templates.map((tpl) => (typeof tpl === "string" ? { name: tpl, public: false } : tpl));
+  // /models agora devolve [{name, public}]
+  templates = tpls.models.map((tpl) => (typeof tpl === "string" ? { name: tpl, public: false } : tpl));
   const sel = $("#newtpl");
   sel.innerHTML = "";
   for (const tpl of templates) {
@@ -209,7 +209,7 @@ function renderTemplates() {
     btn.className = "small";
     btn.textContent = tpl.public ? t("make_private") : t("make_public");
     btn.onclick = async () => {
-      await api.patch(`/api/v1/templates/${tpl.name}`, { public: !tpl.public }, A);
+      await api.patch(`/api/v1/models/${tpl.name}`, { public: !tpl.public }, A);
       load();
     };
     td.appendChild(btn);
@@ -261,7 +261,7 @@ async function generateInvite() {
     count: parseInt($("#inv_count").value) || 1,
     max_images: parseInt($("#inv_max").value) || 1,
     build_quota: parseInt($("#inv_quota").value) || 5,
-    template: $("#inv_tpl").value || undefined,
+    model: $("#inv_tpl").value || undefined,
     note: $("#inv_note").value.trim(),
     unlocked: $("#inv_profile").value === "free",
   };
@@ -392,12 +392,12 @@ function renderLayerTargets() {
 
 async function buildLayerFromTemplate() {
   const name = $("#lay_name").value.trim();
-  const template = $("#lay_tpl").value;
+  const model = $("#lay_tpl").value;
   const packages = parsePackages($("#lay_pkgs").value);
   const attach_to = [...$("#lay_images").querySelectorAll("input:checked")].map((i) => i.value);
   if (!name || !packages.length) return;
   try {
-    await api.post("/api/v1/layerbuilds", { name, template, packages, attach_to }, A);
+    await api.post("/api/v1/layerbuilds", { name, model, packages, attach_to }, A);
     $("#lay_name").value = $("#lay_pkgs").value = "";
     toast(t("build_queued"));
     loadLayerBuilds();
@@ -412,7 +412,7 @@ async function buildLayerForImage() {
   const packages = parsePackages($("#layi_pkgs").value);
   if (!image || !name || !packages.length) return;
   try {
-    await api.post(`/api/v1/images/${image}/layerbuilds`, { name, packages }, A);
+    await api.post(`/api/v1/site-images/${image}/layerbuilds`, { name, packages }, A);
     $("#layi_name").value = $("#layi_pkgs").value = "";
     toast(t("build_queued"));
     loadLayerBuilds();
@@ -423,8 +423,8 @@ async function buildLayerForImage() {
 
 async function showImageLayers(image) {
   const [builds, layers] = await Promise.all([
-    api.get(`/api/v1/images/${image}/layerbuilds`, A),
-    api.get(`/api/v1/images/${image}/layers`, A),
+    api.get(`/api/v1/site-images/${image}/layerbuilds`, A),
+    api.get(`/api/v1/site-images/${image}/layers`, A),
   ]);
   const box = document.createElement("div");
   box.className = "detail";
@@ -439,7 +439,7 @@ async function showImageLayers(image) {
     rm.className = "small danger";
     rm.textContent = t("layer_remove");
     rm.onclick = async () => {
-      await api.del(`/api/v1/images/${image}/layers/${c.file}`, A);
+      await api.del(`/api/v1/site-images/${image}/layers/${c.file}`, A);
       box.remove();
       showImageLayers(image);
     };
@@ -514,7 +514,7 @@ async function loadPublish() {
 async function showLocks(template) {
   const box = $("#lockpanel");
   box.innerHTML = "";
-  const data = await api.get(`/api/v1/templates/${template}/schema`, A);
+  const data = await api.get(`/api/v1/models/${template}/schema`, A);
   const card = document.createElement("div");
   card.innerHTML = `<h3 style="margin:0 0 4px">${t("locks_title")} — <span class="mono">${template}</span></h3>
     <p class="help muted">${t("locks_help")}</p>`;
@@ -547,7 +547,7 @@ async function showLocks(template) {
   salvar.style.marginTop = "10px";
   salvar.textContent = t("locks_save");
   salvar.onclick = async () => {
-    await api.put(`/api/v1/templates/${template}/schema/locks`, { locks: estado }, A);
+    await api.put(`/api/v1/models/${template}/schema/locks`, { locks: estado }, A);
     toast(t("locks_saved"));
   };
   card.appendChild(salvar);
@@ -606,14 +606,14 @@ async function loadRequests() {
 async function createImage() {
   const id = $("#newid").value.trim();
   const fullname = $("#newname").value.trim();
-  const template = $("#newtpl").value;
+  const model = $("#newtpl").value;
   const unlocked = $("#newprofile").value === "free";
   if (!id) return;
   try {
     const wallpaper_locked = $("#newwalllock").checked;
     const info = await api.post(
-      "/api/v1/images",
-      { id, fullname, template, unlocked, wallpaper_locked },
+      "/api/v1/site-images",
+      { id, fullname, model: template, unlocked, wallpaper_locked },
       A
     );
     // wallpaper opcional já na criação: sobe logo depois que a imagem existe
@@ -622,7 +622,7 @@ async function createImage() {
       $("#createstatus").textContent = t("uploading");
       const fd = new FormData();
       fd.append("file", arquivo);
-      await api.request("PUT", `/api/v1/images/${id}/wallpaper`, { raw: fd, kind: "admin" });
+      await api.request("PUT", `/api/v1/site-images/${id}/wallpaper`, { raw: fd, kind: "admin" });
       $("#newwall").value = "";
     }
     $("#createstatus").textContent = "";
@@ -640,7 +640,7 @@ async function bulkCreate() {
   if (!tsv) return;
   $("#bulkstatus").textContent = t("loading");
   try {
-    const resp = await fetch("/api/v1/images/bulk?format=csv", {
+    const resp = await fetch("/api/v1/site-images/bulk?format=csv", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${api.adminKey()}`,

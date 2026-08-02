@@ -23,74 +23,74 @@ def reserved_re() -> re.Pattern:
     return re.compile(server_conf().get("reserved_prefix_regex", "^[0-9]"))
 
 
-# --- templates ---
+# --- modelos ---
 
 
-def template_dir(name: str) -> Path:
-    return settings.data_root / "templates" / name
+def model_dir(name: str) -> Path:
+    return settings.data_root / "models" / name
 
 
-def template_exists(name: str) -> bool:
-    return (template_dir(name) / "template.json").is_file()
+def model_exists(name: str) -> bool:
+    return (model_dir(name) / "model.json").is_file()
 
 
-def list_templates() -> list[str]:
-    base = settings.data_root / "templates"
+def list_models() -> list[str]:
+    base = settings.data_root / "models"
     if not base.is_dir():
         return []
-    return sorted(p.name for p in base.iterdir() if (p / "template.json").is_file())
+    return sorted(p.name for p in base.iterdir() if (p / "model.json").is_file())
 
 
-def template_is_public(name: str) -> bool:
+def model_is_public(name: str) -> bool:
     """Templates marcados `public: true` são os únicos que a criação por
     convite pode usar — protege os templates bloqueados de prova."""
-    tpl = fsdb.read_json(template_dir(name) / "template.json", {}) or {}
+    tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
     return bool(tpl.get("public"))
 
 
-def list_public_templates() -> list[dict]:
+def list_public_models() -> list[dict]:
     out = []
-    for name in list_templates():
-        if template_is_public(name):
-            tpl = fsdb.read_json(template_dir(name) / "template.json", {}) or {}
+    for name in list_models():
+        if model_is_public(name):
+            tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
             out.append({"name": name, "description": tpl.get("description", "")})
     return out
 
 
-def get_template(name: str) -> dict | None:
-    tpl = fsdb.read_json(template_dir(name) / "template.json")
+def get_model(name: str) -> dict | None:
+    tpl = fsdb.read_json(model_dir(name) / "model.json")
     if tpl is None:
         return None
     tpl["name"] = name
-    tpl["schema"] = fsdb.read_json(template_dir(name) / "schema.json", {})
+    tpl["schema"] = fsdb.read_json(model_dir(name) / "schema.json", {})
     return tpl
 
 
-def set_template_layers(name: str, layers: list[dict]) -> None:
-    with fsdb.locked(template_dir(name)):
-        tpl = fsdb.read_json(template_dir(name) / "template.json", {}) or {}
+def set_model_layers(name: str, layers: list[dict]) -> None:
+    with fsdb.locked(model_dir(name)):
+        tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
         tpl["layers"] = layers
-        fsdb.write_json(template_dir(name) / "template.json", tpl)
+        fsdb.write_json(model_dir(name) / "model.json", tpl)
 
 
 def get_schema(name: str) -> dict:
-    return fsdb.read_json(template_dir(name) / "schema.json", {"fields": []}) or {"fields": []}
+    return fsdb.read_json(model_dir(name) / "schema.json", {"fields": []}) or {"fields": []}
 
 
 def set_schema_locks(name: str, locks: dict) -> dict:
-    """Liga/desliga o cadeado de campos do template.
+    """Liga/desliga o cadeado de campos do modelo.
 
     Só mexe na chave `locked` de cada campo — o resto do schema (tipos,
     opções, rótulos) fica intacto. Vale para todas as imagens Oficiais que
-    usam este template; imagens Livres continuam ignorando as travas.
+    usam este modelo; imagens Livres continuam ignorando as travas.
     """
-    d = template_dir(name)
+    d = model_dir(name)
     with fsdb.locked(d):
         schema = fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []}
         conhecidos = {f["key"] for f in schema.get("fields", [])}
         desconhecidos = set(locks) - conhecidos
         if desconhecidos:
-            raise ImageError(f"campos que não existem no template: {', '.join(sorted(desconhecidos))}")
+            raise ImageError(f"campos que não existem no modelo: {', '.join(sorted(desconhecidos))}")
         for field in schema.get("fields", []):
             if field["key"] in locks:
                 field["locked"] = bool(locks[field["key"]])
@@ -98,33 +98,33 @@ def set_schema_locks(name: str, locks: dict) -> dict:
     return schema
 
 
-def set_template_meta(name: str, *, public: bool | None = None, description: str | None = None) -> None:
-    with fsdb.locked(template_dir(name)):
-        tpl = fsdb.read_json(template_dir(name) / "template.json", {}) or {}
+def set_model_meta(name: str, *, public: bool | None = None, description: str | None = None) -> None:
+    with fsdb.locked(model_dir(name)):
+        tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
         if public is not None:
             tpl["public"] = bool(public)
         if description is not None:
             tpl["description"] = str(description)
-        fsdb.write_json(template_dir(name) / "template.json", tpl)
+        fsdb.write_json(model_dir(name) / "model.json", tpl)
 
 
-# --- imagens ---
+# --- site-images (as imagens derivadas de um modelo) ---
 
 
-def image_dir(image_id: str) -> Path:
-    return settings.data_root / "images" / image_id
+def site_image_dir(image_id: str) -> Path:
+    return settings.data_root / "site-images" / image_id
 
 
-def image_exists(image_id: str) -> bool:
-    return (image_dir(image_id) / "image.json").is_file()
+def site_image_exists(image_id: str) -> bool:
+    return (site_image_dir(image_id) / "image.json").is_file()
 
 
-def get_image(image_id: str) -> dict | None:
-    return fsdb.read_json(image_dir(image_id) / "image.json")
+def get_site_image(image_id: str) -> dict | None:
+    return fsdb.read_json(site_image_dir(image_id) / "image.json")
 
 
-def list_images(prefix: str = "") -> list[dict]:
-    base = settings.data_root / "images"
+def list_site_images(prefix: str = "") -> list[dict]:
+    base = settings.data_root / "site-images"
     out = []
     if not base.is_dir():
         return out
@@ -141,10 +141,10 @@ class ImageError(ValueError):
     pass
 
 
-def create_image(
+def create_site_image(
     image_id: str,
     fullname: str,
-    template: str,
+    model: str,
     *,
     unlocked: bool = False,
     extra: dict | None = None,
@@ -157,23 +157,23 @@ def create_image(
         raise ImageError(
             "id inválido: use 2-32 caracteres [a-z0-9._-], começando por letra ou dígito"
         )
-    if not template_exists(template):
-        raise ImageError(f"template '{template}' não existe")
-    if image_exists(image_id):
+    if not model_exists(model):
+        raise ImageError(f"modelo '{model}' não existe")
+    if site_image_exists(image_id):
         raise ImageError(f"imagem '{image_id}' já existe")
 
     namespace = "contest" if reserved_re().match(image_id) else "personal"
     token = auth.new_key("nb3i")
     machine_key = auth.new_key("nb3m")
     boot_key = auth.new_key("nb3b")
-    d = image_dir(image_id)
+    d = site_image_dir(image_id)
     with fsdb.locked(d):
         fsdb.write_json(
             d / "image.json",
             {
                 "id": image_id,
                 "fullname": fullname,
-                "template": template,
+                "model": model,
                 "namespace": namespace,
                 "unlocked": bool(unlocked),
                 **(extra or {}),
@@ -188,7 +188,7 @@ def create_image(
     return {
         "id": image_id,
         "fullname": fullname,
-        "template": template,
+        "model": model,
         "namespace": namespace,
         "unlocked": bool(unlocked),
         "token": token,
@@ -211,8 +211,8 @@ def credentials(image_id: str) -> dict:
     """Todas as credenciais e links de uma imagem já existente. Só o admin lê
     isto — os segredos ficam em claro no disco (são o que se distribui, não
     hashes), então é seguro devolvê-los para quem tem a chave de admin."""
-    token = (fsdb.read_text(image_dir(image_id) / "token") or "").strip()
-    info = get_image(image_id) or {}
+    token = (fsdb.read_text(site_image_dir(image_id) / "token") or "").strip()
+    info = get_site_image(image_id) or {}
     return {
         "id": image_id,
         "fullname": info.get("fullname", ""),
@@ -224,59 +224,59 @@ def credentials(image_id: str) -> dict:
 
 
 def boot_key(image_id: str) -> str:
-    return (fsdb.read_text(image_dir(image_id) / "boot.key") or "").strip()
+    return (fsdb.read_text(site_image_dir(image_id) / "boot.key") or "").strip()
 
 
 def rotate_boot_key(image_id: str) -> str:
     """Gera nova chave de boot. Atenção: todo pendrive daquela imagem precisa
     ter o nutellaboot.conf atualizado depois disso."""
     chave = auth.new_key("nb3b")
-    d = image_dir(image_id)
+    d = site_image_dir(image_id)
     with fsdb.locked(d):
         fsdb.write_text(d / "boot.key", chave + "\n", mode=0o600)
     return chave
 
 
-def patch_image(image_id: str, fields: dict) -> dict:
-    d = image_dir(image_id)
+def patch_site_image(image_id: str, fields: dict) -> dict:
+    d = site_image_dir(image_id)
     with fsdb.locked(d):
         info = fsdb.read_json(d / "image.json") or {}
-        for k in ("fullname", "unlocked", "template", "wallpaper_locked", "build_quota"):
+        for k in ("fullname", "unlocked", "model", "wallpaper_locked", "build_quota"):
             if k in fields and fields[k] is not None:
-                if k == "template" and not template_exists(fields[k]):
-                    raise ImageError(f"template '{fields[k]}' não existe")
+                if k == "model" and not model_exists(fields[k]):
+                    raise ImageError(f"modelo '{fields[k]}' não existe")
                 info[k] = fields[k]
         fsdb.write_json(d / "image.json", info)
     return info
 
 
-def delete_image(image_id: str) -> None:
-    d = image_dir(image_id)
+def delete_site_image(image_id: str) -> None:
+    d = site_image_dir(image_id)
     if d.is_dir():
         shutil.rmtree(d)
 
 
 def rotate_token(image_id: str) -> str:
     token = auth.new_key("nb3i")
-    d = image_dir(image_id)
+    d = site_image_dir(image_id)
     with fsdb.locked(d):
         fsdb.write_text(d / "token", token + "\n", mode=0o600)
     return token
 
 
-def image_layers(image_id: str) -> list[dict]:
-    """Camadas extras da imagem primeiro (prioridade no overlay), depois as do
-    template — mesma semântica do nb2 (template.extra antes do template)."""
-    info = get_image(image_id) or {}
-    extra = fsdb.read_json(image_dir(image_id) / "layers-extra.json", []) or []
-    tpl = fsdb.read_json(template_dir(info.get("template", "")) / "template.json", {}) or {}
+def site_image_layers(image_id: str) -> list[dict]:
+    """Camadas extras da site-image primeiro (prioridade no overlay), depois
+    as do modelo — mesma semântica do nb2 (template.extra antes do template)."""
+    info = get_site_image(image_id) or {}
+    extra = fsdb.read_json(site_image_dir(image_id) / "layers-extra.json", []) or []
+    tpl = fsdb.read_json(model_dir(info.get("model", "")) / "model.json", {}) or {}
     return list(extra) + list(tpl.get("layers", []))
 
 
 def config_values(image_id: str) -> dict:
-    conf = fsdb.read_json(image_dir(image_id) / "config.json", {}) or {}
+    conf = fsdb.read_json(site_image_dir(image_id) / "config.json", {}) or {}
     return conf.get("values", {})
 
 
 def machine_key(image_id: str) -> str:
-    return (fsdb.read_text(image_dir(image_id) / "machine.key") or "").strip()
+    return (fsdb.read_text(site_image_dir(image_id) / "machine.key") or "").strip()

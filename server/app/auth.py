@@ -50,8 +50,8 @@ def _bearer(authorization: str | None) -> str | None:
     return None
 
 
-def _image_dir(image_id: str) -> Path:
-    return settings.data_root / "images" / image_id
+def _site_image_dir(image_id: str) -> Path:
+    return settings.data_root / "site-images" / image_id
 
 
 def identify(token: str | None, image_id: str | None = None) -> Principal | None:
@@ -76,7 +76,7 @@ def identify(token: str | None, image_id: str | None = None) -> Principal | None
             )
 
     if image_id:
-        stored = (fsdb.read_text(_image_dir(image_id) / "token") or "").strip()
+        stored = (fsdb.read_text(_site_image_dir(image_id) / "token") or "").strip()
         if stored and secrets.compare_digest(token, stored):
             return Principal("image", image_id)
     return None
@@ -85,7 +85,7 @@ def identify(token: str | None, image_id: str | None = None) -> Principal | None
 def identify_machine(machine_key: str | None, image_id: str) -> Principal | None:
     if not machine_key:
         return None
-    stored = (fsdb.read_text(_image_dir(image_id) / "machine.key") or "").strip()
+    stored = (fsdb.read_text(_site_image_dir(image_id) / "machine.key") or "").strip()
     if stored and secrets.compare_digest(machine_key.strip(), stored):
         return Principal("machine", image_id)
     return None
@@ -96,7 +96,7 @@ def image_owner(image_id: str, token: str | None) -> bool:
     disparar build de camada da SUA imagem, sem chave de admin."""
     if not token:
         return False
-    stored = (fsdb.read_text(_image_dir(image_id) / "token") or "").strip()
+    stored = (fsdb.read_text(_site_image_dir(image_id) / "token") or "").strip()
     return bool(stored) and secrets.compare_digest(token.strip(), stored)
 
 
@@ -106,7 +106,7 @@ def boot_key_required(image_id: str) -> bool:
     Imagens criadas pelo nutellaboot3 sempre têm. Apagar o arquivo torna a
     imagem aberta de novo — útil só para depuração, e está documentado.
     """
-    return (_image_dir(image_id) / "boot.key").is_file()
+    return (_site_image_dir(image_id) / "boot.key").is_file()
 
 
 def check_boot_key(image_id: str, key: str | None) -> bool:
@@ -115,7 +115,7 @@ def check_boot_key(image_id: str, key: str | None) -> bool:
     Ela também vale como chave de máquina: a máquina que bootou com o
     pendrive certo é a mesma que reporta telemetria e semeia a imagem.
     """
-    stored = (fsdb.read_text(_image_dir(image_id) / "boot.key") or "").strip()
+    stored = (fsdb.read_text(_site_image_dir(image_id) / "boot.key") or "").strip()
     if not stored:
         return not boot_key_required(image_id)
     if not key:
@@ -144,7 +144,7 @@ def require_image_access(*, service_scope: str | None = None, allow_machine: boo
         authorization: str | None = Header(None),
         x_nb_machine_key: str | None = Header(None),
     ) -> Principal:
-        if not _image_dir(image).is_dir():
+        if not _site_image_dir(image).is_dir():
             raise HTTPException(404, "imagem não existe")
         if allow_machine:
             p = identify_machine(x_nb_machine_key, image)
@@ -165,7 +165,7 @@ def require_image_access(*, service_scope: str | None = None, allow_machine: boo
 
 def require_machine(image: str, x_nb_machine_key: str | None) -> Principal:
     """Só a chave de máquina da imagem (telemetria/fila)."""
-    if not _image_dir(image).is_dir():
+    if not _site_image_dir(image).is_dir():
         raise HTTPException(404, "imagem não existe")
     p = identify_machine(x_nb_machine_key, image)
     if not p:

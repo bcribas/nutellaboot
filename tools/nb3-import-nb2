@@ -133,8 +133,8 @@ def main() -> int:
         if args.dry_run:
             print(f"[template] {d.name}: {len(camadas)} camadas")
             continue
-        tdir = store.template_dir(d.name)
-        fsdb.write_json(tdir / "template.json", {"layers": camadas})
+        tdir = store.model_dir(d.name)
+        fsdb.write_json(tdir / "model.json", {"layers": camadas})
         if not (tdir / "schema.json").exists():
             fsdb.write_json(tdir / "schema.json", build_default_schema())
 
@@ -163,18 +163,18 @@ def main() -> int:
         template = base.replace("-desbloqueado", "") or "maratonalinux2404"
 
         if args.dry_run:
-            print(f"[imagem] {d.name}: template={template} unlocked={unlocked} ({fullname})")
+            print(f"[imagem] {d.name}: model={template} unlocked={unlocked} ({fullname})")
             continue
 
-        if not store.template_exists(template):
+        if not store.model_exists(template):
             print(f"  ! {d.name}: template '{template}' não existe — pulando", file=sys.stderr)
             continue
-        if store.image_exists(d.name):
+        if store.site_image_exists(d.name):
             print(f"  = {d.name}: já existe — pulando")
             continue
 
-        criada = store.create_image(d.name, fullname, template, unlocked=unlocked)
-        destino = store.image_dir(d.name)
+        criada = store.create_site_image(d.name, fullname, template, unlocked=unlocked)
+        destino = store.site_image_dir(d.name)
 
         valores = valores_do_stuff_conf(d / "stuff.conf.json")
         valores.pop("SEEDPASSWORD", None)  # senha antiga era derivável

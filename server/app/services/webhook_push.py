@@ -20,14 +20,14 @@ import time
 import httpx
 
 from .. import fsdb
-from .store import image_dir
+from .store import site_image_dir
 
 TIMEOUT = 5.0
 TENTATIVAS = 3
 
 
 def webhooks_for(image_id: str, event: str) -> list[dict]:
-    conf = fsdb.read_json(image_dir(image_id) / "webhooks.json", []) or []
+    conf = fsdb.read_json(site_image_dir(image_id) / "webhooks.json", []) or []
     return [w for w in conf if not w.get("events") or event in w["events"]]
 
 

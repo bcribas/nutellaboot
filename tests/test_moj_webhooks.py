@@ -14,7 +14,7 @@ MAC = "52-54-00-12-34-56"
 
 @pytest.fixture
 def img(data_root, image_testes3):
-    fsdb.write_json(data_root / "templates" / "t" / "template.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
     fsdb.write_json(data_root / "keys" / "services.json", {})
     return image_testes3
 
@@ -37,40 +37,40 @@ def moj_key(client, ha, scopes, images=None):
 def test_service_key_scope_enforced(client, img, ha):
     hs = moj_key(client, ha, ["machines:read"])
     # leitura permitida
-    assert client.get("/api/v1/images/testes3/machines", headers=hs).status_code == 200
+    assert client.get("/api/v1/site-images/testes3/machines", headers=hs).status_code == 200
     # escrever comando não está no escopo
     r = client.post(
-        "/api/v1/images/testes3/commands", json={"command": "cantouch", "target": "all"}, headers=hs
+        "/api/v1/site-images/testes3/commands", json={"command": "cantouch", "target": "all"}, headers=hs
     )
     assert r.status_code == 403
 
 
 def test_service_key_image_filter(client, img, ha, data_root):
     fsdb.write_json(
-        data_root / "images" / "26brbr" / "image.json",
-        {"id": "26brbr", "template": "t", "namespace": "contest"},
+        data_root / "site-images" / "26brbr" / "image.json",
+        {"id": "26brbr", "model": "t", "namespace": "contest"},
     )
     hs = moj_key(client, ha, ["machines:read"], images=["26*"])
-    assert client.get("/api/v1/images/26brbr/machines", headers=hs).status_code == 200
-    assert client.get("/api/v1/images/testes3/machines", headers=hs).status_code == 403
+    assert client.get("/api/v1/site-images/26brbr/machines", headers=hs).status_code == 200
+    assert client.get("/api/v1/site-images/testes3/machines", headers=hs).status_code == 403
 
 
 def test_moj_can_lock_and_bind_with_scopes(client, img, ha):
     hm = {"X-NB-Machine-Key": img["machine_key"]}
-    client.post(f"/api/v1/images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
     hs = moj_key(client, ha, ["commands:write", "bindings:write", "roster:write", "machines:read"])
 
     client.put(
-        "/api/v1/images/testes3/roster",
+        "/api/v1/site-images/testes3/roster",
         json={"roster": [{"user_id": "t1", "name": "Time 1"}]},
         headers=hs,
     )
     r = client.put(
-        f"/api/v1/images/testes3/machines/{MAC}/binding", json={"user_id": "t1"}, headers=hs
+        f"/api/v1/site-images/testes3/machines/{MAC}/binding", json={"user_id": "t1"}, headers=hs
     )
     assert r.status_code == 200
 
-    r = client.post(f"/api/v1/images/testes3/machines/{MAC}/lock", headers=hs)
+    r = client.post(f"/api/v1/site-images/testes3/machines/{MAC}/lock", headers=hs)
     assert r.status_code == 200
     assert client.get(f"/boot/v3/testes3/machines/{MAC}/lockstate").text.strip() == "locked"
 
@@ -80,12 +80,12 @@ def test_service_key_lifecycle(client, img, ha):
     nomes = [k["name"] for k in client.get("/api/v1/service-keys", headers=ha).json()["service_keys"]]
     assert nomes == ["moj"]
     assert client.delete("/api/v1/service-keys/moj", headers=ha).status_code == 204
-    assert client.get("/api/v1/images/testes3/machines", headers=hs).status_code == 401
+    assert client.get("/api/v1/site-images/testes3/machines", headers=hs).status_code == 401
 
 
 def test_webhook_config_hides_secret(client, img, ha):
     r = client.put(
-        "/api/v1/images/testes3/webhooks",
+        "/api/v1/site-images/testes3/webhooks",
         json={
             "webhooks": [
                 {
@@ -98,20 +98,20 @@ def test_webhook_config_hides_secret(client, img, ha):
         headers=ha,
     )
     assert r.status_code == 200
-    got = client.get("/api/v1/images/testes3/webhooks", headers=ha).json()["webhooks"][0]
+    got = client.get("/api/v1/site-images/testes3/webhooks", headers=ha).json()["webhooks"][0]
     assert got["secret"] == "***"
     assert got["url"] == "https://moj.example/hooks/nb3"
 
 
 def test_webhook_rejects_bad_url_and_event(client, img, ha):
     r = client.put(
-        "/api/v1/images/testes3/webhooks",
+        "/api/v1/site-images/testes3/webhooks",
         json={"webhooks": [{"url": "ftp://x/y"}]},
         headers=ha,
     )
     assert r.status_code == 400
     r = client.put(
-        "/api/v1/images/testes3/webhooks",
+        "/api/v1/site-images/testes3/webhooks",
         json={"webhooks": [{"url": "https://x/y", "events": ["nao.existe"]}]},
         headers=ha,
     )
@@ -120,7 +120,7 @@ def test_webhook_rejects_bad_url_and_event(client, img, ha):
 
 def test_webhook_filter_by_event(client, img, ha):
     client.put(
-        "/api/v1/images/testes3/webhooks",
+        "/api/v1/site-images/testes3/webhooks",
         json={
             "webhooks": [
                 {"url": "https://a/", "events": ["machine.locked"]},
@@ -171,7 +171,7 @@ async def test_webhook_is_delivered_and_signed(data_root, image_testes3):
         await asyncio.sleep(0.05)
 
     fsdb.write_json(
-        data_root / "images" / "testes3" / "webhooks.json",
+        data_root / "site-images" / "testes3" / "webhooks.json",
         [{"url": "http://127.0.0.1:8899/hook", "secret": "s3gr3d0", "events": ["machine.locked"]}],
     )
     webhook_push.emit("testes3", "machine.locked", {"machines": [MAC]})

@@ -92,7 +92,7 @@ def md5_of(path: Path) -> str:
 
 def baixar_camadas(job: dict, destino: Path, job_log: Path) -> list[Path]:
     """Garante as camadas base em cache local (verificando o md5)."""
-    tpl = json.loads((DATA / "templates" / job["template"] / "template.json").read_text())
+    tpl = json.loads((DATA / "models" / job["model"] / "model.json").read_text())
     arquivos = []
     destino.mkdir(parents=True, exist_ok=True)
     for camada in tpl.get("layers", []):
@@ -326,7 +326,7 @@ def anexar_camada(image_id: str, saida: dict, job_id: str) -> None:
     """Registra a camada pronta na imagem (camadas extras vêm ANTES no
     manifest = prioridade no overlay). Escrita atômica, sem passar pela API —
     o worker é confiável e local."""
-    d = DATA / "images" / image_id
+    d = DATA / "site-images" / image_id
     if not (d / "image.json").is_file():
         return
     camada = {

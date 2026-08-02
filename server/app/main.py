@@ -29,6 +29,32 @@ def _operation_id(route: APIRoute) -> str:
     return f"{route.name}_{metodos}"
 
 
+class LegacyImagePathMiddleware:
+    """Mantém `/api/v1/images/...` respondendo como `/api/v1/site-images/...`.
+
+    NÃO REMOVER. O agente de telemetria (`client/telemetry/usr/share/mlog/
+    agent.sh`) monta `"$NB_SERVER/api/v1/images/$IMAGEROOT"` e esse arquivo vai
+    DENTRO da camada squashfs publicada — máquinas já em campo continuam
+    chamando o caminho antigo, e não há como atualizá-las remotamente sem
+    telemetria (que é justamente o que quebraria). O mesmo vale para a
+    integração do MOJ, que recebeu esses caminhos documentados.
+
+    Reescrever antes do roteamento mantém uma rota só no código e no OpenAPI.
+    """
+
+    LEGADO = "/api/v1/images/"
+    ATUAL = "/api/v1/site-images/"
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path", "").startswith(self.LEGADO):
+            novo = self.ATUAL + scope["path"][len(self.LEGADO) :]
+            scope = {**scope, "path": novo, "raw_path": novo.encode()}
+        await self.app(scope, receive, send)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="NutellaBoot 3",
@@ -70,6 +96,8 @@ def create_app() -> FastAPI:
     web = REPO_ROOT / "web"
     if web.is_dir():
         app.mount("/", StaticFiles(directory=web, html=True), name="web")
+
+    app.add_middleware(LegacyImagePathMiddleware)
     return app
 
 

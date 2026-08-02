@@ -13,7 +13,7 @@ MAC = "52-54-00-12-34-56"
 
 @pytest.fixture
 def img(data_root, image_testes3):
-    fsdb.write_json(data_root / "templates" / "t" / "template.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
     return image_testes3
 
 
@@ -29,14 +29,14 @@ def hi(img):
 
 def test_status_ingest_creates_machine(client, img, hm, hi):
     r = client.post(
-        f"/api/v1/images/testes3/machines/{MAC}/status",
+        f"/api/v1/site-images/testes3/machines/{MAC}/status",
         json={"hardware": {"memtotal": "16G"}, "operations": {"screen-lock": "NO"}},
         headers=hm,
     )
     assert r.status_code == 200
     assert r.json()["pending_commands"] == 0
 
-    r = client.get("/api/v1/images/testes3/machines", headers=hi)
+    r = client.get("/api/v1/site-images/testes3/machines", headers=hi)
     machines = r.json()["machines"]
     assert len(machines) == 1
     assert machines[0]["mac"] == MAC
@@ -46,7 +46,7 @@ def test_status_ingest_creates_machine(client, img, hm, hi):
 
 def test_status_requires_machine_key(client, img):
     r = client.post(
-        f"/api/v1/images/testes3/machines/{MAC}/status",
+        f"/api/v1/site-images/testes3/machines/{MAC}/status",
         json={},
         headers={"X-NB-Machine-Key": "nb3m_errada"},
     )
@@ -54,21 +54,21 @@ def test_status_requires_machine_key(client, img):
 
 
 def test_mac_is_validated(client, img, hm):
-    r = client.post("/api/v1/images/testes3/machines/nao-e-mac/status", json={}, headers=hm)
+    r = client.post("/api/v1/site-images/testes3/machines/nao-e-mac/status", json={}, headers=hm)
     assert r.status_code == 400
 
 
 def test_command_allowlist(client, img, hm, hi):
-    client.post(f"/api/v1/images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
     r = client.post(
-        "/api/v1/images/testes3/commands",
+        "/api/v1/site-images/testes3/commands",
         json={"command": "rm -rf /", "target": "all"},
         headers=hi,
     )
     assert r.status_code == 400
     # o comando de RCE do nb2 não existe mais
     r = client.post(
-        "/api/v1/images/testes3/commands",
+        "/api/v1/site-images/testes3/commands",
         json={"command": "mlupdatecommands", "target": "all"},
         headers=hi,
     )
@@ -76,64 +76,64 @@ def test_command_allowlist(client, img, hm, hi):
 
 
 def test_command_lifecycle_enqueue_poll_ack(client, img, hm, hi):
-    client.post(f"/api/v1/images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
     r = client.post(
-        "/api/v1/images/testes3/commands",
+        "/api/v1/site-images/testes3/commands",
         json={"command": "cleanhomenow", "target": "all"},
         headers=hi,
     )
     cid = r.json()["command_id"]
     assert r.json()["machines"] == 1
 
-    r = client.get(f"/api/v1/images/testes3/machines/{MAC}/commands", headers=hm)
+    r = client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm)
     cmds = r.json()["commands"]
     assert [c["command"] for c in cmds] == ["cleanhomenow"]
 
     r = client.post(
-        f"/api/v1/images/testes3/machines/{MAC}/commands/{cid}/ack",
+        f"/api/v1/site-images/testes3/machines/{MAC}/commands/{cid}/ack",
         json={"status": "done"},
         headers=hm,
     )
     assert r.json()["found"] is True
     # depois do ack a fila fica vazia (o nb2 nunca truncava a fila)
-    assert client.get(f"/api/v1/images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"] == []
+    assert client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"] == []
 
 
 def test_command_only_reaches_target_machine(client, img, hm, hi):
     outra = "52-54-00-aa-bb-cc"
     for mac in (MAC, outra):
-        client.post(f"/api/v1/images/testes3/machines/{mac}/status", json={}, headers=hm)
+        client.post(f"/api/v1/site-images/testes3/machines/{mac}/status", json={}, headers=hm)
     client.post(
-        "/api/v1/images/testes3/commands",
+        "/api/v1/site-images/testes3/commands",
         json={"command": "mlreboot", "target": [outra]},
         headers=hi,
     )
-    assert client.get(f"/api/v1/images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"] == []
-    assert len(client.get(f"/api/v1/images/testes3/machines/{outra}/commands", headers=hm).json()["commands"]) == 1
+    assert client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"] == []
+    assert len(client.get(f"/api/v1/site-images/testes3/machines/{outra}/commands", headers=hm).json()["commands"]) == 1
 
 
 def test_delay_holds_command(client, img, hm, hi):
-    client.post(f"/api/v1/images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
     client.post(
-        "/api/v1/images/testes3/commands",
+        "/api/v1/site-images/testes3/commands",
         json={"command": "mlpoweroff", "target": "all", "delay": 60},
         headers=hi,
     )
-    assert client.get(f"/api/v1/images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"] == []
+    assert client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"] == []
     assert len(m.pending_commands("testes3", MAC)) == 1
 
 
 def test_longpoll_returns_within_seconds(client, img, hm, hi):
     """O requisito operacional: travar a tela precisa chegar em bem menos de
     10 s. O long-poll é acordado no instante do enqueue."""
-    client.post(f"/api/v1/images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
 
     resultado = {}
 
     def poll():
         t0 = time.monotonic()
         r = client.get(
-            f"/api/v1/images/testes3/machines/{MAC}/commands?wait=25", headers=hm
+            f"/api/v1/site-images/testes3/machines/{MAC}/commands?wait=25", headers=hm
         )
         resultado["elapsed"] = time.monotonic() - t0
         resultado["body"] = r.json()
@@ -141,7 +141,7 @@ def test_longpoll_returns_within_seconds(client, img, hm, hi):
     th = threading.Thread(target=poll)
     th.start()
     time.sleep(0.4)  # garante que o poll já está pendurado
-    client.post("/api/v1/images/testes3/lock", headers=hi)
+    client.post("/api/v1/site-images/testes3/lock", headers=hi)
     th.join(timeout=20)
 
     assert not th.is_alive(), "long-poll não retornou"
@@ -151,25 +151,25 @@ def test_longpoll_returns_within_seconds(client, img, hm, hi):
 
 
 def test_longpoll_times_out_without_commands(client, img, hm):
-    client.post(f"/api/v1/images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
     t0 = time.monotonic()
-    r = client.get(f"/api/v1/images/testes3/machines/{MAC}/commands?wait=1", headers=hm)
+    r = client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands?wait=1", headers=hm)
     elapsed = time.monotonic() - t0
     assert r.json()["commands"] == []
     assert 0.8 < elapsed < 8
 
 
 def test_lock_sets_state_and_command(client, img, hm, hi):
-    client.post(f"/api/v1/images/testes3/machines/{MAC}/status", json={}, headers=hm)
-    client.post(f"/api/v1/images/testes3/machines/{MAC}/lock", headers=hi)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/lock", headers=hi)
 
     # 1) estado consultável pela própria tela (funciona mesmo se o agente cair)
     assert client.get(f"/boot/v3/testes3/machines/{MAC}/lockstate").text.strip() == "locked"
     # 2) comando na fila para o agente executar
-    cmds = client.get(f"/api/v1/images/testes3/machines/{MAC}/commands", headers=hm).json()
+    cmds = client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm).json()
     assert cmds["commands"][0]["command"] == "donottouch"
 
-    client.post(f"/api/v1/images/testes3/machines/{MAC}/unlock", headers=hi)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/unlock", headers=hi)
     assert client.get(f"/boot/v3/testes3/machines/{MAC}/lockstate").text.strip() == "unlocked"
 
 

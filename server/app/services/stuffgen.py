@@ -45,7 +45,7 @@ def render(image_id: str) -> str:
     # template mesmo que a imagem tenha salvo outro valor antes do bloqueio.
     values = dict(config.effective_values(image_id))
     raw = store.config_values(image_id)
-    wallpaper = fsdb.read_json(store.image_dir(image_id) / "wallpaper.json")
+    wallpaper = fsdb.read_json(store.site_image_dir(image_id) / "wallpaper.json")
 
     lines = [
         "#!/bin/sh",

@@ -15,14 +15,14 @@ MAC = "52-54-00-12-34-56"
 
 @pytest.fixture
 def img(data_root, admin_key):
-    fsdb.write_json(data_root / "templates" / "t" / "template.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
     fsdb.write_json(data_root / "server.json", {"reserved_prefix_regex": "^[0-9]"})
-    return store.create_image("comchave", "Com chave", "t")
+    return store.create_site_image("comchave", "Com chave", "t")
 
 
 def test_nova_imagem_ja_nasce_com_chave_de_boot(img, data_root):
     assert img["boot_key"].startswith("nb3b_")
-    arquivo = data_root / "images" / "comchave" / "boot.key"
+    arquivo = data_root / "site-images" / "comchave" / "boot.key"
     assert arquivo.is_file()
     assert (arquivo.stat().st_mode & 0o777) == 0o600
     assert auth.boot_key_required("comchave")
@@ -67,7 +67,7 @@ def test_wallpaper_e_lockinfo_tambem_exigem_chave(client, img, admin_key):
     ha = {"Authorization": f"Bearer {admin_key}"}
     png = b"\x89PNG\r\n\x1a\n" + b"x" * 20
     client.put(
-        "/api/v1/images/comchave/wallpaper",
+        "/api/v1/site-images/comchave/wallpaper",
         files={"file": ("f.png", png, "image/png")},
         headers=ha,
     )
@@ -90,9 +90,9 @@ def test_seeder_usa_chave_de_boot(client, img):
 
 def test_imagem_sem_boot_key_continua_aberta(client, data_root):
     """Modo de depuração: apagar boot.key reabre a imagem. Documentado."""
-    fsdb.write_json(data_root / "templates" / "t" / "template.json", {"layers": []})
-    d = data_root / "images" / "aberta"
-    fsdb.write_json(d / "image.json", {"id": "aberta", "template": "t", "namespace": "personal"})
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
+    d = data_root / "site-images" / "aberta"
+    fsdb.write_json(d / "image.json", {"id": "aberta", "model": "t", "namespace": "personal"})
     fsdb.write_text(d / "machine.key", "nb3m_x\n")
     assert not auth.boot_key_required("aberta")
     assert client.get("/boot/v3/aberta/manifest").status_code == 200
@@ -100,7 +100,7 @@ def test_imagem_sem_boot_key_continua_aberta(client, data_root):
 
 def test_rotacao_invalida_a_chave_antiga(client, img, admin_key):
     ha = {"Authorization": f"Bearer {admin_key}"}
-    r = client.post("/api/v1/images/comchave/boot-key/rotate", headers=ha)
+    r = client.post("/api/v1/site-images/comchave/boot-key/rotate", headers=ha)
     nova = r.json()["boot_key"]
     assert nova != img["boot_key"]
     assert client.post("/boot/v3/comchave/stuff", data={"key": img["boot_key"]}).status_code == 401
@@ -115,10 +115,10 @@ def test_sanity_e_time_continuam_abertos(client):
 
 
 def test_bulk_exporta_a_chave_de_boot(client, admin_key, data_root):
-    fsdb.write_json(data_root / "templates" / "t" / "template.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
     fsdb.write_json(data_root / "server.json", {"reserved_prefix_regex": "^[0-9]"})
     r = client.post(
-        "/api/v1/images/bulk?format=csv",
+        "/api/v1/site-images/bulk?format=csv",
         content="26spsp\tSede SP\tt\n",
         headers={
             "Authorization": f"Bearer {admin_key}",

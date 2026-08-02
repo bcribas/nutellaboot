@@ -40,9 +40,9 @@ async def event_types() -> dict:
     return {"events": EVENTOS, "scopes": ESCOPOS}
 
 
-@router.get("/images/{image}/webhooks")
+@router.get("/site-images/{image}/webhooks")
 async def get_webhooks(image: str, p=Depends(auth.require_admin)) -> dict:
-    conf = fsdb.read_json(store.image_dir(image) / "webhooks.json", []) or []
+    conf = fsdb.read_json(store.site_image_dir(image) / "webhooks.json", []) or []
     # o segredo não volta em claro
     return {
         "webhooks": [
@@ -51,9 +51,9 @@ async def get_webhooks(image: str, p=Depends(auth.require_admin)) -> dict:
     }
 
 
-@router.put("/images/{image}/webhooks")
+@router.put("/site-images/{image}/webhooks")
 async def put_webhooks(image: str, body: dict, p=Depends(auth.require_admin)) -> dict:
-    if not store.image_exists(image):
+    if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
     hooks = body.get("webhooks")
     if not isinstance(hooks, list):
@@ -68,7 +68,7 @@ async def put_webhooks(image: str, body: dict, p=Depends(auth.require_admin)) ->
             if e not in EVENTOS:
                 raise HTTPException(400, f"evento desconhecido: {e}")
         limpo.append({"url": url, "secret": str(h.get("secret", "")), "events": eventos})
-    fsdb.write_json(store.image_dir(image) / "webhooks.json", limpo, mode=0o600)
+    fsdb.write_json(store.site_image_dir(image) / "webhooks.json", limpo, mode=0o600)
     return {"ok": True, "webhooks": len(limpo)}
 
 

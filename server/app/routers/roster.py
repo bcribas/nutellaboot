@@ -30,17 +30,17 @@ LOGO_TYPES = {
 
 
 def _roster(image: str) -> list[dict]:
-    return fsdb.read_json(store.image_dir(image) / "roster.json", []) or []
+    return fsdb.read_json(store.site_image_dir(image) / "roster.json", []) or []
 
 
-@router.get("/images/{image}/roster")
+@router.get("/site-images/{image}/roster")
 async def get_roster(
     image: str, p=Depends(auth.require_image_access(service_scope="roster:read"))
 ) -> dict:
     return {"roster": _roster(image)}
 
 
-@router.put("/images/{image}/roster")
+@router.put("/site-images/{image}/roster")
 async def put_roster(
     image: str, body: dict, p=Depends(auth.require_image_access(service_scope="roster:write"))
 ) -> dict:
@@ -61,11 +61,11 @@ async def put_roster(
                 "seat": str(entry.get("seat", "")),
             }
         )
-    fsdb.write_json(store.image_dir(image) / "roster.json", limpo)
+    fsdb.write_json(store.site_image_dir(image) / "roster.json", limpo)
     return {"ok": True, "entries": len(limpo)}
 
 
-@router.put("/images/{image}/roster/logos/{org_id}")
+@router.put("/site-images/{image}/roster/logos/{org_id}")
 async def put_logo(
     image: str,
     org_id: str,
@@ -82,7 +82,7 @@ async def put_logo(
     if kind is None:
         raise HTTPException(400, "envie SVG ou PNG")
     ext, _ = kind
-    d = store.image_dir(image) / "roster" / "logos"
+    d = store.site_image_dir(image) / "roster" / "logos"
     d.mkdir(parents=True, exist_ok=True)
     for old in d.glob(f"{org_id}.*"):
         old.unlink()
@@ -90,7 +90,7 @@ async def put_logo(
     return {"ok": True, "org_id": org_id, "format": ext, "size": len(data)}
 
 
-@router.put("/images/{image}/machines/{mac}/binding")
+@router.put("/site-images/{image}/machines/{mac}/binding")
 async def put_binding(
     image: str, mac: str, body: dict, p=Depends(auth.require_image_access(service_scope="bindings:write"))
 ) -> dict:
@@ -118,7 +118,7 @@ async def put_binding(
     return binding
 
 
-@router.delete("/images/{image}/machines/{mac}/binding", status_code=204)
+@router.delete("/site-images/{image}/machines/{mac}/binding", status_code=204)
 async def delete_binding(
     image: str, mac: str, p=Depends(auth.require_image_access(service_scope="bindings:write"))
 ) -> None:
@@ -127,7 +127,7 @@ async def delete_binding(
     notify.publish(image, {"event": "machine.unbound", "data": {"mac": mac}, "at": 0})
 
 
-@router.get("/images/{image}/bindings")
+@router.get("/site-images/{image}/bindings")
 async def list_bindings(
     image: str, p=Depends(auth.require_image_access(service_scope="machines:read"))
 ) -> dict:
@@ -143,7 +143,7 @@ async def list_bindings(
 
 
 def lockinfo(image: str, mac: str) -> dict:
-    info = store.get_image(image) or {}
+    info = store.get_site_image(image) or {}
     binding = fsdb.read_json(m.machine_dir(image, mac) / "binding.json") or {}
     entry = {}
     if binding.get("user_id"):
@@ -154,7 +154,7 @@ def lockinfo(image: str, mac: str) -> dict:
     org_id = str(org.get("id", ""))
     logo_url = ""
     if org_id:
-        d = store.image_dir(image) / "roster" / "logos"
+        d = store.site_image_dir(image) / "roster" / "logos"
         if any(d.glob(f"{org_id}.*")) if d.is_dir() else False:
             logo_url = f"/boot/v3/{image}/roster/logos/{org_id}"
     return {
@@ -174,7 +174,7 @@ def lockinfo(image: str, mac: str) -> dict:
 def logo_response(image: str, org_id: str) -> FileResponse:
     if "/" in org_id or ".." in org_id:
         raise HTTPException(400, "identificador inválido")
-    d = store.image_dir(image) / "roster" / "logos"
+    d = store.site_image_dir(image) / "roster" / "logos"
     for ext, media in (("svg", "image/svg+xml"), ("png", "image/png")):
         f = d / f"{org_id}.{ext}"
         if f.is_file():

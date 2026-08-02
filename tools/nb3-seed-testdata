@@ -65,10 +65,10 @@ def main() -> None:
     if not (data / "keys" / "services.json").exists():
         fsdb.write_json(data / "keys" / "services.json", {}, mode=0o600)
 
-    tpl_dir = data / "templates" / TEMPLATE_NAME
+    tpl_dir = data / "models" / TEMPLATE_NAME
     nb2_template = args.nb2 / TEMPLATE_NAME / "template"
-    if not (tpl_dir / "template.json").exists() and nb2_template.exists():
-        fsdb.write_json(tpl_dir / "template.json", {"layers": parse_nb2_template(nb2_template)})
+    if not (tpl_dir / "model.json").exists() and nb2_template.exists():
+        fsdb.write_json(tpl_dir / "model.json", {"layers": parse_nb2_template(nb2_template)})
         print(f"template '{TEMPLATE_NAME}' importado de {nb2_template}")
     if not (tpl_dir / "schema.json").exists():
         fsdb.write_json(tpl_dir / "schema.json", build_default_schema())
@@ -76,8 +76,8 @@ def main() -> None:
 
     # usa a MESMA função da API: assim a imagem de teste nasce com todas as
     # credenciais (inclusive a chave de boot) e nada fica diferente da produção
-    if not store.image_exists("testes3"):
-        criada = store.create_image(
+    if not store.site_image_exists("testes3"):
+        criada = store.create_site_image(
             "testes3", "Imagem de teste do NutellaBoot 3", TEMPLATE_NAME, unlocked=True
         )
         creds["testes3_token"] = criada["token"]

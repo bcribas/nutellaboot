@@ -54,11 +54,11 @@ def test_rota_publica_barra_rajada(client, admin_key, data_root):
 
 
 def test_admin_marca_template_publico(client, admin_key, data_root):
-    fsdb.write_json(data_root / "templates" / "t" / "template.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
     h = {"Authorization": f"Bearer {admin_key}"}
     # nasce privado
-    assert client.get("/api/v1/public/templates").json()["templates"] == []
-    r = client.patch("/api/v1/templates/t", json={"public": True, "description": "genérico"}, headers=h)
+    assert client.get("/api/v1/public/models").json()["models"] == []
+    r = client.patch("/api/v1/models/t", json={"public": True, "description": "genérico"}, headers=h)
     assert r.status_code == 200 and r.json()["public"] is True
-    nomes = [t["name"] for t in client.get("/api/v1/public/templates").json()["templates"]]
+    nomes = [t["name"] for t in client.get("/api/v1/public/models").json()["models"]]
     assert nomes == ["t"]

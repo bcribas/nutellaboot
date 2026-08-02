@@ -29,10 +29,10 @@ def admin_key(data_root):
 
 @pytest.fixture
 def image_testes3(data_root):
-    img = data_root / "images" / "testes3"
+    img = data_root / "site-images" / "testes3"
     token = auth.new_key("nb3i")
     mkey = auth.new_key("nb3m")
-    fsdb.write_json(img / "image.json", {"id": "testes3", "template": "t", "namespace": "personal"})
+    fsdb.write_json(img / "image.json", {"id": "testes3", "model": "t", "namespace": "personal"})
     fsdb.write_text(img / "token", token + "\n")
     fsdb.write_text(img / "machine.key", mkey + "\n")
     return {"id": "testes3", "token": token, "machine_key": mkey}

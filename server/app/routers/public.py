@@ -21,13 +21,13 @@ def _limit(request: Request, escopo: str, cfg: dict) -> None:
         raise HTTPException(429, "muitas tentativas; tente de novo em instantes")
 
 
-@router.get("/templates")
-async def public_templates() -> dict:
+@router.get("/models")
+async def public_models() -> dict:
     """Templates que a criação por convite pode usar (marcados `public`)."""
-    return {"templates": store.list_public_templates()}
+    return {"models": store.list_public_models()}
 
 
-@router.post("/images", status_code=201)
+@router.post("/site-images", status_code=201)
 async def self_create_image(body: dict, request: Request) -> dict:
     _limit(request, "create", _CREATE)
 
@@ -43,19 +43,19 @@ async def self_create_image(body: dict, request: Request) -> dict:
     if store.reserved_re().match(image_id):
         raise HTTPException(403, "esse nome é reservado à administração; escolha outro")
 
-    template = inv.get("template") or str(body.get("template", ""))
-    if not store.template_is_public(template):
-        raise HTTPException(400, "template inválido ou não disponível para auto-atendimento")
+    model = inv.get("model") or str(body.get("model", ""))
+    if not store.model_is_public(model):
+        raise HTTPException(400, "modelo inválido ou não disponível para auto-atendimento")
 
     try:
-        created = store.create_image(
+        created = store.create_site_image(
             image_id,
             str(body.get("fullname", "")),
-            template,
+            model,
             # Perfil Livre por padrão: quem cria a própria imagem manda nela
             # inteira (RAM mínima, firewall, pendrive, página inicial...). O
             # convite pode ter sido emitido como Oficial, e aí as travas do
-            # template valem.
+            # model valem.
             unlocked=bool(inv.get("unlocked", True)),
             extra={
                 "self_service": True,

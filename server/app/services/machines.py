@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from .. import fsdb
-from .store import image_dir
+from .store import site_image_dir
 
 MAC_RE = re.compile(r"^[0-9a-f]{2}(-[0-9a-f]{2}){5,7}$")
 
@@ -46,11 +46,11 @@ def valid_mac(mac: str) -> bool:
 
 
 def machine_dir(image_id: str, mac: str) -> Path:
-    return image_dir(image_id) / "machines" / mac
+    return site_image_dir(image_id) / "machines" / mac
 
 
 def list_macs(image_id: str) -> list[str]:
-    base = image_dir(image_id) / "machines"
+    base = site_image_dir(image_id) / "machines"
     if not base.is_dir():
         return []
     return sorted(p.name for p in base.iterdir() if (p / "machine.json").is_file())

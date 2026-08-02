@@ -20,21 +20,21 @@ JPEG_MAGIC = b"\xff\xd8\xff"
 def _check_wallpaper_editable(image: str, p) -> None:
     """Wallpaper travado é decisão da organização (como os campos `locked`):
     só a administração troca."""
-    info = store.get_image(image) or {}
+    info = store.get_site_image(image) or {}
     if info.get("wallpaper_locked") and p.kind != "admin":
         raise HTTPException(400, "o papel de parede desta imagem foi definido pela organização")
 
 
-@router.get("/images/{image}/config")
+@router.get("/site-images/{image}/config")
 async def get_config(image: str, p=Depends(auth.require_image_access())) -> dict:
-    info = store.get_image(image) or {}
-    wallpaper = fsdb.read_json(store.image_dir(image) / "wallpaper.json")
+    info = store.get_site_image(image) or {}
+    wallpaper = fsdb.read_json(store.site_image_dir(image) / "wallpaper.json")
     can_edit_locked = p.kind == "admin" or bool(info.get("unlocked"))
     return {
         "image": {
             "id": image,
             "fullname": info.get("fullname", ""),
-            "template": info.get("template", ""),
+            "model": info.get("model", ""),
             "unlocked": bool(info.get("unlocked")),
         },
         "schema": cfg.schema_for(image),
@@ -46,7 +46,7 @@ async def get_config(image: str, p=Depends(auth.require_image_access())) -> dict
     }
 
 
-@router.put("/images/{image}/config")
+@router.put("/site-images/{image}/config")
 async def put_config(
     image: str, body: dict, p=Depends(auth.require_image_access(service_scope="config:write"))
 ) -> dict:
@@ -60,7 +60,7 @@ async def put_config(
     return {"ok": True, "values": applied}
 
 
-@router.put("/images/{image}/wallpaper")
+@router.put("/site-images/{image}/wallpaper")
 async def put_wallpaper(
     image: str,
     file: UploadFile = File(...),
@@ -78,7 +78,7 @@ async def put_wallpaper(
         raise HTTPException(400, "formato não reconhecido: envie PNG ou JPEG")
 
     md5 = hashlib.md5(data).hexdigest()
-    d = store.image_dir(image)
+    d = store.site_image_dir(image)
     with fsdb.locked(d):
         (d / "wallpaper.png").write_bytes(data)
         meta = {
@@ -91,12 +91,12 @@ async def put_wallpaper(
     return meta
 
 
-@router.delete("/images/{image}/wallpaper", status_code=204)
+@router.delete("/site-images/{image}/wallpaper", status_code=204)
 async def delete_wallpaper(
     image: str, p=Depends(auth.require_image_access(service_scope="config:write"))
 ) -> None:
     _check_wallpaper_editable(image, p)
-    d = store.image_dir(image)
+    d = store.site_image_dir(image)
     with fsdb.locked(d):
         (d / "wallpaper.png").unlink(missing_ok=True)
         (d / "wallpaper.json").unlink(missing_ok=True)

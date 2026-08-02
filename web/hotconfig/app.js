@@ -123,7 +123,7 @@ function showDetail(m) {
   lockBtn.textContent = m.lock?.locked ? t("unlock_screen") : t("lock_screen");
   lockBtn.onclick = async () => {
     const verb = m.lock?.locked ? "unlock" : "lock";
-    await api.post(`/api/v1/images/${api.imageId}/machines/${m.mac}/${verb}`);
+    await api.post(`/api/v1/site-images/${api.imageId}/machines/${m.mac}/${verb}`);
     box.remove();
     loadAll();
   };
@@ -145,10 +145,10 @@ async function sendCommand(cmd) {
   try {
     if (cmd === "lock" || cmd === "unlock") {
       await Promise.all(
-        macs.map((mac) => api.post(`/api/v1/images/${api.imageId}/machines/${mac}/${cmd}`))
+        macs.map((mac) => api.post(`/api/v1/site-images/${api.imageId}/machines/${mac}/${cmd}`))
       );
     } else {
-      await api.post(`/api/v1/images/${api.imageId}/commands`, { command: cmd, target: macs });
+      await api.post(`/api/v1/site-images/${api.imageId}/commands`, { command: cmd, target: macs });
     }
     toast(t("command_sent", { n: macs.length }));
     loadAll();
@@ -159,7 +159,7 @@ async function sendCommand(cmd) {
 
 async function loadAll() {
   try {
-    const data = await api.get(`/api/v1/images/${api.imageId}/machines`);
+    const data = await api.get(`/api/v1/site-images/${api.imageId}/machines`);
     machines = data.machines;
     render();
   } catch (e) {

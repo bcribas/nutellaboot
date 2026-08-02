@@ -215,7 +215,7 @@ function renderWallpaper(meta) {
 
 async function loadSeeders() {
   try {
-    const data = await api.get(`/api/v1/images/${api.imageId}/seeders`);
+    const data = await api.get(`/api/v1/site-images/${api.imageId}/seeders`);
     const box = $("#seeders");
     if (!data.seeders.length) {
       box.className = "muted";
@@ -245,7 +245,7 @@ async function save() {
       if (f.type === "password" && !values[f.key]) continue;
       payload[f.key] = values[f.key] ?? f.default;
     }
-    const resp = await api.put(`/api/v1/images/${api.imageId}/config`, { values: payload });
+    const resp = await api.put(`/api/v1/site-images/${api.imageId}/config`, { values: payload });
     values = { ...values, ...resp.values };
     $("#savestatus").textContent = "";
     toast(t("saved"));
@@ -264,7 +264,7 @@ async function uploadWallpaper() {
   try {
     const fd = new FormData();
     fd.append("file", file);
-    const meta = await api.request("PUT", `/api/v1/images/${api.imageId}/wallpaper`, { raw: fd });
+    const meta = await api.request("PUT", `/api/v1/site-images/${api.imageId}/wallpaper`, { raw: fd });
     renderWallpaper(meta);
     $("#wallstatus").textContent = t("wallpaper_current");
     $("#wallsend").disabled = true;
@@ -282,7 +282,7 @@ async function main() {
     return;
   }
   try {
-    const data = await api.get(`/api/v1/images/${api.imageId}/config`);
+    const data = await api.get(`/api/v1/site-images/${api.imageId}/config`);
     schema = data.schema;
     values = data.values;
     canEditLocked = data.can_edit_locked;
@@ -301,7 +301,7 @@ async function main() {
   $("#wallfile").onchange = () => ($("#wallsend").disabled = !$("#wallfile").files[0]);
   $("#wallsend").onclick = uploadWallpaper;
   $("#wallremove").onclick = async () => {
-    await api.del(`/api/v1/images/${api.imageId}/wallpaper`);
+    await api.del(`/api/v1/site-images/${api.imageId}/wallpaper`);
     renderWallpaper(null);
   };
   document.addEventListener("nb3:langchange", () => {

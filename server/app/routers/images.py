@@ -9,19 +9,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from .. import auth
-from ..models import BulkRequest, ImageCreate, ImagePatch, TemplateLayers
+from ..models import BulkRequest, SiteImageCreate, SiteImagePatch, ModelLayers
 from ..services import seeders, store
 
 router = APIRouter(prefix="/api/v1")
 
 
-@router.post("/images", status_code=201)
-async def create_image(body: ImageCreate, p=Depends(auth.require_admin)) -> dict:
+@router.post("/site-images", status_code=201)
+async def create_image(body: SiteImageCreate, p=Depends(auth.require_admin)) -> dict:
     try:
-        return store.create_image(
+        return store.create_site_image(
             body.id,
             body.fullname,
-            body.template,
+            body.model,
             unlocked=body.unlocked,
             extra={"wallpaper_locked": bool(body.wallpaper_locked)} if body.wallpaper_locked else None,
         )
@@ -29,14 +29,14 @@ async def create_image(body: ImageCreate, p=Depends(auth.require_admin)) -> dict
         raise HTTPException(400, str(e))
 
 
-@router.post("/images/bulk")
+@router.post("/site-images/bulk")
 async def bulk_create(
     request: Request,
     format: str = Query("json", pattern="^(json|csv)$"),
     p=Depends(auth.require_admin),
 ):
-    """Criação em massa. Aceita JSON {rows:[{id,fullname,template}...]} ou
-    corpo `text/tab-separated-values` com linhas `id<TAB>fullname<TAB>template`.
+    """Criação em massa. Aceita JSON {rows:[{id,fullname,model}...]} ou
+    corpo `text/tab-separated-values` com linhas `id<TAB>fullname<TAB>model`.
     Com ?format=csv devolve as credenciais em CSV para distribuir."""
     ctype = request.headers.get("content-type", "")
     rows: list[dict]
@@ -46,19 +46,19 @@ async def bulk_create(
     else:
         text = (await request.body()).decode()
         rows = []
-        default_template = store.list_templates()[0] if store.list_templates() else ""
+        default_template = store.list_models()[0] if store.list_models() else ""
         for ln, line in enumerate(text.splitlines(), 1):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
             parts = line.split("\t")
             if len(parts) < 2:
-                raise HTTPException(400, f"linha {ln}: esperado id<TAB>fullname[<TAB>template]")
+                raise HTTPException(400, f"linha {ln}: esperado id<TAB>fullname[<TAB>model]")
             rows.append(
                 {
                     "id": parts[0].strip(),
                     "fullname": parts[1].strip(),
-                    "template": (parts[2].strip() if len(parts) > 2 else default_template),
+                    "model": (parts[2].strip() if len(parts) > 2 else default_template),
                     "unlocked": False,
                 }
             )
@@ -66,8 +66,8 @@ async def bulk_create(
     results = []
     for row in rows:
         try:
-            created = store.create_image(
-                row["id"], row["fullname"], row["template"], unlocked=row.get("unlocked", False)
+            created = store.create_site_image(
+                row["id"], row["fullname"], row["model"], unlocked=row.get("unlocked", False)
             )
             results.append({"ok": True, **created})
         except store.ImageError as e:
@@ -93,92 +93,92 @@ async def bulk_create(
     return {"results": results}
 
 
-@router.get("/images")
+@router.get("/site-images")
 async def list_images(prefix: str = "", p=Depends(auth.require_admin)) -> dict:
-    return {"images": store.list_images(prefix)}
+    return {"images": store.list_site_images(prefix)}
 
 
-@router.get("/images/{image}")
-async def get_image(image: str, p=Depends(auth.require_image_access())) -> dict:
-    return store.get_image(image) or {}
+@router.get("/site-images/{image}")
+async def get_site_image(image: str, p=Depends(auth.require_image_access())) -> dict:
+    return store.get_site_image(image) or {}
 
 
-@router.patch("/images/{image}")
-async def patch_image(image: str, body: ImagePatch, p=Depends(auth.require_admin)) -> dict:
-    if not store.image_exists(image):
+@router.patch("/site-images/{image}")
+async def patch_image(image: str, body: SiteImagePatch, p=Depends(auth.require_admin)) -> dict:
+    if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
     try:
-        return store.patch_image(image, body.model_dump())
+        return store.patch_site_image(image, body.model_dump())
     except store.ImageError as e:
         raise HTTPException(400, str(e))
 
 
-@router.delete("/images/{image}", status_code=204)
+@router.delete("/site-images/{image}", status_code=204)
 async def delete_image(image: str, p=Depends(auth.require_admin)) -> None:
-    if not store.image_exists(image):
+    if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
-    store.delete_image(image)
+    store.delete_site_image(image)
 
 
-@router.post("/images/{image}/token/rotate")
+@router.post("/site-images/{image}/token/rotate")
 async def rotate_token(image: str, p=Depends(auth.require_admin)) -> dict:
-    if not store.image_exists(image):
+    if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
     return {"token": store.rotate_token(image)}
 
 
-@router.get("/images/{image}/credentials")
+@router.get("/site-images/{image}/credentials")
 async def get_credentials(image: str, p=Depends(auth.require_admin)) -> dict:
     """Token, chaves e links prontos da imagem — para o admin entregar ao
     coordenador sem precisar rotacionar nada (o que invalidaria links já
     distribuídos)."""
-    if not store.image_exists(image):
+    if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
     return store.credentials(image)
 
 
-@router.get("/images/{image}/boot-key")
+@router.get("/site-images/{image}/boot-key")
 async def get_boot_key(image: str, p=Depends(auth.require_admin)) -> dict:
     """Chave que vai no nutellaboot.conf do pendrive desta imagem."""
-    if not store.image_exists(image):
+    if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
     return {"boot_key": store.boot_key(image)}
 
 
-@router.post("/images/{image}/boot-key/rotate")
+@router.post("/site-images/{image}/boot-key/rotate")
 async def rotate_boot_key(image: str, p=Depends(auth.require_admin)) -> dict:
     """Troca a chave de boot. Depois disso, os pendrives daquela imagem
     precisam ter o nutellaboot.conf atualizado — senão param de bootar."""
-    if not store.image_exists(image):
+    if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
     return {"boot_key": store.rotate_boot_key(image)}
 
 
-@router.get("/images/{image}/seeders")
+@router.get("/site-images/{image}/seeders")
 async def list_seeders(image: str, p=Depends(auth.require_image_access())) -> dict:
     return {"seeders": seeders.detail(image)}
 
 
-@router.delete("/images/{image}/seeders/{ip}", status_code=204)
+@router.delete("/site-images/{image}/seeders/{ip}", status_code=204)
 async def remove_seeder(image: str, ip: str, p=Depends(auth.require_image_access())) -> None:
     seeders.leave(image, ip)
 
 
-@router.get("/templates")
-async def list_templates(p=Depends(auth.require_admin)) -> dict:
+@router.get("/models")
+async def list_models(p=Depends(auth.require_admin)) -> dict:
     return {
         "templates": [
-            {"name": n, "public": store.template_is_public(n)} for n in store.list_templates()
+            {"name": n, "public": store.model_is_public(n)} for n in store.list_models()
         ]
     }
 
 
-@router.get("/templates/{name}/schema")
+@router.get("/models/{name}/schema")
 async def get_template_schema(name: str, p=Depends(auth.require_admin)) -> dict:
-    """Campos do template com o estado do cadeado — alimenta a tela onde o
+    """Campos do model com o estado do cadeado — alimenta a tela onde o
     admin escolhe o que as sedes podem ou não mudar."""
-    if not store.template_exists(name):
-        raise HTTPException(404, "template não existe")
+    if not store.model_exists(name):
+        raise HTTPException(404, "model não existe")
     schema = store.get_schema(name)
     return {
         "name": name,
@@ -194,12 +194,12 @@ async def get_template_schema(name: str, p=Depends(auth.require_admin)) -> dict:
     }
 
 
-@router.put("/templates/{name}/schema/locks")
+@router.put("/models/{name}/schema/locks")
 async def put_schema_locks(name: str, body: dict, p=Depends(auth.require_admin)) -> dict:
     """Liga/desliga o cadeado de campos. Vale para as imagens Oficiais deste
-    template (as Livres continuam editando tudo)."""
-    if not store.template_exists(name):
-        raise HTTPException(404, "template não existe")
+    model (as Livres continuam editando tudo)."""
+    if not store.model_exists(name):
+        raise HTTPException(404, "model não existe")
     locks = body.get("locks")
     if not isinstance(locks, dict) or not locks:
         raise HTTPException(400, "esperava {locks: {CAMPO: true|false}}")
@@ -210,34 +210,34 @@ async def put_schema_locks(name: str, body: dict, p=Depends(auth.require_admin))
     return await get_template_schema(name, p)
 
 
-@router.patch("/templates/{name}")
+@router.patch("/models/{name}")
 async def patch_template(name: str, body: dict, p=Depends(auth.require_admin)) -> dict:
-    """Marca um template como público (disponível para criação por convite) e
+    """Marca um model como público (disponível para criação por convite) e
     ajusta a descrição. Templates de prova bloqueados ficam privados."""
-    if not store.template_exists(name):
-        raise HTTPException(404, "template não existe")
-    store.set_template_meta(
+    if not store.model_exists(name):
+        raise HTTPException(404, "model não existe")
+    store.set_model_meta(
         name, public=body.get("public"), description=body.get("description")
     )
-    return {"name": name, "public": store.template_is_public(name)}
+    return {"name": name, "public": store.model_is_public(name)}
 
 
-@router.get("/templates/{name}")
-async def get_template(name: str, p=Depends(auth.require_admin)) -> dict:
-    tpl = store.get_template(name)
+@router.get("/models/{name}")
+async def get_model(name: str, p=Depends(auth.require_admin)) -> dict:
+    tpl = store.get_model(name)
     if tpl is None:
-        raise HTTPException(404, "template não existe")
+        raise HTTPException(404, "model não existe")
     return tpl
 
 
-@router.put("/templates/{name}/layers")
+@router.put("/models/{name}/layers")
 async def put_template_layers(
-    name: str, body: TemplateLayers, p=Depends(auth.require_admin)
+    name: str, body: ModelLayers, p=Depends(auth.require_admin)
 ) -> dict:
-    if not store.template_exists(name):
-        raise HTTPException(404, "template não existe")
+    if not store.model_exists(name):
+        raise HTTPException(404, "model não existe")
     for layer in body.layers:
         if not {"md5", "file"} <= set(layer):
             raise HTTPException(400, "cada camada precisa de md5 e file")
-    store.set_template_layers(name, body.layers)
+    store.set_model_layers(name, body.layers)
     return {"ok": True, "layers": len(body.layers)}

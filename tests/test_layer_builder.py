@@ -92,9 +92,9 @@ def ambiente(tmp_path, base_squash):
     (data / "layerbuilds" / "queue").mkdir(parents=True)
     shutil.copy(base_squash, data / "blobs" / "base.squash")
     md5 = hashlib.md5((data / "blobs" / "base.squash").read_bytes()).hexdigest()
-    tpl = data / "templates" / "tteste"
+    tpl = data / "models" / "tteste"
     tpl.mkdir(parents=True)
-    (tpl / "template.json").write_text(
+    (tpl / "model.json").write_text(
         json.dumps({"layers": [{"md5": md5, "file": "base.squash", "cdn_url": "file:///inexistente"}]})
     )
     return {"data": data, "build": tmp_path / "build"}
@@ -131,15 +131,15 @@ def test_worker_anexa_camada_sozinho(ambiente):
     anexa a camada à imagem ao terminar, sem passo manual do admin."""
     data = ambiente["data"]
     (data / "server.json").write_text(json.dumps({"base_url": "https://exemplo.test"}))
-    img = data / "images" / "labauto"
+    img = data / "site-images" / "labauto"
     img.mkdir(parents=True)
-    (img / "image.json").write_text(json.dumps({"id": "labauto", "template": "tteste"}))
+    (img / "image.json").write_text(json.dumps({"id": "labauto", "model": "tteste"}))
     (img / "layers-extra.json").write_text("[]")
 
     job = {
         "id": "ja",
         "name": "camada-auto",
-        "template": "tteste",
+        "model": "tteste",
         "packages": ["htop"],
         "created_at": 0,
         "image": "labauto",
@@ -160,7 +160,7 @@ def test_build_completo_sem_root(ambiente):
     job = {
         "id": "j1",
         "name": "camada-teste",
-        "template": "tteste",
+        "model": "tteste",
         "packages": ["htop", "tmux"],
         "requested_by": "pytest",
         "created_at": 0,
@@ -200,12 +200,12 @@ def test_pacote_invalido_e_recusado_pela_api(client, admin_key, data_root):
     """Nome de pacote não pode virar linha de comando: a API valida antes."""
     from server.app import fsdb
 
-    fsdb.write_json(data_root / "templates" / "t" / "template.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
     h = {"Authorization": f"Bearer {admin_key}"}
     for ruim in ["htop; rm -rf /", "--option", "pacote com espaço", "$(whoami)"]:
         r = client.post(
             "/api/v1/layerbuilds",
-            json={"name": "x", "template": "t", "packages": [ruim]},
+            json={"name": "x", "model": "t", "packages": [ruim]},
             headers=h,
         )
         assert r.status_code == 400, ruim
@@ -217,20 +217,20 @@ def test_attach_coloca_camada_na_frente(client, admin_key, data_root):
     from server.app import fsdb
 
     fsdb.write_json(
-        data_root / "templates" / "t" / "template.json",
+        data_root / "models" / "t" / "model.json",
         {"layers": [{"md5": "a" * 32, "file": "base.squash", "cdn_url": "https://cdn/base.squash"}]},
     )
     fsdb.write_json(data_root / "server.json", {"reserved_prefix_regex": "^[0-9]"})
     h = {"Authorization": f"Bearer {admin_key}"}
     criada = client.post(
-        "/api/v1/images", json={"id": "alvo", "fullname": "Alvo", "template": "t"}, headers=h
+        "/api/v1/site-images", json={"id": "alvo", "fullname": "Alvo", "model": "t"}, headers=h
     ).json()
     bk = {"X-NB-Boot-Key": criada["boot_key"]}
 
     job = {
         "id": "j2",
         "name": "extra",
-        "template": "t",
+        "model": "t",
         "packages": ["htop"],
         "created_at": 0,
         "output": {"file": "extra.squash", "md5": "b" * 32, "size": 123},
@@ -248,6 +248,6 @@ def test_attach_coloca_camada_na_frente(client, admin_key, data_root):
     client.post("/api/v1/layerbuilds/j2/attach", json={"image_ids": ["alvo"]}, headers=h)
     assert len(client.get("/boot/v3/alvo/manifest", headers=bk).text.strip().splitlines()) == 2
 
-    r = client.delete("/api/v1/images/alvo/layers/extra.squash", headers=h)
+    r = client.delete("/api/v1/site-images/alvo/layers/extra.squash", headers=h)
     assert r.status_code == 204
     assert len(client.get("/boot/v3/alvo/manifest", headers=bk).text.strip().splitlines()) == 1

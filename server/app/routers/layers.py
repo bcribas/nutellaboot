@@ -77,15 +77,15 @@ async def create_build(body: dict, p=Depends(auth.require_admin)) -> dict:
     nome = str(body.get("name", "")).strip()
     if not NAME_RE.match(nome):
         raise HTTPException(400, "nome inválido para a camada")
-    template = str(body.get("template", ""))
-    if not store.template_exists(template):
-        raise HTTPException(400, f"template '{template}' não existe")
+    model = str(body.get("model", ""))
+    if not store.model_exists(model):
+        raise HTTPException(400, f"modelo '{model}' não existe")
 
     pacotes = _validate_packages(body.get("packages"))
     job = {
         "id": secrets.token_hex(6),
         "name": nome,
-        "template": template,
+        "model": model,
         "packages": pacotes,
         "requested_by": p.name,
         "created_at": time.time(),
@@ -95,7 +95,7 @@ async def create_build(body: dict, p=Depends(auth.require_admin)) -> dict:
     return job
 
 
-@router.post("/images/{image}/layerbuilds", status_code=201)
+@router.post("/site-images/{image}/layerbuilds", status_code=201)
 async def create_build_for_image(
     image: str,
     body: dict,
@@ -105,7 +105,7 @@ async def create_build_for_image(
     """Build de camada da PRÓPRIA imagem. Aceito do admin (sem limite) ou do
     dono da imagem (token da imagem), respeitando a quota da imagem. A camada
     é anexada automaticamente a esta imagem quando fica pronta."""
-    info = store.get_image(image)
+    info = store.get_site_image(image)
     if info is None:
         raise HTTPException(404, "imagem não existe")
 
@@ -130,7 +130,7 @@ async def create_build_for_image(
     job = {
         "id": secrets.token_hex(6),
         "name": nome,
-        "template": info.get("template", ""),
+        "model": info.get("model", ""),
         "packages": pacotes,
         "requested_by": "admin" if is_admin else f"image:{image}",
         "created_at": time.time(),
@@ -141,13 +141,13 @@ async def create_build_for_image(
     return {**job, "quota": None if is_admin else int(info.get("build_quota", 0))}
 
 
-@router.get("/images/{image}/layerbuilds")
+@router.get("/site-images/{image}/layerbuilds")
 async def list_builds_for_image(
     image: str,
     authorization: str | None = Header(None),
     x_nb_machine_key: str | None = Header(None),
 ) -> dict:
-    info = store.get_image(image)
+    info = store.get_site_image(image)
     if info is None:
         raise HTTPException(404, "imagem não existe")
     token = authorization[7:].strip() if authorization and authorization.startswith("Bearer ") else None
@@ -226,9 +226,9 @@ async def attach(job_id: str, body: dict, p=Depends(auth.require_admin)) -> dict
     }
     aplicadas = []
     for image_id in imagens:
-        if not store.image_exists(image_id):
+        if not store.site_image_exists(image_id):
             raise HTTPException(404, f"imagem '{image_id}' não existe")
-        d = store.image_dir(image_id)
+        d = store.site_image_dir(image_id)
         with fsdb.locked(d):
             extras = fsdb.read_json(d / "layers-extra.json", []) or []
             extras = [c for c in extras if c.get("file") != camada["file"]]
@@ -238,13 +238,13 @@ async def attach(job_id: str, body: dict, p=Depends(auth.require_admin)) -> dict
     return {"ok": True, "layer": camada, "images": aplicadas}
 
 
-@router.post("/images/{image}/layers")
+@router.post("/site-images/{image}/layers")
 async def add_layer(image: str, body: dict, p=Depends(auth.require_admin)) -> dict:
     """Registra uma camada já construída (caminho da VM: nb3-pack-upper).
-    No nb2 isto era editar template.extra na mão, com o md5 copiado do
+    No nb2 isto era editar model.extra na mão, com o md5 copiado do
     terminal — e o arquivo ficava com a URL literal 'unk' quando ninguém
     lembrava de preencher."""
-    if not store.image_exists(image):
+    if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
     md5 = str(body.get("md5", "")).lower()
     arquivo = str(body.get("file", ""))
@@ -260,7 +260,7 @@ async def add_layer(image: str, body: dict, p=Depends(auth.require_admin)) -> di
         "cdn_url": body.get("cdn_url") or f"{settings.base_url}/blobs/{arquivo}",
         "size": body.get("size") or (blob.stat().st_size if blob.is_file() else None),
     }
-    d = store.image_dir(image)
+    d = store.site_image_dir(image)
     with fsdb.locked(d):
         extras = fsdb.read_json(d / "layers-extra.json", []) or []
         extras = [c for c in extras if c.get("file") != arquivo]
@@ -269,17 +269,17 @@ async def add_layer(image: str, body: dict, p=Depends(auth.require_admin)) -> di
     return {"ok": True, "layer": camada}
 
 
-@router.delete("/images/{image}/layers/{file}", status_code=204)
+@router.delete("/site-images/{image}/layers/{file}", status_code=204)
 async def detach(image: str, file: str, p=Depends(auth.require_admin)) -> None:
-    d = store.image_dir(image)
+    d = store.site_image_dir(image)
     with fsdb.locked(d):
         extras = fsdb.read_json(d / "layers-extra.json", []) or []
         fsdb.write_json(d / "layers-extra.json", [c for c in extras if c.get("file") != file])
 
 
-@router.get("/images/{image}/layers")
+@router.get("/site-images/{image}/layers")
 async def list_layers(image: str, p=Depends(auth.require_image_access())) -> dict:
     return {
-        "extra": fsdb.read_json(store.image_dir(image) / "layers-extra.json", []) or [],
-        "all": store.image_layers(image),
+        "extra": fsdb.read_json(store.site_image_dir(image) / "layers-extra.json", []) or [],
+        "all": store.site_image_layers(image),
     }

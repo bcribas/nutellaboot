@@ -37,7 +37,7 @@ def _publish(image: str, event: str, data: dict) -> None:
     webhook_push.emit(image, event, data)
 
 
-@router.post("/images/{image}/machines/{mac}/status")
+@router.post("/site-images/{image}/machines/{mac}/status")
 async def post_status(
     image: str, mac: str, body: dict, x_nb_machine_key: str | None = Header(None)
 ) -> dict:
@@ -52,7 +52,7 @@ async def post_status(
     }
 
 
-@router.get("/images/{image}/machines/{mac}/commands")
+@router.get("/site-images/{image}/machines/{mac}/commands")
 async def poll_commands(
     image: str,
     mac: str,
@@ -76,7 +76,7 @@ async def poll_commands(
         await notify.wait_machine(image, mac, min(restante, 5.0))
 
 
-@router.post("/images/{image}/machines/{mac}/commands/{cid}/ack")
+@router.post("/site-images/{image}/machines/{mac}/commands/{cid}/ack")
 async def ack_command(
     image: str, mac: str, cid: str, body: dict, x_nb_machine_key: str | None = Header(None)
 ) -> dict:
@@ -86,21 +86,21 @@ async def ack_command(
     return {"ok": True, "found": found}
 
 
-@router.get("/images/{image}/machines")
+@router.get("/site-images/{image}/machines")
 async def list_machines(
     image: str, p=Depends(auth.require_image_access(service_scope="machines:read"))
 ) -> dict:
     return {"machines": m.list_machines(image)}
 
 
-@router.get("/images/{image}/machines/{mac}")
+@router.get("/site-images/{image}/machines/{mac}")
 async def get_machine(
     image: str, mac: str, p=Depends(auth.require_image_access(service_scope="machines:read"))
 ) -> dict:
     return m.get_machine(image, m.normalize_mac(mac))
 
 
-@router.post("/images/{image}/commands")
+@router.post("/site-images/{image}/commands")
 async def create_command(
     image: str, body: dict, p=Depends(auth.require_image_access(service_scope="commands:write"))
 ) -> dict:
@@ -133,35 +133,35 @@ async def _lock(image: str, macs: list[str], locked: bool, by: str) -> dict:
     return {"command_id": cid, "machines": len(macs), "locked": locked}
 
 
-@router.post("/images/{image}/lock")
+@router.post("/site-images/{image}/lock")
 async def lock_all(
     image: str, p=Depends(auth.require_image_access(service_scope="commands:write"))
 ) -> dict:
     return await _lock(image, m.list_macs(image), True, p.name)
 
 
-@router.post("/images/{image}/unlock")
+@router.post("/site-images/{image}/unlock")
 async def unlock_all(
     image: str, p=Depends(auth.require_image_access(service_scope="commands:write"))
 ) -> dict:
     return await _lock(image, m.list_macs(image), False, p.name)
 
 
-@router.post("/images/{image}/machines/{mac}/lock")
+@router.post("/site-images/{image}/machines/{mac}/lock")
 async def lock_one(
     image: str, mac: str, p=Depends(auth.require_image_access(service_scope="commands:write"))
 ) -> dict:
     return await _lock(image, [m.normalize_mac(mac)], True, p.name)
 
 
-@router.post("/images/{image}/machines/{mac}/unlock")
+@router.post("/site-images/{image}/machines/{mac}/unlock")
 async def unlock_one(
     image: str, mac: str, p=Depends(auth.require_image_access(service_scope="commands:write"))
 ) -> dict:
     return await _lock(image, [m.normalize_mac(mac)], False, p.name)
 
 
-@router.get("/images/{image}/events")
+@router.get("/site-images/{image}/events")
 async def events(image: str, request: Request, tk: str = Query("")) -> StreamingResponse:
     """Fluxo SSE para o painel do laboratório (sem recarregar a página).
     O token vem na query porque EventSource não manda cabeçalhos."""

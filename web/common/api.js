@@ -70,5 +70,5 @@ export const del = (p, o) => request("DELETE", p, o);
 
 export function eventsUrl(image) {
   const tk = imageToken() || adminKey();
-  return `/api/v1/images/${encodeURIComponent(image)}/events?tk=${encodeURIComponent(tk)}`;
+  return `/api/v1/site-images/${encodeURIComponent(image)}/events?tk=${encodeURIComponent(tk)}`;
 }

@@ -12,11 +12,11 @@ import ipaddress
 import time
 
 from .. import fsdb
-from .store import image_dir, server_conf
+from .store import site_image_dir, server_conf
 
 
 def _path(image_id: str):
-    return image_dir(image_id) / "seeders.json"
+    return site_image_dir(image_id) / "seeders.json"
 
 
 def _ttl() -> int:
@@ -57,7 +57,7 @@ def detail(image_id: str) -> list[dict]:
 def touch(image_id: str, ip: str) -> None:
     """join e heartbeat são a mesma operação: registrar last_seen agora."""
     now = time.time()
-    d = image_dir(image_id)
+    d = site_image_dir(image_id)
     with fsdb.locked(d):
         pool = fsdb.read_json(_path(image_id), {}) or {}
         pool[ip] = {"last_seen": now}
@@ -65,7 +65,7 @@ def touch(image_id: str, ip: str) -> None:
 
 
 def leave(image_id: str, ip: str) -> None:
-    d = image_dir(image_id)
+    d = site_image_dir(image_id)
     with fsdb.locked(d):
         pool = fsdb.read_json(_path(image_id), {}) or {}
         pool.pop(ip, None)

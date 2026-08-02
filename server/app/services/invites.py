@@ -4,7 +4,7 @@ O código é o segredo distribuído (não fica como hash, igual a token/boot.key
 quem o recebe cria a própria imagem sem precisar de aprovação, dentro da cota.
 
 `data/invites.json` = {CODIGO: {max_images, used_images, expires_at,
-template, build_quota, note, created_at}}.
+model, build_quota, note, created_at}}.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def create(
     *,
     max_images: int = DEFAULT_MAX_IMAGES,
     build_quota: int = DEFAULT_BUILD_QUOTA,
-    template: str | None = None,
+    model: str | None = None,
     expires_at: float | None = None,
     note: str = "",
     count: int = 1,
@@ -53,7 +53,7 @@ def create(
     """Gera `count` códigos e devolve a lista (com o código em claro).
 
     `unlocked` define o perfil da imagem que o código vai criar: Livre (padrão
-    — o dono edita tudo) ou Oficial (os campos obrigatórios do template ficam
+    — o dono edita tudo) ou Oficial (os campos obrigatórios do model ficam
     travados, como nas imagens de prova)."""
     novos = []
     with fsdb.locked(settings.data_root):
@@ -66,7 +66,7 @@ def create(
                 "max_images": int(max_images),
                 "used_images": [],
                 "build_quota": int(build_quota),
-                "template": template,
+                "model": model,
                 "expires_at": expires_at,
                 "note": note,
                 "unlocked": bool(unlocked),

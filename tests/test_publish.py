@@ -156,9 +156,9 @@ def test_rotas_exigem_admin(client, conf_publish):
 def test_manifest_usa_a_url_publicada(client, data_root, conf_publish, fake_rsync, admin_key, ha):
     """Depois de publicada, a camada é baixada do servidor de arquivos — não
     da máquina de gestão."""
-    fsdb.write_json(data_root / "templates" / "t" / "template.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
     criada = client.post(
-        "/api/v1/images", json={"id": "img1", "fullname": "I", "template": "t"}, headers=ha
+        "/api/v1/site-images", json={"id": "img1", "fullname": "I", "model": "t"}, headers=ha
     ).json()
     _blob(data_root, "extra.squash", b"conteudo")
     publish.publish_file(data_root / "blobs" / "extra.squash", "layers")
@@ -166,7 +166,7 @@ def test_manifest_usa_a_url_publicada(client, data_root, conf_publish, fake_rsyn
     job = {
         "id": "j1",
         "name": "extra",
-        "template": "t",
+        "model": "t",
         "packages": ["htop"],
         "created_at": 0,
         "output": {"file": "extra.squash", "md5": "a" * 32, "size": 8},

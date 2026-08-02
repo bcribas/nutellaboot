@@ -2,7 +2,7 @@
 
 Regras que valem a pena ter em mente:
  - campos `locked` são o "perfil bloqueado" da maratona: só a administração
-   muda (o nb2 fazia isso mantendo DOIS diretórios de template, um normal e um
+   muda (o nb2 fazia isso mantendo DOIS diretórios de modelo, um normal e um
    "-desbloqueado", que precisavam ser mantidos em sincronia à mão);
  - senha nunca volta pela API nem fica em claro no disco: guardamos
    `<chave>_HASH` = sha256(salt + senha) e só o hash chega à máquina;
@@ -16,7 +16,7 @@ import hashlib
 import secrets
 
 from .. import fsdb
-from .store import config_values, get_image, image_dir, template_dir
+from .store import config_values, get_site_image, model_dir, site_image_dir
 
 
 class ConfigError(ValueError):
@@ -24,8 +24,8 @@ class ConfigError(ValueError):
 
 
 def schema_for(image_id: str) -> dict:
-    info = get_image(image_id) or {}
-    return fsdb.read_json(template_dir(info.get("template", "")) / "schema.json", {"fields": []})
+    info = get_site_image(image_id) or {}
+    return fsdb.read_json(model_dir(info.get("model", "")) / "schema.json", {"fields": []})
 
 
 def _field_map(schema: dict) -> dict:
@@ -34,9 +34,9 @@ def _field_map(schema: dict) -> dict:
 
 def effective_values(image_id: str) -> dict:
     """Valores atuais: padrão do esquema, sobrescrito pelo que a imagem salvou.
-    Campos bloqueados sempre voltam ao padrão do template."""
+    Campos bloqueados sempre voltam ao padrão do modelo."""
     schema = schema_for(image_id)
-    info = get_image(image_id) or {}
+    info = get_site_image(image_id) or {}
     unlocked = bool(info.get("unlocked"))
     saved = config_values(image_id)
 
@@ -110,10 +110,10 @@ def check_password(stored: str, password: str) -> bool:
 def write_values(image_id: str, incoming: dict, *, is_admin: bool) -> dict:
     schema = schema_for(image_id)
     fields = _field_map(schema)
-    info = get_image(image_id) or {}
+    info = get_site_image(image_id) or {}
     unlocked = bool(info.get("unlocked"))
 
-    d = image_dir(image_id)
+    d = site_image_dir(image_id)
     with fsdb.locked(d):
         current = fsdb.read_json(d / "config.json", {"values": {}}) or {"values": {}}
         values = dict(current.get("values", {}))
@@ -121,7 +121,7 @@ def write_values(image_id: str, incoming: dict, *, is_admin: bool) -> dict:
         for key, value in incoming.items():
             field = fields.get(key)
             if field is None:
-                raise ConfigError(f"{key}: campo não existe neste template")
+                raise ConfigError(f"{key}: campo não existe neste modelo")
             if field.get("locked") and not (is_admin or unlocked):
                 raise ConfigError(f"{key}: campo bloqueado pela organização da maratona")
 

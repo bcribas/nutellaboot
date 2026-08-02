@@ -46,7 +46,7 @@ async def _key_from(request: Request, header: str | None, query: str | None) -> 
 
 async def _autorizar(request: Request, image: str, header: str | None, query: str | None) -> None:
     """Confere que a imagem existe e que a chave de boot confere."""
-    if not store.image_exists(image):
+    if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
     chave = await _key_from(request, header, query)
     if not auth.check_boot_key(image, chave):
@@ -80,7 +80,7 @@ async def manifest(
     await _autorizar(request, image, x_nb_boot_key, key)
     live = seeders.live(image)
     out = []
-    for layer in store.image_layers(image):
+    for layer in store.site_image_layers(image):
         urls = [f"http://{ip}/{layer['file']}" for ip in live]
         if layer.get("cdn_url"):
             urls.append(layer["cdn_url"])
@@ -122,7 +122,7 @@ async def seeder_join(
 @router.post("/{image}/seeders/leave")
 async def seeder_leave(image: str, ip: str = Query(...)) -> str:
     # sem chave, como o `out` do nb2: só remove uma entrada — inócuo.
-    if not store.image_exists(image):
+    if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
     seeders.leave(image, ip)
     return "ok\n"
@@ -188,8 +188,8 @@ async def wallpaper(
     await _autorizar(request, image, x_nb_boot_key, key)
     from .. import fsdb
 
-    meta = fsdb.read_json(store.image_dir(image) / "wallpaper.json")
-    path = store.image_dir(image) / "wallpaper.png"
+    meta = fsdb.read_json(store.site_image_dir(image) / "wallpaper.json")
+    path = store.site_image_dir(image) / "wallpaper.png"
     if not meta or not path.is_file():
         raise HTTPException(404, "sem wallpaper")
     return FileResponse(path, media_type="image/png", headers={"ETag": f'"{meta["md5"]}"'})

@@ -12,18 +12,18 @@ BK = {"X-NB-Boot-Key": "nb3b_chavedeteste"}
 @pytest.fixture
 def image_with_template(data_root, image_testes3):
     # imagem de teste com chave de boot, como as criadas pela API
-    fsdb.write_text(data_root / "images" / "testes3" / "boot.key", "nb3b_chavedeteste\n")
+    fsdb.write_text(data_root / "site-images" / "testes3" / "boot.key", "nb3b_chavedeteste\n")
     fsdb.write_json(
-        data_root / "templates" / "tpl" / "template.json",
+        data_root / "models" / "tpl" / "model.json",
         {
             "layers": [
                 {"md5": "a" * 32, "file": "base.squash", "cdn_url": "https://cdn/base.squash"}
             ]
         },
     )
-    img = data_root / "images" / "testes3"
+    img = data_root / "site-images" / "testes3"
     info = fsdb.read_json(img / "image.json")
-    info["template"] = "tpl"
+    info["model"] = "tpl"
     fsdb.write_json(img / "image.json", info)
     fsdb.write_json(
         img / "layers-extra.json",
@@ -70,7 +70,7 @@ def test_seeder_ttl_expires(client, image_with_template, data_root):
     client.post(f"/boot/v3/testes3/seeders/join?ip=10.0.0.5&key={key}")
     assert seeders.live("testes3") == ["10.0.0.5"]
     # envelhece o heartbeat além do TTL
-    pool_path = data_root / "images" / "testes3" / "seeders.json"
+    pool_path = data_root / "site-images" / "testes3" / "seeders.json"
     pool = fsdb.read_json(pool_path)
     pool["10.0.0.5"]["last_seen"] = time.time() - 9999
     fsdb.write_json(pool_path, pool)
@@ -95,7 +95,7 @@ def test_stuff_renders_vars_and_modules(client, image_with_template):
 
 
 def test_stuff_quotes_hostile_values(client, image_with_template, data_root):
-    img = data_root / "images" / "testes3"
+    img = data_root / "site-images" / "testes3"
     fsdb.write_json(
         img / "config.json",
         {"values": {"DEFAULTBROWSERURL": "x'; rm -rf / #", "não-vale": "y", "lower": "z"}},
@@ -111,38 +111,38 @@ def test_manifest_404_unknown_image(client, data_root):
 
 
 def test_image_lifecycle_via_api(client, admin_key, data_root):
-    fsdb.write_json(data_root / "templates" / "tpl" / "template.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "tpl" / "model.json", {"layers": []})
     fsdb.write_json(data_root / "server.json", {"reserved_prefix_regex": "^[0-9]"})
     h = {"Authorization": f"Bearer {admin_key}"}
 
-    r = client.post("/api/v1/images", json={"id": "unbteste", "fullname": "UnB", "template": "tpl"}, headers=h)
+    r = client.post("/api/v1/site-images", json={"id": "unbteste", "fullname": "UnB", "model": "tpl"}, headers=h)
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["namespace"] == "personal"
     assert body["token"].startswith("nb3i_")
 
-    r = client.post("/api/v1/images", json={"id": "26brbr", "fullname": "Finals", "template": "tpl"}, headers=h)
+    r = client.post("/api/v1/site-images", json={"id": "26brbr", "fullname": "Finals", "model": "tpl"}, headers=h)
     assert r.json()["namespace"] == "contest"
 
-    r = client.post("/api/v1/images", json={"id": "unbteste", "fullname": "dup", "template": "tpl"}, headers=h)
+    r = client.post("/api/v1/site-images", json={"id": "unbteste", "fullname": "dup", "model": "tpl"}, headers=h)
     assert r.status_code == 400
 
-    r = client.get("/api/v1/images?prefix=26", headers=h)
+    r = client.get("/api/v1/site-images?prefix=26", headers=h)
     assert [i["id"] for i in r.json()["images"]] == ["26brbr"]
 
-    r = client.post("/api/v1/images/unbteste/token/rotate", headers=h)
+    r = client.post("/api/v1/site-images/unbteste/token/rotate", headers=h)
     assert r.json()["token"].startswith("nb3i_")
 
-    assert client.delete("/api/v1/images/unbteste", headers=h).status_code == 204
-    assert not store.image_exists("unbteste")
+    assert client.delete("/api/v1/site-images/unbteste", headers=h).status_code == 204
+    assert not store.site_image_exists("unbteste")
 
 
 def test_bulk_tsv_csv(client, admin_key, data_root):
-    fsdb.write_json(data_root / "templates" / "tpl" / "template.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "tpl" / "model.json", {"layers": []})
     fsdb.write_json(data_root / "server.json", {"reserved_prefix_regex": "^[0-9]"})
     tsv = "26spsp\tSede São Paulo\ttpl\n26mgbh\tSede BH\ttpl\nruim id\tX\ttpl\n"
     r = client.post(
-        "/api/v1/images/bulk?format=csv",
+        "/api/v1/site-images/bulk?format=csv",
         content=tsv,
         headers={"Authorization": f"Bearer {admin_key}", "Content-Type": "text/tab-separated-values"},
     )

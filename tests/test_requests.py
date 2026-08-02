@@ -16,7 +16,7 @@ def _reset():
 @pytest.fixture
 def base(data_root, admin_key):
     fsdb.write_json(data_root / "server.json", {"reserved_prefix_regex": "^[0-9]"})
-    fsdb.write_json(data_root / "templates" / "generico" / "template.json", {"layers": [], "public": True})
+    fsdb.write_json(data_root / "models" / "generico" / "model.json", {"layers": [], "public": True})
     return admin_key
 
 
@@ -35,15 +35,15 @@ def test_aprovar_criando_imagem_direto(client, base, ha):
     ).json()["id"]
     r = client.post(
         f"/api/v1/requests/{rid}/approve",
-        json={"id": "labaprovado", "template": "generico", "fullname": "Lab Aprovado"},
+        json={"id": "labaprovado", "model": "generico", "fullname": "Lab Aprovado"},
         headers=ha,
     )
     assert r.status_code == 200, r.text
     created = r.json()["created"]
     assert created["id"] == "labaprovado"
-    assert store.image_exists("labaprovado")
+    assert store.site_image_exists("labaprovado")
     # a imagem aprovada nasce marcada como auto-atendimento
-    assert store.get_image("labaprovado")["self_service"] is True
+    assert store.get_site_image("labaprovado")["self_service"] is True
 
 
 def test_aprovar_direto_sem_template_valido(client, base, ha):

@@ -12,13 +12,13 @@ router = APIRouter(prefix="/api/v1")
 
 @router.post("/invites", status_code=201)
 async def create_invite(body: dict, p=Depends(auth.require_admin)) -> dict:
-    template = body.get("template")
-    if template and not store.template_exists(template):
-        raise HTTPException(400, f"template '{template}' não existe")
+    model = body.get("model")
+    if model and not store.model_exists(model):
+        raise HTTPException(400, f"modelo '{model}' não existe")
     novos = invites.create(
         max_images=int(body.get("max_images", invites.DEFAULT_MAX_IMAGES)),
         build_quota=int(body.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),
-        template=template,
+        model=model,
         expires_at=body.get("expires_at"),
         note=str(body.get("note", "")),
         count=int(body.get("count", 1)),
@@ -58,7 +58,7 @@ async def approve_request(rid: str, body: dict, p=Depends(auth.require_admin)) -
         code = invites.create(
             max_images=int(body.get("max_images", 1)),
             build_quota=int(body.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),
-            template=body.get("template"),
+            model=body.get("model"),
             note=f"pedido {rid}: {req.get('wanted_name', '')}",
             unlocked=bool(body.get("unlocked", True)),
         )[0]
@@ -67,14 +67,14 @@ async def approve_request(rid: str, body: dict, p=Depends(auth.require_admin)) -
 
     # criar a imagem direto
     image_id = body.get("id") or req.get("wanted_name", "")
-    template = body.get("template")
-    if not template or not store.template_exists(template):
-        raise HTTPException(400, "informe um template válido")
+    model = body.get("model")
+    if not model or not store.model_exists(model):
+        raise HTTPException(400, "informe um modelo válido")
     try:
-        created = store.create_image(
+        created = store.create_site_image(
             image_id,
             body.get("fullname", req.get("wanted_name", "")),
-            template,
+            model,
             unlocked=bool(body.get("unlocked", True)),
             extra={"self_service": True, "build_quota": int(body.get("build_quota", invites.DEFAULT_BUILD_QUOTA))},
         )

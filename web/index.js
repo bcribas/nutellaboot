@@ -34,7 +34,7 @@ async function validate() {
 
   $("#coord_status").textContent = t("home_coord_checking");
   try {
-    const resp = await fetch(`/api/v1/images/${encodeURIComponent(id)}/config`, {
+    const resp = await fetch(`/api/v1/site-images/${encodeURIComponent(id)}/config`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!resp.ok) throw new Error();

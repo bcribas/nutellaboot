@@ -34,9 +34,9 @@ def live(tmp_path_factory):
     token = auth.new_key("nb3i")
     mkey = auth.new_key("nb3m")
     fsdb.write_json(data / "server.json", {"reserved_prefix_regex": "^[0-9]"})
-    fsdb.write_json(data / "templates" / "t" / "template.json", {"layers": []})
-    img = data / "images" / "testes3"
-    fsdb.write_json(img / "image.json", {"id": "testes3", "template": "t", "namespace": "personal"})
+    fsdb.write_json(data / "models" / "t" / "model.json", {"layers": []})
+    img = data / "site-images" / "testes3"
+    fsdb.write_json(img / "image.json", {"id": "testes3", "model": "t", "namespace": "personal"})
     fsdb.write_text(img / "token", token + "\n")
     fsdb.write_text(img / "machine.key", mkey + "\n")
 
@@ -91,12 +91,12 @@ def test_sse_delivers_events_live(live):
     recebidos = []
 
     with httpx.stream(
-        "GET", f"{b}/api/v1/images/testes3/events?tk={tk}", timeout=15
+        "GET", f"{b}/api/v1/site-images/testes3/events?tk={tk}", timeout=15
     ) as stream:
         linhas = stream.iter_lines()
         next(linhas)  # "retry: 3000"
 
-        httpx.post(f"{b}/api/v1/images/testes3/machines/{MAC}/status", json={}, headers=hm, timeout=5)
+        httpx.post(f"{b}/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm, timeout=5)
         t0 = time.monotonic()
         for line in linhas:
             if line.startswith("event:"):
@@ -116,14 +116,14 @@ def test_lock_latency_over_http(live):
     b = live["base"]
     hm = {"X-NB-Machine-Key": live["machine_key"]}
     hi = {"Authorization": f"Bearer {live['token']}"}
-    httpx.post(f"{b}/api/v1/images/testes3/machines/{MAC}/status", json={}, headers=hm, timeout=5)
+    httpx.post(f"{b}/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm, timeout=5)
 
     resultado = {}
 
     def agente():
         t0 = time.monotonic()
         r = httpx.get(
-            f"{b}/api/v1/images/testes3/machines/{MAC}/commands?wait=25", headers=hm, timeout=40
+            f"{b}/api/v1/site-images/testes3/machines/{MAC}/commands?wait=25", headers=hm, timeout=40
         )
         resultado["elapsed"] = time.monotonic() - t0
         resultado["body"] = r.json()
@@ -131,7 +131,7 @@ def test_lock_latency_over_http(live):
     th = threading.Thread(target=agente)
     th.start()
     time.sleep(0.5)
-    httpx.post(f"{b}/api/v1/images/testes3/machines/{MAC}/lock", headers=hi, timeout=5)
+    httpx.post(f"{b}/api/v1/site-images/testes3/machines/{MAC}/lock", headers=hi, timeout=5)
     th.join(timeout=30)
 
     assert not th.is_alive()

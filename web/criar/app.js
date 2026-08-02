@@ -64,17 +64,17 @@ function showResult(info) {
 
 async function loadTemplates() {
   try {
-    const data = await (await fetch("/api/v1/public/templates")).json();
+    const data = await (await fetch("/api/v1/public/models")).json();
     const sel = $("#ctpl");
     sel.innerHTML = "";
-    for (const tpl of data.templates) {
+    for (const tpl of data.models) {
       const o = document.createElement("option");
       o.value = tpl.name;
       o.textContent = tpl.description ? `${tpl.name} — ${tpl.description}` : tpl.name;
       sel.appendChild(o);
     }
-    // se não houver template público, o campo some (o código pode fixar um)
-    $("#tplfield").style.display = data.templates.length ? "" : "none";
+    // se não houver modelo público, o campo some (o código pode fixar um)
+    $("#tplfield").style.display = data.models.length ? "" : "none";
   } catch {
     $("#tplfield").style.display = "none";
   }
@@ -85,11 +85,11 @@ async function create() {
     code: $("#code").value.trim(),
     id: $("#cname").value.trim(),
     fullname: $("#cfull").value.trim(),
-    template: $("#ctpl").value || undefined,
+    model: $("#ctpl").value || undefined,
   };
   $("#code_status").textContent = t("loading");
   try {
-    const resp = await fetch("/api/v1/public/images", {
+    const resp = await fetch("/api/v1/public/site-images", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""Migra os dados para os nomes novos: modelo e site-image.
+
+    data/templates/<n>/template.json  ->  data/models/<n>/model.json
+    data/images/<id>/                 ->  data/site-images/<id>/
+    image.json: campo "template"      ->  "model"
+    image.json: campo "invite"        ->  removido (virou credencial de console)
+    invites.json: "template"          ->  "model"
+    layerbuilds/*/*.json: "template"  ->  "model"
+
+Idempotente: registra o que já aplicou em `data/.migrations.json` e também
+confere o estado real, para sobreviver a uma execução interrompida.
+
+PARE O SERVIDOR antes de rodar. Um retrato barato dos dados:
+    cp -al data data.bak-$(date +%F)
+(é seguro porque o fsdb nunca escreve no lugar — grava em tmp e troca.)
+
+    tools/nb3-migrate-names --dry-run
+    tools/nb3-migrate-names
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+VENV_PY = REPO / ".venv" / "bin" / "python3"
+if VENV_PY.exists() and Path(sys.prefix).resolve() != (REPO / ".venv").resolve():
+    os.execv(str(VENV_PY), [str(VENV_PY), __file__, *sys.argv[1:]])
+sys.path.insert(0, str(REPO))
+
+from server.app import fsdb  # noqa: E402
+
+PASSOS = ("01-models-dir", "02-site-images-dir", "03-invites", "04-layerbuilds")
+
+
+class Migracao:
+    def __init__(self, data: Path, dry: bool):
+        self.data = data
+        self.dry = dry
+        self.feitos = []
+
+    def log(self, msg: str) -> None:
+        print(("[simulação] " if self.dry else "  ") + msg)
+
+    # --- controle de idempotência ---
+
+    def _marcador(self) -> dict:
+        return fsdb.read_json(self.data / ".migrations.json", {"applied": []}) or {"applied": []}
+
+    def ja_aplicado(self, passo: str) -> bool:
+        return passo in self._marcador().get("applied", [])
+
+    def marcar(self, passo: str) -> None:
+        if self.dry:
+            return
+        m = self._marcador()
+        if passo not in m["applied"]:
+            m["applied"].append(passo)
+            m["at"] = time.time()
+            fsdb.write_json(self.data / ".migrations.json", m)
+
+    # --- passos ---
+
+    def modelos(self) -> None:
+        origem, destino = self.data / "templates", self.data / "models"
+        if not origem.is_dir():
+            self.log("modelos: nada a fazer (já migrado ou instalação nova)")
+            return
+        if destino.exists():
+            self.log(f"modelos: ATENÇÃO — {destino} já existe; não sobrescrevo")
+            return
+        self.log(f"renomeia {origem.name}/ -> {destino.name}/")
+        if not self.dry:
+            os.rename(origem, destino)
+        base = destino if not self.dry else origem
+        for d in sorted(base.iterdir()) if base.is_dir() else []:
+            antigo = d / "template.json"
+            if not antigo.is_file():
+                continue
+            self.log(f"  {d.name}: template.json -> model.json (+name, +owner)")
+            if self.dry:
+                continue
+            conteudo = json.loads(antigo.read_text())
+            conteudo.setdefault("name", d.name)
+            conteudo.setdefault("owner", "admin")
+            conteudo.setdefault("created_at", time.time())
+            fsdb.write_json(d / "model.json", conteudo)
+            antigo.unlink()
+
+    def site_images(self) -> None:
+        origem, destino = self.data / "images", self.data / "site-images"
+        if not origem.is_dir():
+            self.log("site-images: nada a fazer")
+            return
+        if destino.exists():
+            self.log(f"site-images: ATENÇÃO — {destino} já existe; não sobrescrevo")
+            return
+        self.log(f"renomeia {origem.name}/ -> {destino.name}/")
+        if not self.dry:
+            os.rename(origem, destino)
+        base = destino if not self.dry else origem
+        for d in sorted(base.iterdir()) if base.is_dir() else []:
+            arq = d / "image.json"
+            if not arq.is_file():
+                continue
+            info = json.loads(arq.read_text())
+            mudou = []
+            if "template" in info:
+                info["model"] = info.pop("template")
+                mudou.append("template->model")
+            if "invite" in info:
+                # o código do convite virou credencial de console: não pode
+                # ficar legível para quem tem só o token da site-image
+                info.pop("invite")
+                mudou.append("remove invite")
+            info.setdefault("owner", "admin")
+            info.setdefault("created_at", time.time())
+            if mudou:
+                self.log(f"  {d.name}: {', '.join(mudou)}")
+            if not self.dry:
+                fsdb.write_json(arq, info)
+
+    def invites(self) -> None:
+        p = self.data / "invites.json"
+        if not p.is_file():
+            self.log("convites: nada a fazer")
+            return
+        dados = json.loads(p.read_text())
+        n = 0
+        for code, inv in dados.items():
+            if "template" in inv:
+                inv["model"] = inv.pop("template")
+                n += 1
+            inv.setdefault("max_models", 1)
+        self.log(f"convites: {n} com campo renomeado, {len(dados)} com cota de modelos")
+        if not self.dry and dados:
+            fsdb.write_json(p, dados, mode=0o600)
+
+    def layerbuilds(self) -> None:
+        base = self.data / "layerbuilds"
+        if not base.is_dir():
+            self.log("builds: nada a fazer")
+            return
+        n = 0
+        for estado in ("queue", "running", "done", "failed"):
+            for f in sorted((base / estado).glob("*.json")) if (base / estado).is_dir() else []:
+                job = json.loads(f.read_text())
+                if "template" in job:
+                    job["model"] = job.pop("template")
+                    n += 1
+                    if not self.dry:
+                        fsdb.write_json(f, job)
+        self.log(f"builds: {n} com campo renomeado")
+
+    def relatorio(self) -> int:
+        """Procura resíduos do nome antigo."""
+        restos = []
+        for f in self.data.rglob("*.json"):
+            if f.name == ".migrations.json":
+                continue
+            try:
+                texto = f.read_text()
+            except OSError:
+                continue
+            if '"template"' in texto:
+                restos.append(str(f.relative_to(self.data)))
+        if restos:
+            print("\nAINDA HÁ resíduos de 'template' em:")
+            for r in restos:
+                print("  ", r)
+            return 1
+        print("\nnenhum resíduo do nome antigo")
+        return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", type=Path, default=REPO / "data")
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args()
+
+    if not args.data.is_dir():
+        print(f"diretório de dados não encontrado: {args.data}", file=sys.stderr)
+        return 1
+
+    m = Migracao(args.data, args.dry_run)
+    print(f"{'Simulando' if args.dry_run else 'Migrando'} {args.data}\n")
+    for passo, funcao in (
+        ("01-models-dir", m.modelos),
+        ("02-site-images-dir", m.site_images),
+        ("03-invites", m.invites),
+        ("04-layerbuilds", m.layerbuilds),
+    ):
+        if m.ja_aplicado(passo):
+            print(f"  {passo}: já aplicado")
+            continue
+        funcao()
+        m.marcar(passo)
+    return m.relatorio() if not args.dry_run else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
