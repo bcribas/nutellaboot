@@ -172,9 +172,91 @@ def test_banner_quebra_em_varias_linhas_quando_nao_cabe():
 
 def test_modo_sem_cor_nao_emite_escape():
     """NB_UI_PLAIN existe para quando a saída do boot está sendo capturada
-    para arquivo (e para estes testes)."""
-    saida = sh('NB_UI_PLAIN=1; . ' + str(UI) + '; nb_banner "" NO DISK; log_begin_msg oi; log_end_msg')
+    para arquivo (e para estes testes).
+
+    `nb_phase` entra na lista porque a cor do texto dela era um escape escrito
+    direto no printf: continuava saindo com a cor desligada, e como o reset
+    também some nesse modo, tudo depois dele ficava cinza-escuro.
+    """
+    saida = sh(
+        "NB_UI_PLAIN=1; . "
+        + str(UI)
+        + '; nb_banner "" NO DISK; nb_phase "STORAGE - x"; log_begin_msg oi; log_end_msg'
+    )
     assert "\x1b" not in saida
+
+
+# --- contraste ---------------------------------------------------------------
+
+# A paleta do console VGA, que é o que a máquina de prova tem. Índice 8 é o
+# "preto brilhante" — cinza-escuro, não preto.
+VGA = {
+    "30": (0x00, 0x00, 0x00), "1;30": (0x55, 0x55, 0x55),
+    "31": (0xAA, 0x00, 0x00), "1;31": (0xFF, 0x55, 0x55),
+    "32": (0x00, 0xAA, 0x00), "1;32": (0x55, 0xFF, 0x55),
+    "33": (0xAA, 0x55, 0x00), "1;33": (0xFF, 0xFF, 0x55),
+    "37": (0xAA, 0xAA, 0xAA), "1;37": (0xFF, 0xFF, 0xFF), "0;37": (0xAA, 0xAA, 0xAA),
+    "40": (0x00, 0x00, 0x00), "41": (0xAA, 0x00, 0x00), "43": (0xAA, 0x55, 0x00),
+    "47": (0xAA, 0xAA, 0xAA),
+}
+
+
+def luminancia(rgb):
+    def canal(v):
+        v /= 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (canal(x) for x in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contraste(a, b):
+    la, lb = luminancia(VGA[a]), luminancia(VGA[b])
+    claro, escuro = max(la, lb), min(la, lb)
+    return (claro + 0.05) / (escuro + 0.05)
+
+
+def pares_na_saida(saida: str):
+    """Os pares (fundo, frente) que realmente aparecem, na ordem em que os
+    escapes chegam. Fundo é 4x; frente é 3x, com ou sem o `1;`."""
+    fundo, frente = "40", "37"
+    vistos = set()
+    for pedaco in re.split(r"\x1b\[([0-9;]*)m", saida)[1:]:
+        if re.fullmatch(r"[0-9;]*", pedaco):
+            codigo = pedaco
+            if codigo in ("0", ""):
+                fundo, frente = "40", "37"
+            elif codigo.startswith("4"):
+                fundo = codigo
+            elif codigo in VGA:
+                frente = codigo
+            continue
+        if pedaco.strip():  # só conta se há texto de verdade nesse par
+            vistos.add((fundo, frente))
+    return vistos
+
+
+def test_texto_dentro_das_caixas_tem_contraste_legivel():
+    """A faixa de etapa saía com cinza-escuro (índice 8) sobre o laranja:
+    1,4:1. Ilegível a um metro do monitor, que é a distância de quem está
+    olhando a máquina de um competidor."""
+    for par in pares_na_saida(sh('NB_UI_COLS=60; nb_phase "STORAGE - looking for a disk"')):
+        assert contraste(*par) >= 4.5, f"{par}: {contraste(*par):.2f}:1"
+
+
+def test_texto_das_telas_de_erro_tem_contraste_legivel():
+    saida = sh(
+        'NB_UI_COLS=60; NB_UI_LINES=25; nb_screen "$NB_C_RED" "NO DISK" '
+        '"!Nothing was found." "" "  1. Check the cable" | cat'
+    )
+    for par in pares_na_saida(saida):
+        assert contraste(*par) >= 4.5, f"{par}: {contraste(*par):.2f}:1"
+
+
+def test_as_letras_grandes_tem_contraste_de_texto_grande():
+    """As letras do banner são blocos enormes: o limiar de texto grande (3:1)
+    basta, e trocar o 47 quebraria a leitura do desenho nos outros testes."""
+    assert contraste("41", "47") >= 3.0
 
 
 def test_passo_fecha_a_linha_antes_de_um_aviso():

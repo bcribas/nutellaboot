@@ -36,12 +36,19 @@ NB_C_DIM="${NB_ESC}[0;37m"
 NB_C_OK="${NB_ESC}[1;32m"
 NB_C_WARN="${NB_ESC}[1;33m"
 NB_C_FAIL="${NB_ESC}[1;31m"
+# Texto DENTRO da faixa laranja. Era `1;30` escrito direto no printf: preto com
+# o atributo de brilho, que no console vira o índice 8 (cinza-escuro #555555)
+# sobre o laranja #AA5500 — contraste 1,4:1, ilegível a um metro do monitor.
+# Branco forte sobre o mesmo laranja dá 5,2:1. Ser uma constante também conserta
+# o modo sem cor: como literal, o escape continuava saindo com NB_C_OFF vazio,
+# e daí para a frente a saída inteira ficava cinza-escuro.
+NB_C_ON_YEL="${NB_ESC}[1;37m"
 
 # NB_UI_PLAIN=1 desliga cor e letras grandes (usado nos testes e útil quando a
 # saída do boot está sendo capturada para arquivo).
 if [ "${NB_UI_PLAIN:-0}" = 1 ]; then
     NB_C_OFF= NB_C_RED= NB_C_YEL= NB_C_LIT= NB_C_TXT= NB_C_DIM=
-    NB_C_OK= NB_C_WARN= NB_C_FAIL=
+    NB_C_OK= NB_C_WARN= NB_C_FAIL= NB_C_ON_YEL=
 fi
 
 # --- fonte de bitmap 4x5 ----------------------------------------------------
@@ -123,8 +130,14 @@ nb_ui_spaces() {
     printf '%s' "$_nbu_s"
 }
 
-# nb_ui_word LINHA PALAVRA — desenha uma linha da palavra inteira.
+# nb_ui_word LINHA PALAVRA [FUNDO] — desenha uma linha da palavra inteira.
+#
+# O fundo vem por parâmetro porque o pixel apagado precisa voltar para a cor da
+# caixa. Era `NB_C_RED` fixo aqui: `nb_banner` aceita a cor de fundo, mas do
+# primeiro pixel aceso em diante a caixa voltava a ser vermelha sozinha — o
+# parâmetro era uma promessa que a função não cumpria.
 nb_ui_word() {
+    _nbu_wbg=${3:-$NB_C_RED}
     _nbu_line=
     _nbu_rest=$2
     while [ -n "$_nbu_rest" ]; do
@@ -136,7 +149,7 @@ nb_ui_word() {
             _nbu_p=${_nbu_pat%"${_nbu_pat#?}"}
             _nbu_pat=${_nbu_pat#?}
             if [ "$_nbu_p" = '#' ]; then
-                _nbu_line="$_nbu_line${NB_C_LIT}  ${NB_C_RED}"
+                _nbu_line="$_nbu_line${NB_C_LIT}  ${_nbu_wbg}"
             else
                 _nbu_line="$_nbu_line  "
             fi
@@ -191,7 +204,7 @@ nb_ui_bannerline() {
     printf '  %s%s%s\n' "$_nbu_bg" "$_nbu_bar" "$NB_C_OFF"
     _nbu_n=1
     while [ "$_nbu_n" -le 5 ]; do
-        printf '  %s  %s%s%s\n' "$_nbu_bg" "$(nb_ui_word "$_nbu_n" "$_nbu_txt")" "$_nbu_fill" "$NB_C_OFF"
+        printf '  %s  %s%s%s\n' "$_nbu_bg" "$(nb_ui_word "$_nbu_n" "$_nbu_txt" "$_nbu_bg")" "$_nbu_fill" "$NB_C_OFF"
         _nbu_n=$((_nbu_n + 1))
     done
     printf '  %s%s%s\n' "$_nbu_bg" "$_nbu_bar" "$NB_C_OFF"
@@ -208,7 +221,7 @@ nb_phase() {
     [ "$_nbu_phpad" -lt 0 ] && _nbu_phpad=0
     printf '\n  %s%s%s\n' "$NB_C_YEL" "$_nbu_phbar" "$NB_C_OFF"
     printf '  %s%s  %s  %s%s\n' \
-        "$NB_C_YEL" "${NB_ESC}[1;30m" "$_nbu_t" "$(nb_ui_spaces "$_nbu_phpad")" "$NB_C_OFF"
+        "$NB_C_YEL" "$NB_C_ON_YEL" "$_nbu_t" "$(nb_ui_spaces "$_nbu_phpad")" "$NB_C_OFF"
     printf '  %s%s%s\n\n' "$NB_C_YEL" "$_nbu_phbar" "$NB_C_OFF"
 }
 
@@ -255,6 +268,77 @@ nb_ui_text() {
 
 nb_ui_dim() {
     printf '  %s%s%s\n' "$NB_C_DIM" "$*" "$NB_C_OFF"
+}
+
+# --- barra de progresso -----------------------------------------------------
+
+# nb_ui_bytes N — bytes em unidade legível, com uma casa. Só aritmética de
+# inteiros: não há `bc` no initrd, e a divisão do shell trunca.
+nb_ui_bytes() {
+    _nbu_b=${1:-0}
+    if [ "$_nbu_b" -ge 1073741824 ]; then
+        printf '%s.%s GB' "$((_nbu_b / 1073741824))" "$(((_nbu_b % 1073741824) / 107374182))"
+    elif [ "$_nbu_b" -ge 1048576 ]; then
+        printf '%s.%s MB' "$((_nbu_b / 1048576))" "$(((_nbu_b % 1048576) / 104858))"
+    elif [ "$_nbu_b" -ge 1024 ]; then
+        printf '%s kB' "$((_nbu_b / 1024))"
+    else
+        printf '%s B' "$_nbu_b"
+    fi
+}
+
+# nb_ui_hms SEGUNDOS — 7m41s / 2h05m
+nb_ui_hms() {
+    _nbu_sec=${1:-0}
+    if [ "$_nbu_sec" -ge 3600 ]; then
+        printf '%sh%02dm' "$((_nbu_sec / 3600))" "$(((_nbu_sec % 3600) / 60))"
+    elif [ "$_nbu_sec" -ge 60 ]; then
+        printf '%sm%02ds' "$((_nbu_sec / 60))" "$((_nbu_sec % 60))"
+    else
+        printf '%ss' "$_nbu_sec"
+    fi
+}
+
+# nb_ui_progress FEITO TOTAL BYTES_POR_SEG SEGUNDOS — uma linha, reescrita no
+# lugar com \r. Com TOTAL 0 (tamanho desconhecido) sai sem barra nem ETA.
+#
+# A barra é feita de espaços em fundo colorido, como as letras grandes: no
+# console do initrd não há garantia de fonte, e '#' num terminal sem a fonte
+# certa é a mesma aposta que caractere de desenho.
+NB_UI_BAR=${NB_UI_BAR:-32}
+
+nb_ui_progress() {
+    _nbu_done=$1
+    _nbu_tot=$2
+    _nbu_bps=$3
+    _nbu_el=$4
+
+    if [ "${NB_UI_PLAIN:-0}" = 1 ]; then
+        printf '    %s of %s\n' "$(nb_ui_bytes "$_nbu_done")" "$(nb_ui_bytes "$_nbu_tot")"
+        return 0
+    fi
+
+    if [ "$_nbu_tot" -gt 0 ]; then
+        _nbu_pct=$((_nbu_done * 100 / _nbu_tot))
+        [ "$_nbu_pct" -gt 100 ] && _nbu_pct=100
+        _nbu_pgfill=$((_nbu_pct * NB_UI_BAR / 100))
+        # colchetes delimitam a barra: fundo claro para a parte feita e o
+        # fundo normal para a que falta. Nada de 100m (fundo brilhante): em VGA
+        # texto esse bit é o de PISCAR, e a barra viraria um pisca-pisca.
+        printf '\r    [%s%s%s%s]  %3s%%  %s of %s' \
+            "$NB_C_LIT" "$(nb_ui_spaces "$_nbu_pgfill")" "$NB_C_OFF" \
+            "$(nb_ui_spaces $((NB_UI_BAR - _nbu_pgfill)))" \
+            "$_nbu_pct" "$(nb_ui_bytes "$_nbu_done")" "$(nb_ui_bytes "$_nbu_tot")"
+        if [ "$_nbu_bps" -gt 0 ]; then
+            printf '  %s/s  ETA %s' "$(nb_ui_bytes "$_nbu_bps")" \
+                "$(nb_ui_hms $(((_nbu_tot - _nbu_done) / _nbu_bps)))"
+        fi
+    else
+        printf '\r    %s downloaded' "$(nb_ui_bytes "$_nbu_done")"
+        [ "$_nbu_bps" -gt 0 ] && printf '  %s/s' "$(nb_ui_bytes "$_nbu_bps")"
+        printf '  %s elapsed' "$(nb_ui_hms "$_nbu_el")"
+    fi
+    printf '            '
 }
 
 # --- tela cheia de erro -----------------------------------------------------
