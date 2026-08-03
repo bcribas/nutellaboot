@@ -27,4 +27,17 @@ EOF
 [org/gnome/shell/extensions/dash-to-dock]
 show-mounts=false
 EOF
+
+    # A base já aponta `picture-uri` para o papel de parede da sede e trava a
+    # chave, mas deixa `picture-uri-dark` no padrão do Ubuntu: numa máquina em
+    # tema escuro aparece o fundo da Canonical, e com ele some o carimbo da
+    # sede que o 70-wallpaper.sh desenha.
+    cat > "$_db/91-wallpaper-dark" << 'EOF'
+[org/gnome/desktop/background]
+picture-uri-dark='file:///usr/share/maratona-background/maratona-common-wallpaper.png'
+
+[org/gnome/desktop/screensaver]
+picture-uri-dark='file:///usr/share/maratona-background/maratona-common-wallpaper.png'
+EOF
+    echo "/org/gnome/desktop/background/picture-uri-dark" > "$_db/locks/91-wallpaper-dark"
 }

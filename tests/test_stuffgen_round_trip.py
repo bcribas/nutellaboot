@@ -249,3 +249,41 @@ def test_o_esquema_manda_no_separador(data_root, imagem):
     fsdb.write_json(data_root / "models" / "t" / "schema.json", esquema)
     linha = [l for l in stuffgen.render(imagem).splitlines() if l.startswith("INPUT_SOURCES=")][0]
     assert "') ('" in linha, linha
+
+
+# --- o carimbo da sede no papel de parede ---
+
+
+def test_o_papel_de_parede_guarda_o_original_e_carimba_a_copia(imagem, raiz):
+    """Carimbar sobre o carimbado empilharia tarja sobre tarja a cada boot — e
+    a home é persistente, então isso se acumularia até a tela toda ser tarja."""
+    (raiz / "home").mkdir(parents=True, exist_ok=True)
+    (raiz / "usr/share/maratona-background").mkdir(parents=True, exist_ok=True)
+    (raiz / "etc/rc.local.d").mkdir(parents=True, exist_ok=True)
+
+    texto = (REPO / "client" / "stuff" / "60-postmount.d" / "70-wallpaper.sh").read_text()
+    assert ".wallpaper-orig.png" in texto, "o original precisa sobreviver ao carimbo"
+    # o que o dconf aponta é o carimbado
+    assert "ln -s /home/.wallpaper.png" in texto
+
+
+def test_o_carimbo_e_desenhado_com_o_sistema_rodando():
+    """No initrd não há python nem fonte nenhuma; quem tem Pillow é a máquina."""
+    texto = (REPO / "client" / "stuff" / "60-postmount.d" / "70-wallpaper.sh").read_text()
+    assert "rc.local.d/60-wallpaper-stamp" in texto
+    assert "imageroot-icpc" in texto, "a sede vem do arquivo que o 15-machineid grava"
+    assert "PIL" in texto
+
+
+def test_o_tema_escuro_tambem_recebe_o_papel_de_parede(imagem, raiz):
+    """A base trava `picture-uri` mas deixa `picture-uri-dark` no padrão do
+    Ubuntu: em tema escuro apareceria o fundo da Canonical, e com ele sumiria
+    o carimbo da sede."""
+    r = roda_consumidor(imagem, "nb3_post_dconf", raiz)
+    assert r.returncode == 0, r.stderr
+    arq = raiz / "etc/dconf/db/local.d/91-wallpaper-dark"
+    assert arq.is_file()
+    texto = arq.read_text()
+    assert "picture-uri-dark" in texto
+    assert "maratona-common-wallpaper.png" in texto
+    assert (raiz / "etc/dconf/db/local.d/locks/91-wallpaper-dark").is_file()
