@@ -22,11 +22,31 @@ def editores():
     nomes = r.stdout.lower().split()
     return sorted({e for e in EDITORES if any(e in n for n in nomes)})
 
+def acumulado():
+    """Minutos com cada editor aberto, contados pelo laço do agente.
+
+    O instantâneo acima diz o que está aberto AGORA — e é o único dado que o
+    nb3 tinha. O nb2 acumulava (`/home/.idesacumula`) e o painel mostrava
+    "usado/amostrado"; isso se perdeu na reescrita, junto com o sentido do
+    botão `resetcontaeditores`, que apagava um arquivo que ninguém escrevia.
+    """
+    dados = {}
+    try:
+        with open("/home/.nb3/editores") as fh:
+            for linha in fh:
+                chave, _, valor = linha.strip().partition("=")
+                if chave and valor.isdigit():
+                    dados[chave] = int(valor)
+    except OSError:
+        return None
+    return dados or None
+
 print(json.dumps({
     "operations": {
         "firewall": firewall(),
         "screen_lock": os.path.exists("/home/.nb3/locked"),
         "editors": editores(),
+        "editors_time": acumulado(),
     }
 }, ensure_ascii=False)[1:-1])
 PY

@@ -101,6 +101,11 @@ def record_status(image_id: str, mac: str, status: dict) -> dict:
         info["last_seen"] = now
         fsdb.write_json(d / "machine.json", info)
         fsdb.write_json(d / "status.json", status)
+    # o status.json é sobrescrito a cada envio: sem esta linha, memória, carga
+    # e editores só existem no presente e não há relatório de período possível
+    from . import samples
+
+    samples.record(image_id, mac, status)
     return {"first_seen": first, "info": info}
 
 

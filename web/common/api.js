@@ -135,6 +135,13 @@ export function usbGenericUrl(image, token) {
   return `/api/v1/usb/generic/image${s ? `?${s}` : ""}`;
 }
 
+export function reportUrl(image, since, until, lang) {
+  const q = new URLSearchParams({ since, until, lang: lang || "pt" });
+  const tk = imageToken();
+  if (tk) q.set("tk", tk);
+  return `/api/v1/site-images/${encodeURIComponent(image)}/report?${q}`;
+}
+
 export function eventsUrl(image) {
   // Com token de sede na URL, ele vai junto (o EventSource não manda
   // cabeçalho). No console não vai credencial nenhuma: o cookie de sessão

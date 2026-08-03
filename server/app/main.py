@@ -13,6 +13,7 @@ from .routers import (
     models,
     public,
     publish,
+    report,
     roster,
     session,
     usb,
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(invites.router)
     app.include_router(public.router)
     app.include_router(publish.router)
+    app.include_router(report.router)
     app.include_router(usb.router)
     app.include_router(session.router)
     app.include_router(whoami.router)
