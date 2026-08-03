@@ -1,6 +1,6 @@
 #!/bin/bash
 # nb3-gerar-squash — gera a camada base (o Maratona Linux inteiro) a partir da
-# imagem-mestre, e registra no template.
+# imagem-mestre, e registra no modelo.
 #
 # Substitui o mlinux/gerar-squash, que tinha o nome do .raw e o /mnt fixos no
 # código, e cujo md5 era copiado do terminal para o servidor na mão.
@@ -8,8 +8,15 @@
 # Precisa de root só por causa do losetup/mount da imagem-mestre:
 #     sudo tools/nb3-gerar-squash --raw ubuntu-24.04-initial.raw --name icpc-latam2026
 #
-# Com --register, publica direto no template (aí precisa da chave de admin):
-#     sudo -E tools/nb3-gerar-squash --raw ... --name ... --register maratonalinux2604
+# Com --register, registra a camada no modelo (aí precisa da chave de admin);
+# com --publish, envia o arquivo para o servidor de arquivos antes:
+#     sudo -E tools/nb3-gerar-squash --raw ... --name ... \
+#         --register maratonalinux2604 --publish
+#
+# A camada entra com role=base, substituindo a base anterior do modelo. Casar
+# por nome de arquivo não serve: o nome muda todo ano (icpc-latam2025 →
+# maratonalinux2026) e o modelo ficaria com as duas — a máquina baixaria 13 GB
+# e montaria duas raízes sobrepostas, sem erro nenhum.
 
 set -euo pipefail
 
@@ -22,6 +29,7 @@ REGISTRAR=""
 SERVIDOR=${NB3_BASE_URL:-}
 CHAVE=${NB3_ADMIN_KEY:-}
 SAIDA=""
+PUBLICAR=0
 
 usage() {
     cat << EOF
@@ -31,9 +39,14 @@ Uso: sudo nb3-gerar-squash --raw IMAGEM.raw --name NOME [opções]
   --name NOME        nome da camada (vira <nome>.squash-<data>)
   --part N           partição raiz dentro do .raw (padrão: 2)
   --out DIR          onde gravar (padrão: data/blobs)
-  --register TPL     registra a camada neste template pela API
+  --register MODELO  registra a camada neste modelo, como base
+  --publish          envia o arquivo ao servidor de arquivos (files.mdp)
   --server URL       endereço da API (ou NB3_BASE_URL)
   --admin-key CHAVE  chave de administração (ou NB3_ADMIN_KEY)
+
+Sem --publish a camada fica servida pela própria máquina de gestão. Para a
+base isso significa a sala inteira baixando vários GB do mesmo servidor que
+responde à API durante a prova.
 EOF
     exit "${1:-0}"
 }
@@ -45,6 +58,7 @@ while [ $# -gt 0 ]; do
         --part) PARTICAO=$2; shift 2 ;;
         --out) SAIDA=$2; shift 2 ;;
         --register) REGISTRAR=$2; shift 2 ;;
+        --publish) PUBLICAR=1; shift ;;
         --server) SERVIDOR=$2; shift 2 ;;
         --admin-key) CHAVE=$2; shift 2 ;;
         -h | --help) usage 0 ;;
@@ -93,9 +107,41 @@ echo "  arquivo: $SAIDA/$ARQUIVO"
 echo "  md5:     $MD5"
 echo "  tamanho: $((TAMANHO / 1024 / 1024)) MB"
 
+URL_PUBLICA=""
+if [ "$PUBLICAR" = 1 ]; then
+    echo ">> publicando no servidor de arquivos (pode demorar: o arquivo tem GB)"
+    URL_PUBLICA=$(PYTHONPATH="$REPO" python3 - "$SAIDA/$ARQUIVO" << 'PY'
+import sys
+from server.app.services import publish
+
+if not publish.enabled():
+    sys.exit("publicacao desligada em data/server.json (chave 'publish')")
+estado = publish.publish_file(sys.argv[1])
+if estado.get("status") != "done":
+    sys.exit(f"publicacao falhou: {estado.get('error', estado)}")
+print(estado["url"])
+PY
+    )
+    echo "   $URL_PUBLICA"
+fi
+
 if [ -z "$REGISTRAR" ]; then
     echo
-    echo "para publicar no template:  --register <template>"
+    if [ -z "$URL_PUBLICA" ]; then
+        AVISO=" --publish"
+        echo "AVISO: sem --publish, esta camada sera servida pela maquina de"
+        echo "       gestao. Para a base isso e a sala inteira baixando GB do"
+        echo "       mesmo servidor que responde a API durante a prova."
+        echo
+    else
+        AVISO=""
+    fi
+    echo "para criar a temporada nova a partir da anterior (o caminho normal):"
+    echo "  tools/nb3-nova-temporada --de <modelo anterior> --para <modelo novo> \\"
+    echo "      --base $SAIDA/$ARQUIVO$AVISO"
+    echo
+    echo "ou para trocar a base de um modelo que ja existe:"
+    echo "  $0 ... --register <modelo>$AVISO"
     exit 0
 fi
 
@@ -104,26 +150,58 @@ fi
     exit 1
 }
 
-echo ">> registrando no template $REGISTRAR"
-ATUAL=$(curl -sS "$SERVIDOR/api/v1/templates/$REGISTRAR" -H "Authorization: Bearer $CHAVE")
-NOVAS=$(python3 - "$ATUAL" "$MD5" "$ARQUIVO" "$TAMANHO" "$SERVIDOR" << 'PY'
+# Camada sem papel nao e reconhecida pelo replace_role: a base velha fica e o
+# modelo termina com duas raizes, sem erro em lugar nenhum. Modelo importado do
+# nb2 nasce assim.
+ORFAS=$(curl -sS --fail-with-body "$SERVIDOR/api/v1/models/$REGISTRAR" \
+    -H "Authorization: Bearer $CHAVE" |
+    PYTHONPATH="$REPO" python3 -c '
 import json, sys
-atual, md5, arquivo, tamanho, servidor = sys.argv[1:6]
-camadas = json.loads(atual).get("layers", [])
-prefixo = arquivo.split(".squash")[0]
-# troca a versão anterior da MESMA camada base, mantendo a ordem (a base é a
-# última: as camadas anteriores têm prioridade no overlay)
-camadas = [c for c in camadas if not c["file"].startswith(prefixo)]
-camadas.append({
-    "md5": md5,
-    "file": arquivo,
-    "cdn_url": f"{servidor}/blobs/{arquivo}",
-    "size": int(tamanho),
-})
-print(json.dumps({"layers": camadas}))
-PY
-)
-curl -sS -X PUT "$SERVIDOR/api/v1/templates/$REGISTRAR/layers" \
+from server.app.services import layer_roles
+print(", ".join(layer_roles.sem_papel(json.load(sys.stdin).get("layers", []))))
+') || {
+    echo "erro: nao consegui ler o modelo '$REGISTRAR'." >&2
+    echo "      confira o nome e a chave: curl \"$SERVIDOR/api/v1/models\"" >&2
+    exit 1
+}
+if [ -n "$ORFAS" ]; then
+    echo "erro: estas camadas de '$REGISTRAR' nao tem papel: $ORFAS" >&2
+    echo "      a troca da base nao as reconhece e o modelo ficaria com duas" >&2
+    echo "      raizes. Rode antes: tools/nb3-migrate-roles --dry-run" >&2
+    exit 1
+fi
+
+echo ">> registrando como base do modelo $REGISTRAR"
+# --fail-with-body: sem isto um 404 (nome de modelo errado) devolve o JSON de
+# erro com codigo de saida ZERO, e o script terminava dizendo que deu certo
+# sem ter registrado nada. Foi assim que dois modelos ficaram vazios.
+CORPO=$(python3 -c '
+import json, sys
+md5, arquivo, tamanho, url = sys.argv[1:5]
+camada = {"md5": md5, "file": arquivo, "size": int(tamanho),
+          "role": "base", "replace_role": "base", "position": 99}
+if url:
+    camada["cdn_url"] = url
+print(json.dumps(camada))
+' "$MD5" "$ARQUIVO" "$TAMANHO" "$URL_PUBLICA")
+
+curl -sS --fail-with-body -X POST "$SERVIDOR/api/v1/models/$REGISTRAR/layers" \
     -H "Authorization: Bearer $CHAVE" -H 'Content-Type: application/json' \
-    --data "$NOVAS"
+    --data "$CORPO" > /dev/null || {
+    echo "erro: nao consegui registrar em '$REGISTRAR'." >&2
+    echo "      confira o nome do modelo e a chave de admin:" >&2
+    echo "      curl \"$SERVIDOR/api/v1/models\" -H \"Authorization: Bearer \$NB3_ADMIN_KEY\"" >&2
+    exit 1
+}
+
 echo
+echo ">> camadas de $REGISTRAR agora:"
+curl -sS --fail-with-body "$SERVIDOR/api/v1/models/$REGISTRAR" \
+    -H "Authorization: Bearer $CHAVE" |
+    python3 -c '
+import json, sys
+for i, c in enumerate(json.load(sys.stdin)["layers"]):
+    print(f"   {i}. {c[\"file\"]:46} {c.get(\"role\", \"extra\")}")
+'
+echo
+echo "as maquinas pegam a base nova no proximo boot"

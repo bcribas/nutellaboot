@@ -36,7 +36,7 @@ if VENV_PY.exists() and Path(sys.prefix).resolve() != (REPO / ".venv").resolve()
 sys.path.insert(0, str(REPO))
 
 from server.app import auth, fsdb  # noqa: E402
-from server.app.services import store  # noqa: E402
+from server.app.services import layer_roles, store  # noqa: E402
 from server.app.services.default_schema import build_default_schema  # noqa: E402
 from server.app.settings import settings  # noqa: E402
 
@@ -60,7 +60,10 @@ def ler_template(path: Path) -> list[dict]:
         url = partes[2].strip() if len(partes) > 2 else ""
         # o nb2 usava o literal "unk" quando não havia URL de origem
         camadas.append({"md5": md5, "file": arquivo, "cdn_url": "" if url == "unk" else url})
-    return camadas
+    # o nb2 não tinha papel de camada. Gravar sem papel é o que faz a troca de
+    # base da temporada seguinte não achar a antiga e empilhar as duas raízes,
+    # com a trava de segurança contando 1 base e dizendo que deu certo.
+    return layer_roles.marcar(camadas)
 
 
 def valores_do_stuff_conf(path: Path) -> dict:

@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""nb3-migrate-roles — marca o papel das camadas que já estão nos modelos.
+
+Cada camada passa a dizer o que é (`base`, `telemetry`, `wifi`, `extra`), para
+que trocar a base entre temporadas substitua a certa. Antes disso a troca
+casava por nome de arquivo — e como o nome da base muda todo ano
+(icpc-latam2025 → maratonalinux2026), o resultado era ficar com as duas no
+modelo: a máquina baixa 13 GB e monta duas raízes sobrepostas, sem erro nenhum.
+
+Os papéis são deduzidos do que já se sabe de cada camada. A da **base é a
+última da lista**, que é a convenção real (a ordem é a prioridade no overlay e
+a base tem que perder para todas) — mas é dedução, não certeza. Por isso o
+`--dry-run` mostra o antes/depois para conferência antes de gravar.
+
+    tools/nb3-migrate-roles --dry-run
+    tools/nb3-migrate-roles
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+
+from server.app import fsdb  # noqa: E402
+from server.app.services.layer_roles import papel_de  # noqa: E402
+from server.app.settings import settings  # noqa: E402
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--dry-run", action="store_true", help="mostra e nao grava")
+    ap.add_argument("--data", help="raiz de dados (padrao: data/)")
+    args = ap.parse_args()
+
+    raiz = Path(args.data) if args.data else settings.data_root
+    base = raiz / "models"
+    if not base.is_dir():
+        print(f"nada a fazer: {base} nao existe")
+        return
+
+    mudou_algo = False
+    for d in sorted(p for p in base.iterdir() if (p / "model.json").is_file()):
+        arq = d / "model.json"
+        modelo = fsdb.read_json(arq, {}) or {}
+        camadas = modelo.get("layers", [])
+        if not camadas:
+            print(f"{d.name}: sem camadas")
+            continue
+
+        novas = []
+        mudou = False
+        for i, c in enumerate(camadas):
+            papel = papel_de(c, e_ultima=(i == len(camadas) - 1))
+            marca = "  " if c.get("role") == papel else "->"
+            if c.get("role") != papel:
+                mudou = True
+            print(f"{d.name}: {marca} {i}. {c.get('file', '?'):46} {papel}")
+            novas.append({**c, "role": papel})
+
+        if not mudou:
+            print(f"{d.name}: ja estava marcado")
+            continue
+        mudou_algo = True
+        if not args.dry_run:
+            modelo["layers"] = novas
+            fsdb.write_json(arq, modelo)
+
+    if args.dry_run:
+        print("\n(--dry-run: nada foi gravado)")
+    elif mudou_algo:
+        print("\npapeis gravados")
+    else:
+        print("\nnada a mudar")
+
+
+if __name__ == "__main__":
+    main()

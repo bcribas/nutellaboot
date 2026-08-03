@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""nb3-nova-temporada — o modelo do ano novo, a partir do do ano passado.
+
+A operação anual inteira num passo: duplica o modelo anterior (herdando
+telemetria, wifi, extras e o formulário com os cadeados) e troca **só** a
+camada base pela que você acabou de gerar.
+
+    tools/nb3-nova-temporada --de maratonalinux2404 --para maratona2026 \\
+        --base data/blobs/maratonalinux2026-24.04.4.squash-2026-08-02-12-36 \\
+        --publish --dry-run
+
+É também por aqui que um `.squash` já gerado entra no sistema: o
+`nb3-gerar-squash` só sabe registrar dentro da mesma execução, e repetir a
+geração custa meia hora de `mksquashfs` sobre dezenas de GB.
+
+Sem `--de`, cria o modelo do zero com só a base (primeira temporada; a
+telemetria entra depois com o `nb3-camada-telemetria`).
+
+Não precisa de root.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+
+from server.app.services import layer_roles  # noqa: E402
+
+
+def erro(msg: str) -> None:
+    print(f"erro: {msg}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def api(metodo: str, caminho: str, chave: str, base: str, corpo: dict | None = None) -> dict:
+    url = f"{base.rstrip('/')}{caminho}"
+    dados = json.dumps(corpo).encode() if corpo is not None else None
+    req = urllib.request.Request(url, data=dados, method=metodo)
+    req.add_header("Authorization", f"Bearer {chave}")
+    if dados:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            texto = r.read().decode()
+            return json.loads(texto) if texto.strip() else {}
+    except urllib.error.HTTPError as e:
+        detalhe = e.read().decode()[:300]
+        erro(f"{metodo} {url} -> {e.code}: {detalhe}")
+    except urllib.error.URLError as e:
+        erro(f"nao consegui falar com {url}: {e.reason}")
+    return {}
+
+
+def md5_de(p: Path) -> str:
+    """md5 de um arquivo grande, mostrando progresso — a base tem vários GB e
+    um comando mudo por um minuto parece travado."""
+    total = p.stat().st_size
+    h = hashlib.md5()
+    lido = 0
+    marca = time.monotonic()
+    with open(p, "rb") as fh:
+        for bloco in iter(lambda: fh.read(8 << 20), b""):
+            h.update(bloco)
+            lido += len(bloco)
+            if time.monotonic() - marca > 2:
+                print(f"\r   md5 {lido * 100 // total}%", end="", flush=True)
+                marca = time.monotonic()
+    print(f"\r   md5 {h.hexdigest()}")
+    return h.hexdigest()
+
+
+def mostrar(titulo: str, camadas: list[dict]) -> None:
+    print(f"\n{titulo}")
+    if not camadas:
+        print("   (nenhuma camada)")
+        return
+    for i, c in enumerate(camadas):
+        tam = c.get("size") or 0
+        if tam >= 1024**3:
+            tam = f"{tam / 1024**3:.1f} GB"
+        elif tam >= 1024**2:
+            tam = f"{tam / 1024**2:.0f} MB"
+        elif tam:
+            tam = f"{tam / 1024:.0f} kB"
+        else:
+            tam = "?"
+        print(f"   {i}. {c.get('file', '?'):46} {c.get('role', 'extra'):10} {tam:>8}")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--de", help="modelo do ano anterior (herda camadas e formulario)")
+    ap.add_argument("--para", required=True, help="modelo a criar (ou atualizar)")
+    ap.add_argument("--base", required=True, help="arquivo .squash da camada base")
+    ap.add_argument("--publish", action="store_true", help="envia o arquivo ao servidor de arquivos")
+    ap.add_argument("--dry-run", action="store_true", help="mostra o que faria e sai")
+    ap.add_argument("--description", default="", help="descricao do modelo novo")
+    ap.add_argument("--server", default=os.environ.get("NB3_BASE_URL", ""))
+    ap.add_argument("--admin-key", default=os.environ.get("NB3_ADMIN_KEY", ""))
+    args = ap.parse_args()
+
+    if not args.server or not args.admin_key:
+        erro("informe --server e --admin-key (ou NB3_BASE_URL / NB3_ADMIN_KEY)")
+
+    arquivo = Path(args.base)
+    if not arquivo.is_file():
+        erro(f"{arquivo} nao existe")
+    tamanho = arquivo.stat().st_size
+
+    modelos = {m["name"] for m in api("GET", "/api/v1/models", args.admin_key, args.server)["models"]}
+    if args.de and args.de not in modelos:
+        erro(f"modelo de origem '{args.de}' nao existe (existem: {', '.join(sorted(modelos))})")
+    existe = args.para in modelos
+
+    print(f"base:   {arquivo}  ({tamanho / 1024**3:.1f} GB)")
+    print(f"modelo: {args.para}" + (f"  (a partir de {args.de})" if args.de else "  (do zero)"))
+
+    herdar = []
+    if args.de:
+        herdar = api("GET", f"/api/v1/models/{args.de}", args.admin_key, args.server).get("layers", [])
+
+    atuais = []
+    if existe:
+        atuais = api("GET", f"/api/v1/models/{args.para}", args.admin_key, args.server).get("layers", [])
+
+    # Um modelo criado e nunca preenchido é o resultado mais comum de um
+    # registro que falhou. Trocar "a base" dele deixaria a temporada sem
+    # telemetria nem wifi — então, se está vazio e há de onde herdar, herda.
+    # Camada sem papel é armadilha silenciosa: `replace_role` não a reconhece,
+    # a base velha fica, e a trava lá embaixo conta só as marcadas — acha 1 e
+    # diz que deu certo, com duas raízes no modelo. Modelo importado do nb2
+    # nascia assim.
+    orfas = layer_roles.sem_papel(atuais) + layer_roles.sem_papel(herdar)
+    if orfas:
+        erro(
+            "estas camadas nao tem papel: " + ", ".join(orfas) + "\n"
+            "  a troca da base nao consegue reconhece-las e o modelo ficaria com\n"
+            "  duas raizes, sem erro nenhum. Rode antes:\n"
+            "    tools/nb3-migrate-roles --dry-run   # confira a deducao\n"
+            "    tools/nb3-migrate-roles"
+        )
+
+    adotar = existe and not atuais and bool(args.de)
+    if adotar:
+        print(f"        ja existe, mas esta VAZIO — as camadas e os cadeados de")
+        print(f"        {args.de} serao copiados, e so entao a base e trocada")
+    elif existe:
+        print("        ja existe — so a base sera trocada")
+
+    mostrar("camadas de agora:" if atuais else "camadas herdadas:", atuais or herdar)
+
+    if args.dry_run:
+        print("\n(--dry-run: nada foi calculado, enviado nem registrado)")
+        return
+
+    md5 = md5_de(arquivo)
+
+    url_publica = ""
+    if args.publish:
+        sys.path.insert(0, str(REPO))
+        from server.app.services import publish  # noqa: E402
+
+        if not publish.enabled():
+            erro("publicacao desligada em data/server.json (chave 'publish')")
+        print(f"   publicando {tamanho / 1024**3:.1f} GB (pode demorar)...")
+        estado = publish.publish_file(arquivo)
+        if estado.get("status") != "done":
+            erro(f"publicacao falhou: {estado.get('error', estado)}")
+        url_publica = estado.get("url", "")
+        print(f"   {url_publica}")
+    else:
+        print("   AVISO: sem --publish, a base sera servida pela maquina de gestao")
+
+    if not existe:
+        corpo = {"name": args.para, "description": args.description}
+        if args.de:
+            corpo["from"] = args.de
+        api("POST", "/api/v1/models", args.admin_key, args.server, corpo)
+        print(f">> modelo {args.para} criado")
+    elif adotar:
+        api(
+            "PUT", f"/api/v1/models/{args.para}/layers", args.admin_key, args.server,
+            {"layers": herdar},
+        )
+        # os cadeados do formulário também são herdados: é o que separa uma
+        # imagem Oficial de uma Livre, e refazer isso à mão é onde se erra
+        origem = api("GET", f"/api/v1/models/{args.de}/schema", args.admin_key, args.server)
+        travas = {c["key"]: bool(c.get("locked")) for c in origem.get("fields", [])}
+        if travas:
+            api(
+                "PUT", f"/api/v1/models/{args.para}/schema/locks", args.admin_key, args.server,
+                {"locks": travas},
+            )
+        print(f">> {len(herdar)} camadas e {sum(travas.values())} cadeados copiados de {args.de}")
+
+    camada = {
+        "file": arquivo.name,
+        "md5": md5,
+        "size": tamanho,
+        "role": "base",
+        # a base tem que ser a ULTIMA (menor prioridade no overlay) e substituir
+        # a base herdada — casar por nome nao serve, o nome muda todo ano
+        "replace_role": "base",
+        "position": 99,
+    }
+    if url_publica:
+        camada["cdn_url"] = url_publica
+
+    depois = api(
+        "POST", f"/api/v1/models/{args.para}/layers", args.admin_key, args.server, camada
+    )["layers"]
+    mostrar(f"camadas de {args.para} agora:", depois)
+
+    bases = [c for c in depois if c.get("role") == "base"]
+    if len(bases) != 1:
+        erro(f"o modelo ficou com {len(bases)} bases — confira antes de usar")
+    if layer_roles.sem_papel(depois):
+        erro(
+            "sobrou camada sem papel: " + ", ".join(layer_roles.sem_papel(depois)) + "\n"
+            "  ela nao entra na contagem de bases acima — pode ser uma segunda raiz"
+        )
+
+    print(f"\npara criar a imagem de uma sede a partir dele:")
+    print(f"  curl -X POST \"{args.server.rstrip('/')}/api/v1/site-images\" \\")
+    print(f"      -H \"Authorization: Bearer $NB3_ADMIN_KEY\" \\")
+    print("      -H 'Content-Type: application/json' \\")
+    print(f"      -d '{{\"id\":\"26spsp\",\"fullname\":\"SEDE: SP\",\"model\":\"{args.para}\"}}'")
+
+
+if __name__ == "__main__":
+    main()
