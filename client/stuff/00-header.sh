@@ -26,6 +26,13 @@ nb_fatal() {
     panic=60 panic "$*"
 }
 
+# Escapa um valor do formulário para dentro de um JSON. Sem isto, uma aspa na
+# página inicial quebra o policies.json inteiro — e um JSON inválido o Firefox
+# ignora em silêncio, deixando a máquina sem política nenhuma.
+nb3_json_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
 # nb_retry <tentativas> <espera> <comando...>
 nb_retry() {
     _tries=$1
