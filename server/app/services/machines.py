@@ -84,6 +84,15 @@ def get_machine(image_id: str, mac: str) -> dict:
         "binding": fsdb.read_json(d / "binding.json"),
         "lock": fsdb.read_json(d / "lockstate.json", {"locked": False}),
         "pending": len(pending_commands(image_id, mac)),
+        # a tela usa isto para saber se vale abrir a aba de logs; o conteúdo
+        # em si só é buscado quando alguém pede
+        "logs": {
+            "bytes": info.get("logs_bytes", 0),
+            "at": info.get("logs_at"),
+        },
+        # alertas abertos: ficam até alguém dispensar, então sobrevivem a
+        # reboot da máquina e a recarga da página
+        "alerts": fsdb.read_json(d / "alerts.json", []) or [],
     }
 
 
