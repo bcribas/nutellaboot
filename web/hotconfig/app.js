@@ -6,6 +6,7 @@ import { init, t, apply } from "/common/i18n.js";
 
 const $ = (s) => document.querySelector(s);
 let machines = [];
+let rejeitadas = [];
 let selected = new Set();
 let filter = "all";
 let source = null;
@@ -208,6 +209,23 @@ function card(m) {
   return el;
 }
 
+// Painel vazio não pode ser mudo quando alguém ESTÁ tentando reportar. Um
+// agente com a identificação quebrada leva 400 em tudo — inclusive no status,
+// então a máquina nunca chega a existir — e daqui isso parecia "ninguém ligou
+// o computador ainda". Foram 30 horas assim.
+function renderRejeitadas() {
+  const box = $("#rejected");
+  if (!rejeitadas.length || machines.length) {
+    box.classList.add("hidden");
+    return;
+  }
+  box.classList.remove("hidden");
+  const quais = rejeitadas.map((r) => `"${r.id}"`).join(", ");
+  box.innerHTML = `${t("rejected_machines", { n: rejeitadas.length })} ${quais}<br>${t(
+    "rejected_machines_hint"
+  )}`;
+}
+
 function render() {
   renderAlerts();
   const list = machines.filter(matches);
@@ -215,6 +233,7 @@ function render() {
   grid.innerHTML = "";
   list.forEach((m) => grid.appendChild(card(m)));
   $("#empty").classList.toggle("hidden", machines.length > 0);
+  renderRejeitadas();
 
   const online = machines.filter((m) => m.online).length;
   $("#counts").textContent = `${t("machines_online", { n: online })} · ${t("machines_total", {
@@ -336,6 +355,7 @@ async function loadAll() {
   try {
     const data = await api.get(`/api/v1/site-images/${api.imageId}/machines`);
     machines = data.machines;
+    rejeitadas = data.rejected || [];
     render();
   } catch (e) {
     toast(`${t("error")}: ${e.message}`, true);

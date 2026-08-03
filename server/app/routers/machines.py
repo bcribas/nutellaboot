@@ -28,6 +28,10 @@ def _machine(image: str, x_nb_machine_key: str | None, mac: str) -> str:
     auth.require_machine(image, x_nb_machine_key)
     mac = m.normalize_mac(mac)
     if not m.valid_mac(mac):
+        # a chave de máquina confere: é um agente nosso com a identificação
+        # quebrada. Guardar isso é o que faz o painel poder dizer por que não
+        # aparece máquina nenhuma, em vez de só mostrar a lista vazia.
+        m.record_rejected(image, mac[:64])
         raise HTTPException(400, "MAC inválido")
     return mac
 
@@ -209,7 +213,15 @@ async def ack_command(
 async def list_machines(
     image: str, p=Depends(auth.require_image_access(service_scope="machines:read"))
 ) -> dict:
-    return {"machines": m.list_machines(image)}
+    maquinas = m.list_machines(image)
+    corpo = {"machines": maquinas}
+    # só quando não há máquina nenhuma: é aí que o painel vazio precisa
+    # explicar que alguém ESTÁ tentando, e com que identificação
+    if not maquinas:
+        rejeitadas = m.rejected(image)
+        if rejeitadas:
+            corpo["rejected"] = rejeitadas
+    return corpo
 
 
 @router.get("/site-images/{image}/machines/{mac}")

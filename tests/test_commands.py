@@ -58,6 +58,40 @@ def test_mac_is_validated(client, img, hm):
     assert r.status_code == 400
 
 
+def test_identificacao_invalida_fica_registrada(client, img, hm, hi):
+    """Um agente com a detecção de MAC quebrada leva 400 em tudo — inclusive no
+    status, então a máquina nunca chega a existir. O painel ficava vazio, sem
+    dizer que alguém estava tentando: foram 4320 requisições rejeitadas em ~30
+    horas antes de alguém olhar o log do servidor."""
+    for _ in range(3):
+        client.post("/api/v1/site-images/testes3/machines/enp0s3%5C/status", json={}, headers=hm)
+
+    r = client.get("/api/v1/site-images/testes3/machines", headers=hi)
+    assert r.status_code == 200, r.text
+    assert r.json()["machines"] == []
+    rejeitadas = r.json()["rejected"]
+    assert len(rejeitadas) == 1
+    assert rejeitadas[0]["id"] == "enp0s3\\"
+    assert rejeitadas[0]["count"] == 3
+
+
+def test_com_maquina_de_verdade_o_aviso_some(client, img, hm, hi):
+    """O aviso é para o painel vazio: com máquina reportando, ele só atrapalha."""
+    client.post("/api/v1/site-images/testes3/machines/naoemac/status", json={}, headers=hm)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    r = client.get("/api/v1/site-images/testes3/machines", headers=hi)
+    assert len(r.json()["machines"]) == 1
+    assert "rejected" not in r.json()
+
+
+def test_sem_chave_de_maquina_nao_registra_nada(client, img, hi):
+    """Só agente nosso entra no registro: senão qualquer um enche o arquivo
+    de fora, sem credencial nenhuma."""
+    client.post("/api/v1/site-images/testes3/machines/lixo/status", json={})
+    r = client.get("/api/v1/site-images/testes3/machines", headers=hi)
+    assert "rejected" not in r.json()
+
+
 def test_command_allowlist(client, img, hm, hi):
     client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
     r = client.post(

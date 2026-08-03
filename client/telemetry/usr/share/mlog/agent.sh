@@ -19,10 +19,48 @@ MACHINE_HDR="X-NB-Machine-Key: $NB_MACHINE_KEY"
 STATE_DIR=/home/.nb3
 mkdir -p "$STATE_DIR"
 
+# Identidade da máquina para o servidor. O formato é `aa-bb-cc-dd-ee-ff`, e o
+# servidor recusa qualquer outra coisa com 400.
+#
+# Isto lia `ip -o link show | awk '{print $(NF-2)}'`: contagem de campos a
+# partir do fim de uma linha cujo formato muda (com `altname`, com `permaddr`,
+# e com a barra invertida que o `ip -o` usa de separador virando parte de um
+# campo). O resultado real numa máquina de teste foi `enp0s3\` — o NOME da
+# interface. Todas as requisições do agente levaram 400 por 30 horas seguidas,
+# e como o `status` também era recusado a máquina nunca chegava a existir: o
+# hotconfig ficava vazio, sem nenhum sinal de que alguém estava tentando.
+#
+# Agora o valor vem de onde ele É o valor, sem formatação para interpretar.
+NB3_SYSFS_NET=${NB3_SYSFS_NET:-/sys/class/net}
+
+nb3_mac_de() {
+    _end=$(cat "$NB3_SYSFS_NET/$1/address" 2> /dev/null) || return 1
+    case "$_end" in
+        "" | 00:00:00:00:00:00) return 1 ;;
+    esac
+    printf '%s' "$_end" | tr 'A-F:' 'a-f-'
+}
+
+nb3_detect_mac() {
+    # 1. a interface da rota padrão: é por ela que se fala com o servidor
+    _dev=$(ip -o route show default 2> /dev/null |
+        awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
+    if [ -n "${_dev:-}" ] && nb3_mac_de "$_dev"; then
+        return 0
+    fi
+    # 2. a primeira física com endereço (ordem alfabética, determinística)
+    for _cam in "$NB3_SYSFS_NET"/*; do
+        _nome=${_cam##*/}
+        [ "$_nome" = lo ] && continue
+        # sem `device` é virtual (docker0, veth, bridge): o MAC é sorteado
+        [ -e "$_cam/device" ] || continue
+        nb3_mac_de "$_nome" && return 0
+    done
+    return 1
+}
+
 MAC=$(sed -n 's/.*BOOTIF=01-\([0-9a-f-]*\).*/\1/p' /proc/cmdline)
-if [ -z "$MAC" ]; then
-    MAC=$(ip -o link show | awk '$2 !~ /lo:/ {print $(NF-2); exit}' | tr ':' '-')
-fi
+[ -n "$MAC" ] || MAC=$(nb3_detect_mac) || MAC=""
 export MAC
 
 log() { logger -t nb3-agent "$*"; }
@@ -244,6 +282,20 @@ usb_loop() {
         sleep 1
     done
 }
+
+> "$STATE_DIR/mac" printf '%s\n' "$MAC"
+
+# Sem MAC válido não há o que reportar: o servidor recusa tudo com 400 e a
+# máquina some do painel. Melhor parar aqui, dizendo o porquê, do que bater no
+# servidor a cada 25 s para sempre.
+case "$MAC" in
+    [0-9a-f][0-9a-f]-[0-9a-f][0-9a-f]-[0-9a-f][0-9a-f]-*) ;;
+    *)
+        log "SEM MAC VALIDO (encontrei '${MAC:-vazio}') — o agente nao vai reportar."
+        log "confira as interfaces de rede em $NB3_SYSFS_NET"
+        exit 1
+        ;;
+esac
 
 log "iniciando (imagem=$IMAGEROOT mac=$MAC servidor=$NB_SERVER)"
 telemetry_loop &

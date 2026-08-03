@@ -45,6 +45,40 @@ def valid_mac(mac: str) -> bool:
     return bool(MAC_RE.match(mac))
 
 
+# Quantas identificações inválidas diferentes guardar por imagem. É diagnóstico,
+# não histórico: o que importa é "alguém está tentando, e com o quê".
+MAX_REJEITADAS = 10
+
+
+def record_rejected(image_id: str, bruto: str) -> None:
+    """Guarda quem tentou reportar com uma identificação que não é um MAC.
+
+    Um agente com a detecção de MAC quebrada bate no servidor a cada 25 s e
+    leva 400 em tudo — inclusive no `status`, então a máquina nunca chega a
+    existir e o painel fica vazio, sem dizer que alguém está tentando. Isso
+    aconteceu por 30 horas seguidas antes de alguém olhar o log do servidor.
+    """
+    d = site_image_dir(image_id)
+    if not d.is_dir():
+        return
+    with fsdb.locked(d):
+        atual = fsdb.read_json(d / "rejected.json", {}) or {}
+        entrada = atual.get(bruto) or {"first_seen": time.time(), "count": 0}
+        entrada["count"] += 1
+        entrada["last_seen"] = time.time()
+        atual[bruto] = entrada
+        if len(atual) > MAX_REJEITADAS:
+            velhas = sorted(atual.items(), key=lambda kv: kv[1].get("last_seen", 0))
+            atual = dict(velhas[-MAX_REJEITADAS:])
+        fsdb.write_json(d / "rejected.json", atual)
+
+
+def rejected(image_id: str) -> list[dict]:
+    dados = fsdb.read_json(site_image_dir(image_id) / "rejected.json", {}) or {}
+    out = [{"id": k, **v} for k, v in dados.items()]
+    return sorted(out, key=lambda e: -(e.get("last_seen") or 0))
+
+
 def machine_dir(image_id: str, mac: str) -> Path:
     return site_image_dir(image_id) / "machines" / mac
 

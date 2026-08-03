@@ -195,6 +195,8 @@
   "publish_status_failed": "failed",
   "reboot": "Reboot",
   "refresh": "Refresh",
+  "rejected_machines": "{n} machine(s) tried to report with an invalid identification:",
+  "rejected_machines_hint": "Probably an outdated telemetry agent — rebuild the telemetry layer and restart the machines.",
   "remove": "Remove",
   "request_approve_code": "Approve (send code)",
   "request_contact": "Your contact (email, phone, @)",

@@ -195,6 +195,8 @@
   "publish_status_failed": "falló",
   "reboot": "Reiniciar",
   "refresh": "Actualizar",
+  "rejected_machines": "{n} máquina(s) intentaron reportar con identificación inválida:",
+  "rejected_machines_hint": "Probablemente un agente de telemetría desactualizado — regenere la capa de telemetría y reinicie las máquinas.",
   "remove": "Quitar",
   "request_approve_code": "Aprobar (enviar código)",
   "request_contact": "Su contacto (correo, teléfono, @)",
