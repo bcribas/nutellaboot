@@ -11,36 +11,64 @@
 #  - aceita VÁRIAS URLs do mesmo arquivo: o aria2 usa todas como espelhos e
 #    contorna seeder morto sozinho.
 
-# Tamanho do arquivo remoto, para a barra saber onde é 100%. Pergunta na ÚLTIMA
-# URL: o manifest traz os seeders primeiro e o servidor de arquivos por último,
-# e o seeder é a máquina de um colega que pode ter desligado. Sem resposta, a
-# barra vira contador (sem porcentagem nem ETA) em vez de sumir.
-nb_remote_size() {
-    for _rs_url in "$@"; do :; done
-    wget.good --spider --server-response --timeout=10 --tries=1 \
-        --ca-certificate="$NB_CA_BUNDLE" \
-        --header="X-NB-Boot-Key: ${NB_BOOT_KEY:-}" "$_rs_url" 2>&1 |
-        awk 'tolower($1) == "content-length:" {print $2 + 0; exit}'
-}
-
-_nb_size_of() {
-    stat -c %s "$1" 2> /dev/null || echo 0
-}
-
-# Acompanha o arquivo crescendo e desenha a barra. Roda em segundo plano; quem
-# chamou mata pelo PID. O tempo vem da contagem de voltas, não de `date`: uma
-# dependência a menos dentro do initrd (onde já faltou `head`).
-nb_progress_watch() {
-    _pw_file=$1
-    _pw_total=$2
-    _pw_prev=0
-    _pw_el=0
-    while :; do
-        sleep 2
-        _pw_el=$((_pw_el + 2))
-        _pw_now=$(_nb_size_of "$_pw_file")
-        nb_ui_progress "$_pw_now" "$_pw_total" $(((_pw_now - _pw_prev) / 2)) "$_pw_el"
-        _pw_prev=$_pw_now
+# A barra vem dos números do PRÓPRIO aria2.
+#
+# Medir o arquivo não funciona: o aria2 pré-aloca, então ele nasce com o
+# tamanho final e a barra marcava 100% desde o primeiro segundo. E perguntar o
+# tamanho antes, com um HEAD, trazia o Content-Length do REDIRECIONAMENTO
+# quando a URL redireciona — daí saía "4 kB of 178 B".
+#
+# O aria2 imprime, uma vez por segundo, uma linha como
+#   [#fbbee4 2.0MiB/300MiB(0%) CN:1 DL:1.0MiB ETA:4m56s]
+# e continua imprimindo quando a saída é um cano (conferido). É dela que saem
+# baixado, total, velocidade e tempo restante.
+#
+# Num TERMINAL o aria2 separa as atualizações com \r (para reescrever no
+# lugar); num CANO, com \n. Aqui a saída é sempre um cano, então o separador é
+# a quebra de linha — mas o corte pelo último \r fica como rede, porque com
+# RS='\r' e uma entrada sem nenhum CR o awk lê tudo como UM registro e a barra
+# imprime uma vez só, no começo, e congela.
+nb_aria_progress() {
+    awk '
+        function bytes(s,   n, u) {
+            n = s + 0
+            u = s
+            sub(/^[0-9.]+/, "", u)
+            if (u ~ /^GiB/) return n * 1073741824
+            if (u ~ /^MiB/) return n * 1048576
+            if (u ~ /^KiB/) return n * 1024
+            return n
+        }
+        function segundos(s,   t, n) {
+            t = 0
+            while (match(s, /[0-9]+[dhms]/)) {
+                n = substr(s, RSTART, RLENGTH - 1) + 0
+                u = substr(s, RSTART + RLENGTH - 1, 1)
+                if (u == "d") t += n * 86400
+                else if (u == "h") t += n * 3600
+                else if (u == "m") t += n * 60
+                else t += n
+                s = substr(s, RSTART + RLENGTH)
+            }
+            return t
+        }
+        /\[#[0-9a-f]+ / {
+            sub(/^.*\r/, "")
+            feito = total = vel = eta = 0
+            if (match($0, /[0-9.]+[KMGT]?i?B\/[0-9.]+[KMGT]?i?B/)) {
+                par = substr($0, RSTART, RLENGTH)
+                split(par, ab, "/")
+                feito = bytes(ab[1]); total = bytes(ab[2])
+            }
+            if (match($0, /DL:[0-9.]+[KMGT]?i?B/)) vel = bytes(substr($0, RSTART + 3, RLENGTH - 3))
+            if (match($0, /ETA:[0-9dhms]+/)) eta = segundos(substr($0, RSTART + 4, RLENGTH - 4))
+            # %d e não print: com print o awk sai em notação científica
+            # (5.03316e+06) e a aritmética do shell recusa
+            printf "%d %d %d %d\n", feito, total, vel, eta
+            fflush()
+        }
+    ' | while read -r _ap_feito _ap_total _ap_vel _ap_eta; do
+        nb_ui_progress "$_ap_feito" "$_ap_total" "$_ap_vel" "$_ap_eta"
     done
 }
 
@@ -60,43 +88,49 @@ nb_download() {
     rm -f "$_dest"
 
     log_begin_msg "Downloading ${NB_DL_LABEL:-$_base}"
-    _total=0
-    if [ "${NB_DL_PROGRESS:-0}" = 1 ]; then
-        nb_ui_closeline
-        _total=$(nb_remote_size "$@")
-        [ -n "$_total" ] || _total=0
-    fi
+    _rcfile=$_dir/.nb3-dlrc
 
     _try=1
     _max=${NB_DOWNLOAD_TRIES:-5}
     while [ "$_try" -le "$_max" ]; do
-        _watch=
-        if [ "${NB_DL_PROGRESS:-0}" = 1 ]; then
-            nb_progress_watch "$_dest" "$_total" &
-            _watch=$!
-        fi
         # --async-dns=false para honrar /etc/hosts (pin de NB_HOSTS).
         # A chave de boot vai no cabeçalho: o aria2c faz GET, e os endpoints
         # do servidor aceitam a chave tanto por POST quanto por cabeçalho.
-        aria2c --quiet=true \
-            --timeout=30 --connect-timeout=15 --max-tries=1 \
-            --check-certificate=true --ca-certificate="$NB_CA_BUNDLE" \
-            --async-dns=false --allow-overwrite=true --auto-file-renaming=false \
-            --max-concurrent-downloads=1 \
-            --header="X-NB-Boot-Key: ${NB_BOOT_KEY:-}" \
-            -j "$_conn" -x "$_conn" -s "$_conn" \
-            -d "$_dir" -o "$_base" "$@"
-        _rc=$?
-        if [ -n "$_watch" ]; then
-            kill "$_watch" 2> /dev/null
-            wait "$_watch" 2> /dev/null
-            # última linha com o número final, e um \n para não deixar a barra
-            # colada no que vier depois
-            nb_ui_progress "$(_nb_size_of "$_dest")" "$_total" 0 0
+        if [ "${NB_DL_PROGRESS:-0}" = 1 ]; then
+            nb_ui_closeline
+            # o código de saída vai para um arquivo: num cano, `$?` é do último
+            # comando (o awk), e é o do aria2 que decide se vale repetir
+            rm -f "$_rcfile"
+            {
+                # stdbuf -o0: sem ele os números ficam no buffer do libc e a
+                # barra só se mexe quando o download acaba
+                stdbuf -o0 aria2c --quiet=false --console-log-level=warn \
+                    --show-console-readout=true --summary-interval=0 \
+                    --timeout=30 --connect-timeout=15 --max-tries=1 \
+                    --check-certificate=true --ca-certificate="$NB_CA_BUNDLE" \
+                    --async-dns=false --allow-overwrite=true --auto-file-renaming=false \
+                    --max-concurrent-downloads=1 \
+                    --header="X-NB-Boot-Key: ${NB_BOOT_KEY:-}" \
+                    -j "$_conn" -x "$_conn" -s "$_conn" \
+                    -d "$_dir" -o "$_base" "$@" 2>&1
+                echo $? > "$_rcfile"
+            } | nb_aria_progress
+            _rc=$(cat "$_rcfile" 2> /dev/null || echo 1)
+            rm -f "$_rcfile"
             printf '\n'
+            log_begin_msg "Downloading ${NB_DL_LABEL:-$_base}"
+        else
+            aria2c --quiet=true \
+                --timeout=30 --connect-timeout=15 --max-tries=1 \
+                --check-certificate=true --ca-certificate="$NB_CA_BUNDLE" \
+                --async-dns=false --allow-overwrite=true --auto-file-renaming=false \
+                --max-concurrent-downloads=1 \
+                --header="X-NB-Boot-Key: ${NB_BOOT_KEY:-}" \
+                -j "$_conn" -x "$_conn" -s "$_conn" \
+                -d "$_dir" -o "$_base" "$@"
+            _rc=$?
         fi
         if [ "$_rc" -eq 0 ] && [ -s "$_dest" ]; then
-            [ -n "$_watch" ] && log_begin_msg "Downloading ${NB_DL_LABEL:-$_base}"
             log_end_msg
             return 0
         fi

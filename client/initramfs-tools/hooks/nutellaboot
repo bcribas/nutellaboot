@@ -38,6 +38,17 @@ copy_exec /bin/bash /bin
 copy_exec /usr/bin/head /usr/bin
 # `stat` é o tamanho do arquivo para a barra de progresso do download
 copy_exec /usr/bin/stat /usr/bin
+# `stdbuf` desliga a bufferização da saída do aria2. Sem ele, os números do
+# progresso ficam presos no buffer de 4 kB do libc e chegam TODOS DE UMA VEZ
+# no fim: a barra fica parada o download inteiro e pula para 100% (medido —
+# num download de 10 s, todas as amostras com o mesmo carimbo de tempo).
+#
+# Ele funciona por LD_PRELOAD, então a biblioteca auxiliar tem que vir junto E
+# no mesmo caminho: `stdbuf` procura por um caminho absoluto compilado dentro
+# dele. Sem ela, o comando falha com "failed to find libstdbuf.so" e o
+# download inteiro morre — é por isso que há teste guardando o par.
+copy_exec /usr/bin/stdbuf /usr/bin
+copy_exec /usr/libexec/coreutils/libstdbuf.so /usr/libexec/coreutils
 
 # --- TLS DE VERDADE ---
 # O nb2 embutia um único certificado no stuff e depois desligava a verificação

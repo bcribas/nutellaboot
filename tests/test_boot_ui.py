@@ -308,3 +308,68 @@ def test_kit_e_o_mesmo_arquivo_nos_dois_caminhos():
     cópia para 'ajustar só no initrd', as telas divergem em silêncio."""
     copias = [p for p in REPO.rglob("*.sh") if p.name == "05-ui.sh"]
     assert len(copias) == 1, [str(p) for p in copias]
+
+
+# --- a barra de progresso do download ---
+
+DOWNLOAD = REPO / "client" / "stuff" / "20-download.sh"
+HOOK_INITRD = REPO / "client" / "initramfs-tools" / "hooks" / "nutellaboot"
+
+
+def test_a_barra_le_os_numeros_do_aria2(tmp_path):
+    """A barra media o TAMANHO do arquivo, e o aria2 pré-aloca: nascia cheio,
+    marcando 100% desde o primeiro segundo. Agora os quatro números vêm da
+    linha que o próprio aria2 imprime.
+
+    A amostra abaixo é uma captura real do aria2 1.37 (num cano ele separa as
+    atualizações com \\n, não com \\r — foi o que fez a primeira versão
+    imprimir uma vez só e congelar)."""
+    captura = (
+        "[#2feb6c 16KiB/40MiB(0%) CN:1 DL:15KiB ETA:42m41s]\n"
+        "[#2feb6c 6.0MiB/40MiB(15%) CN:1 DL:3.0MiB ETA:11s]\n"
+        "[#2feb6c 12MiB/40MiB(30%) CN:1 DL:4.0MiB ETA:1m6s]\n"
+    )
+    arq = tmp_path / "aria.txt"
+    arq.write_text(captura)
+    saida = subprocess.run(
+        [
+            "sh",
+            "-c",
+            f'. {UI}; . {DOWNLOAD}; nb_ui_progress() {{ echo "$1 $2 $3 $4"; }}; '
+            f'nb_aria_progress < "{arq}"',
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert saida.returncode == 0, saida.stderr
+    linhas = [l.split() for l in saida.stdout.splitlines() if l.strip()]
+    assert len(linhas) == 3, saida.stdout
+    assert linhas[0] == ["16384", "41943040", "15360", "2561"]
+    assert linhas[1] == ["6291456", "41943040", "3145728", "11"]
+    assert linhas[2] == ["12582912", "41943040", "4194304", "66"]  # 1m6s
+    # nada de notação científica: a aritmética do shell recusaria
+    assert "e+" not in saida.stdout
+
+
+def test_a_barra_nao_depende_de_medir_o_arquivo():
+    """Medir o arquivo não funciona com o aria2: ele pré-aloca, e com dez
+    conexões escreve em posições diferentes. E o HEAD que perguntava o tamanho
+    trazia o Content-Length do REDIRECIONAMENTO ("4 kB of 178 B")."""
+    codigo = "\n".join(
+        l for l in DOWNLOAD.read_text().splitlines() if not l.lstrip().startswith("#")
+    )
+    assert "--spider" not in codigo, "o HEAD voltou"
+    assert "stat -c %s" not in codigo
+
+
+def test_o_stdbuf_vem_com_a_biblioteca_dele():
+    """`stdbuf` funciona por LD_PRELOAD: sem a `libstdbuf.so` no caminho que
+    ele espera, o comando falha e leva o download junto. Copiar um sem o outro
+    é a falha muda de sempre."""
+    hook = HOOK_INITRD.read_text()
+    usa = "stdbuf" in "\n".join(
+        l for l in DOWNLOAD.read_text().splitlines() if not l.lstrip().startswith("#")
+    )
+    assert usa, "a barra deixou de usar stdbuf; revise este teste"
+    assert "copy_exec /usr/bin/stdbuf" in hook
+    assert "libstdbuf.so" in hook

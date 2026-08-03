@@ -299,8 +299,12 @@ nb_ui_hms() {
     fi
 }
 
-# nb_ui_progress FEITO TOTAL BYTES_POR_SEG SEGUNDOS — uma linha, reescrita no
-# lugar com \r. Com TOTAL 0 (tamanho desconhecido) sai sem barra nem ETA.
+# nb_ui_progress FEITO TOTAL BYTES_POR_SEG ETA_SEGUNDOS — uma linha, reescrita
+# no lugar com \r. Com TOTAL 0 (tamanho ainda desconhecido) sai sem barra.
+#
+# Os quatro números vêm do aria2, inclusive o tempo restante: ele sabe o que
+# está em voo nas dez conexões, e a conta ingênua (falta / velocidade
+# instantânea) oscilava a cada amostra.
 #
 # A barra é feita de espaços em fundo colorido, como as letras grandes: no
 # console do initrd não há garantia de fonte, e '#' num terminal sem a fonte
@@ -311,7 +315,7 @@ nb_ui_progress() {
     _nbu_done=$1
     _nbu_tot=$2
     _nbu_bps=$3
-    _nbu_el=$4
+    _nbu_eta=$4
 
     if [ "${NB_UI_PLAIN:-0}" = 1 ]; then
         printf '    %s of %s\n' "$(nb_ui_bytes "$_nbu_done")" "$(nb_ui_bytes "$_nbu_tot")"
@@ -329,14 +333,11 @@ nb_ui_progress() {
             "$NB_C_LIT" "$(nb_ui_spaces "$_nbu_pgfill")" "$NB_C_OFF" \
             "$(nb_ui_spaces $((NB_UI_BAR - _nbu_pgfill)))" \
             "$_nbu_pct" "$(nb_ui_bytes "$_nbu_done")" "$(nb_ui_bytes "$_nbu_tot")"
-        if [ "$_nbu_bps" -gt 0 ]; then
-            printf '  %s/s  ETA %s' "$(nb_ui_bytes "$_nbu_bps")" \
-                "$(nb_ui_hms $(((_nbu_tot - _nbu_done) / _nbu_bps)))"
-        fi
+        [ "$_nbu_bps" -gt 0 ] && printf '  %s/s' "$(nb_ui_bytes "$_nbu_bps")"
+        [ "$_nbu_eta" -gt 0 ] && printf '  ETA %s' "$(nb_ui_hms "$_nbu_eta")"
     else
         printf '\r    %s downloaded' "$(nb_ui_bytes "$_nbu_done")"
         [ "$_nbu_bps" -gt 0 ] && printf '  %s/s' "$(nb_ui_bytes "$_nbu_bps")"
-        printf '  %s elapsed' "$(nb_ui_hms "$_nbu_el")"
     fi
     printf '            '
 }
