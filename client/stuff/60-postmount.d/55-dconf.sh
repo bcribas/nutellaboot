@@ -12,10 +12,13 @@ EOF
     fi
 
     if [ -n "$DEFAULTBROWSERURL" ]; then
+        # texto livre indo para dentro de aspas simples do GVariant: uma aspa
+        # no endereço quebraria o keyfile, e o dconf recusa o local.d inteiro
+        _url=$(nb3_gvariant_escape "$DEFAULTBROWSERURL")
         cat > "$_db/90-browserurl" << EOF
 [org/gnome/epiphany]
 restore-session-policy='crashed'
-homepage-url='$DEFAULTBROWSERURL'
+homepage-url='$_url'
 EOF
         echo "/org/gnome/epiphany/homepage-url" > "$_db/locks/90-browserurl"
     fi

@@ -13,6 +13,7 @@ Regras que valem a pena ter em mente:
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 
 from .. import fsdb
@@ -23,9 +24,32 @@ class ConfigError(ValueError):
     pass
 
 
+# Metadados que descrevem o CONTRATO com o cliente, não uma escolha do modelo:
+# como a lista é juntada no stuff e que forma um item precisa ter. O
+# schema.json de um modelo é gravado na criação e nunca mais revisto, então
+# sem isto uma regra nova só valeria para modelos criados depois dela — e os
+# que estão em produção seguiriam aceitando o valor que quebra a máquina.
+HERDADOS_DO_PADRAO = ("sep", "item_pattern")
+
+
 def schema_for(image_id: str) -> dict:
     info = get_site_image(image_id) or {}
-    return fsdb.read_json(model_dir(info.get("model", "")) / "schema.json", {"fields": []})
+    schema = fsdb.read_json(model_dir(info.get("model", "")) / "schema.json", {"fields": []})
+    return _com_padroes(schema)
+
+
+def _com_padroes(schema: dict) -> dict:
+    from .default_schema import build_default_schema
+
+    padrao = {f["key"]: f for f in build_default_schema().get("fields", [])}
+    for f in schema.get("fields", []):
+        base = padrao.get(f.get("key"))
+        if not base:
+            continue
+        for chave in HERDADOS_DO_PADRAO:
+            if chave not in f and chave in base:
+                f[chave] = base[chave]
+    return schema
 
 
 def _field_map(schema: dict) -> dict:
@@ -81,7 +105,26 @@ def _coerce(field: dict, value):
             for v in value:
                 if v not in allowed:
                     raise ConfigError(f"{key}: item inválido ({v!r})")
-        return [str(v) for v in value]
+            return [str(v) for v in value]
+        # Lista livre: o item vira texto dentro do stuff e o consumidor o
+        # separa por `sep`. Um item vazio, com quebra de linha ou com o próprio
+        # separador dentro vira entrada fantasma lá na frente — e o `text` já
+        # recusava quebra de linha, então a assimetria era só descuido.
+        sep = field.get("sep", ",")
+        padrao = field.get("item_pattern")
+        itens = []
+        for v in value:
+            v = str(v).strip()
+            if not v:
+                raise ConfigError(f"{key}: item vazio")
+            if "\n" in v or "\r" in v:
+                raise ConfigError(f"{key}: item não pode conter quebra de linha")
+            if sep in v:
+                raise ConfigError(f"{key}: item não pode conter {sep!r} ({v!r})")
+            if padrao and not re.fullmatch(padrao, v):
+                raise ConfigError(f"{key}: formato inválido ({v!r})")
+            itens.append(v)
+        return itens
     if ftype in ("text", "password"):
         if not isinstance(value, str):
             raise ConfigError(f"{key}: esperava texto")

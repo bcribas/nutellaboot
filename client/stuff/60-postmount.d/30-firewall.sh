@@ -10,6 +10,13 @@ nb3_post_firewall() {
             IFS=$_old_ifs
             _host=$(echo "$_entry" | awk '{print $1}')
             _ip=$(echo "$_entry" | awk '{print $2}')
+            # o nome vira NOME DE ARQUIVO: um "hostname" com barra escreveria
+            # fora de hosts/, como root, dentro do sistema que a sala monta.
+            # O servidor já valida o par, mas o stuff pode ter sido gerado por
+            # uma versão anterior.
+            case "$_host" in
+                */* | .*) nb_warn "ignoring invalid host in the allowlist: $_host"; _host= ;;
+            esac
             [ -n "$_host" ] && [ -n "$_ip" ] &&
                 echo "$_ip" > "${rootmnt?}/usr/share/maratona-firewall/hosts/$_host"
             IFS=,
@@ -27,6 +34,6 @@ nb3_post_firewall() {
         webfs exim4 fwupd networkd-dispatcher geoclue packagekit; do
         ln -s /dev/null "${rootmnt?}/etc/systemd/system/$_svc.service"
     done
-    rm -f "${rootmnt?}/etc/cron.d/cron-boca-submit" "${rootmnt?}/etc/cron.d/cron-boca-log"
+    #rm -f "${rootmnt?}/etc/cron.d/cron-boca-submit" "${rootmnt?}/etc/cron.d/cron-boca-log"
     log_end_msg
 }

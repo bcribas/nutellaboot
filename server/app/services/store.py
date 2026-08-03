@@ -137,12 +137,28 @@ def set_schema_field(name: str, key: str, patch: dict) -> dict:
     """
     d = model_dir(name)
     with fsdb.locked(d):
-        schema = fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []}
+        from .config import _com_padroes
+
+        # com os metadados de formato do esquema padrão: o schema.json gravado
+        # na criação do modelo não os tem, e sem eles a validação abaixo não
+        # sabe o que exigir
+        schema = _com_padroes(fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []})
         alvo = next((f for f in schema.get("fields", []) if f["key"] == key), None)
         if alvo is None:
             raise ImageError(f"campo '{key}' não existe neste modelo")
         if "default" in patch:
-            alvo["default"] = patch["default"]
+            # Pelo MESMO caminho que valida o que a sede digita. O padrão de um
+            # campo `locked` é o que vai para TODA máquina da sala — e daí para
+            # o /etc/.nb3, que o agente carrega como root. Sem esta linha,
+            # qualquer valor entrava: uma aspa simples no lugar certo virava
+            # comando executado como root em toda a sala, e um `None` fazia a
+            # comparação de RAM do boot dar erro de aritmética.
+            from .config import ConfigError, _coerce
+
+            try:
+                alvo["default"] = _coerce(alvo, patch["default"])
+            except ConfigError as e:
+                raise ImageError(str(e))
         if "locked" in patch:
             alvo["locked"] = bool(patch["locked"])
         for texto in ("label", "help"):

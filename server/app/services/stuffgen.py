@@ -25,11 +25,30 @@ def _sh_quote(value: str) -> str:
     return "'" + str(value).replace("'", "'\\''") + "'"
 
 
-def _render_value(value) -> str:
+# Separador entre os itens de um campo `list`, quando o esquema não diz outro.
+#
+# Vírgula porque é o que os dois consumidores esperam, e um deles precisa: cada
+# item de FIREWALL_ALLOWLIST é o par "NOME IP", com um espaço DENTRO. Juntar
+# com espaço não separava errado — apagava a fronteira entre os itens, e o laço
+# do firewall (`IFS=,`) via tudo como uma entrada só. Com duas linhas na lista,
+# a segunda simplesmente não era liberada, sem erro e sem log; na prova isso é
+# o servidor do BOCA fora do firewall.
+#
+# O outro é `sources=[$INPUT_SOURCES]` do dconf, uma lista GVariant, onde
+# espaço entre as tuplas é erro de sintaxe — e o `dconf update` que recusa o
+# arquivo derruba junto os outros ajustes da sala.
+SEP_PADRAO = ","
+
+
+def _render_value(value, sep: str = SEP_PADRAO) -> str:
+    if value is None:
+        # sem este ramo, `_sh_quote(None)` emitia a string 'None' — e
+        # `MINRAM='None'` faz a comparação aritmética do boot dar erro
+        return "''"
     if isinstance(value, bool):
         return "'t'" if value else "'f'"
     if isinstance(value, list):
-        return _sh_quote(" ".join(str(v) for v in value))
+        return _sh_quote(sep.join(str(v) for v in value))
     return _sh_quote(value)
 
 
@@ -62,12 +81,22 @@ def render(image_id: str) -> str:
     if wallpaper and wallpaper.get("md5"):
         lines.append(f"NB_WALLPAPER_MD5={_sh_quote(wallpaper['md5'])}")
 
+    # o separador é do CAMPO, não global: `60-polkit.sh` percorre
+    # NB_HIDE_DOCS_APPS com o IFS padrão, então uma lista de aplicativos
+    # precisaria de espaço. Ainda não é campo de formulário, mas no dia em que
+    # for, um separador único seria esta mesma armadilha ao contrário.
+    seps = {
+        f["key"]: f.get("sep", SEP_PADRAO)
+        for f in config.schema_for(image_id).get("fields", [])
+        if isinstance(f, dict) and f.get("key")
+    }
+
     for name in sorted(values):
         if not VAR_NAME_RE.match(name):
             continue  # nomes fora do padrão nunca viram código shell
         if name.startswith("LOCK_FALLBACK"):
             continue  # hash da senha vai como NB_LOCK_FALLBACK_HASH abaixo
-        lines.append(f"{name}={_render_value(values[name])}")
+        lines.append(f"{name}={_render_value(values[name], seps.get(name, SEP_PADRAO))}")
 
     lockhash = raw.get("LOCK_FALLBACK_PASSWORD_HASH", "")
     if lockhash:

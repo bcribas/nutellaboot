@@ -33,6 +33,22 @@ nb3_json_escape() {
     printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
+# Os dois destinos abaixo re-envolvem o valor em aspas simples, e aí a proteção
+# que o servidor deu (`_sh_quote`) não vale mais nada: uma aspa na página
+# inicial quebra o keyfile do dconf — que recusa o local.d INTEIRO, levando
+# teclado e favoritos junto — e, no /etc/.nb3, quem lê é o agente como root.
+#
+# São dois idiomas diferentes, e é por isso que são duas funções: no GVariant a
+# aspa se escapa com barra invertida; em shell isso NÃO existe dentro de aspas
+# simples — é preciso fechar, pôr a aspa e reabrir.
+nb3_gvariant_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g"
+}
+
+nb3_sh_escape() {
+    printf '%s' "$1" | sed "s/'/'\\\\''/g"
+}
+
 # nb_retry <tentativas> <espera> <comando...>
 nb_retry() {
     _tries=$1

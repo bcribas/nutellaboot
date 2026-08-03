@@ -159,6 +159,10 @@ def build_default_schema() -> dict:
                 "default": ["global.naquadah.com.br 177.70.23.143"],
                 "locked": True,
                 "options": [],
+                # o par que o `help` promete. O nome vira NOME DE ARQUIVO no
+                # cliente (usr/share/maratona-firewall/hosts/<nome>), então
+                # aqui é o lugar de garantir que ele não tem `/` nem `..`
+                "item_pattern": r"[A-Za-z0-9][A-Za-z0-9.-]*\s+[0-9a-fA-F.:]+",
                 "label": _t("Liberados no firewall", "Firewall allowlist", "Permitidos en el cortafuegos"),
                 "help": _t(
                     "Pares \"nome ip\" liberados durante a prova.",
