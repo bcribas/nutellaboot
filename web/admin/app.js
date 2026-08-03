@@ -5,7 +5,8 @@ import { init, t, apply, currentLang } from "/common/i18n.js";
 const $ = (s) => document.querySelector(s);
 const A = { kind: "admin" };
 let images = [];
-let templates = [];
+let modelos = [];
+let eu = null;
 let lastBulkCsv = "";
 
 function toast(msg, isError = false) {
@@ -156,67 +157,359 @@ function renderImages() {
 }
 
 async function load() {
-  const [imgs, tpls] = await Promise.all([
+  eu = await api.get("/api/v1/whoami", A);
+  aplicarPerfil();
+
+  const [imgs, mods] = await Promise.all([
     api.get("/api/v1/site-images", A),
     api.get("/api/v1/models", A),
   ]);
   images = imgs.images;
-  // /models agora devolve [{name, public}]
-  templates = tpls.models.map((tpl) => (typeof tpl === "string" ? { name: tpl, public: false } : tpl));
-  const sel = $("#newtpl");
-  sel.innerHTML = "";
-  for (const tpl of templates) {
-    const o = document.createElement("option");
-    o.value = o.textContent = tpl.name;
-    sel.appendChild(o);
-  }
-  // template opcional do convite (vazio = a pessoa escolhe entre os públicos)
-  const invsel = $("#inv_tpl");
-  if (invsel) {
-    invsel.innerHTML = '<option value="">—</option>';
-    for (const tpl of templates) {
-      const o = document.createElement("option");
-      o.value = o.textContent = tpl.name;
-      invsel.appendChild(o);
-    }
-  }
+  modelos = mods.models;
+
+  // derivar site-image só faz sentido de um modelo com camada; o que não tem
+  // continua listado (para receber camadas), mas fora dos selects de criação
+  preencherSelect($("#newtpl"), modelos.filter((m) => m.layers > 0));
+  preencherSelect($("#mod_from"), modelos, { vazio: t("model_from_blank") });
+  preencherSelect($("#lay_tpl"), modelos.filter((m) => m.can_manage));
+  // modelo opcional do convite (vazio = a pessoa escolhe entre os públicos)
+  if ($("#inv_tpl")) preencherSelect($("#inv_tpl"), modelos.filter((m) => m.public), { vazio: "—" });
+
   renderImages();
-  renderTemplates();
+  renderModels();
   renderLayerTargets();
-  loadInvites();
-  loadRequests();
+  if (ehAdmin()) {
+    loadInvites();
+    loadRequests();
+  }
   loadLayerBuilds();
-  loadPublish();
+  if (ehAdmin()) loadPublish();
 }
 
-function renderTemplates() {
-  const box = $("#tpllist");
+function ehAdmin() {
+  return !eu || eu.kind === "admin";
+}
+
+function preencherSelect(sel, lista, { vazio } = {}) {
+  if (!sel) return;
+  const antes = sel.value;
+  sel.innerHTML = vazio === undefined ? "" : `<option value="">${vazio}</option>`;
+  for (const m of lista) {
+    const o = document.createElement("option");
+    o.value = m.name;
+    o.textContent = m.description ? `${m.name} — ${m.description}` : m.name;
+    sel.appendChild(o);
+  }
+  if (antes && lista.some((m) => m.name === antes)) sel.value = antes;
+}
+
+// Sub-admin não vê convites, pedidos, publicação nem criação em massa: são
+// operações globais. Esconder é mais honesto que deixar clicar e tomar 401.
+function aplicarPerfil() {
+  const admin = ehAdmin();
+  for (const el of document.querySelectorAll("[data-admin-only]")) {
+    el.classList.toggle("hidden", !admin);
+  }
+  $("#who_label").textContent = eu.label || "";
+  $("#who_kind").textContent = admin ? t("who_admin") : t("who_subadmin");
+  $("#who_kind").className = "pill" + (admin ? " ok" : "");
+  $("#who_help").textContent = admin ? t("who_admin_help") : t("who_subadmin_help");
+  $("#who_quotas").textContent = admin
+    ? ""
+    : [
+        `${t("models_section")}: ${eu.usage.models}/${eu.quotas.models}`,
+        `${t("images")}: ${eu.usage.site_images}/${eu.quotas.site_images}`,
+      ].join("   ·   ");
+}
+
+function renderModels() {
+  const box = $("#modlist");
   if (!box) return;
   box.innerHTML = "";
+  box.className = "";
+  if (!modelos.length) {
+    box.className = "muted";
+    box.textContent = t("models_none");
+    return;
+  }
   const table = document.createElement("table");
-  for (const tpl of templates) {
+  for (const m of modelos) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><a href="#" class="mono tplname">${tpl.name}</a></td>
-      <td><span class="pill ${tpl.public ? "ok" : ""}">${
-        tpl.public ? t("template_public") : "—"
-      }</span></td>`;
-    tr.querySelector(".tplname").onclick = (e) => {
+    const nome = document.createElement("td");
+    const a = document.createElement("a");
+    a.href = "#";
+    a.className = "mono";
+    a.textContent = m.name;
+    a.onclick = (e) => {
       e.preventDefault();
-      showLocks(tpl.name);
+      showModel(m);
     };
-    const td = document.createElement("td");
-    const btn = document.createElement("button");
-    btn.className = "small";
-    btn.textContent = tpl.public ? t("make_private") : t("make_public");
-    btn.onclick = async () => {
-      await api.patch(`/api/v1/models/${tpl.name}`, { public: !tpl.public }, A);
-      load();
+    nome.appendChild(a);
+    if (m.description) {
+      const d = document.createElement("div");
+      d.className = "muted";
+      d.textContent = m.description;
+      nome.appendChild(d);
+    }
+
+    const info = document.createElement("td");
+    info.className = "muted";
+    info.textContent = `${m.layers} ${t("model_layers_count")} · ${m.used_by} ${t("model_used_by")}`;
+
+    const marca = document.createElement("td");
+    if (m.public) marca.innerHTML = `<span class="pill ok">${t("template_public")}</span>`;
+    else if (!m.mine) marca.innerHTML = `<span class="pill">${t("model_of_admin")}</span>`;
+
+    const acoes = document.createElement("td");
+    acoes.style.textAlign = "right";
+    if (ehAdmin()) {
+      const pub = document.createElement("button");
+      pub.className = "small";
+      pub.textContent = m.public ? t("make_private") : t("make_public");
+      pub.onclick = async () => {
+        await api.patch(`/api/v1/models/${m.name}`, { public: !m.public }, A);
+        load();
+      };
+      acoes.append(pub, " ");
+    }
+    const dup = document.createElement("button");
+    dup.className = "small";
+    dup.textContent = t("model_duplicate");
+    dup.onclick = () => {
+      $("#mod_from").value = m.name;
+      $("#mod_name").focus();
+      toast(t("model_duplicate_hint"));
     };
-    td.appendChild(btn);
-    tr.appendChild(td);
+    acoes.append(dup, " ");
+    if (m.can_manage) {
+      const del = document.createElement("button");
+      del.className = "small danger";
+      del.textContent = t("delete");
+      del.onclick = () => removeModel(m);
+      acoes.appendChild(del);
+    }
+
+    tr.append(nome, info, marca, acoes);
     table.appendChild(tr);
   }
   box.appendChild(table);
+}
+
+async function createModel() {
+  const nome = $("#mod_name").value.trim();
+  if (!nome) return;
+  try {
+    const criado = await api.post(
+      "/api/v1/models",
+      {
+        name: nome,
+        description: $("#mod_desc").value.trim(),
+        from: $("#mod_from").value || undefined,
+      },
+      A,
+    );
+    $("#mod_name").value = $("#mod_desc").value = "";
+    toast(criado.warning ? `${t("model_created")} — ${t("model_empty_warning")}` : t("model_created"));
+    await load();
+    showModel(modelos.find((m) => m.name === criado.name) || { name: criado.name, can_manage: true });
+  } catch (e) {
+    toast(`${t("error")}: ${e.message}`, true);
+  }
+}
+
+async function removeModel(m) {
+  if (!confirm(t("model_delete_confirm").replace("{n}", m.name))) return;
+  try {
+    await api.del(`/api/v1/models/${m.name}`, A);
+    $("#modpanel").innerHTML = "";
+    load();
+  } catch (e) {
+    // 409 = tem site-image usando; a mensagem do servidor diz quais
+    toast(`${t("error")}: ${e.message}`, true);
+  }
+}
+
+// ---------- painel de um modelo: camadas + formulário ----------
+
+async function showModel(m) {
+  const box = $("#modpanel");
+  box.innerHTML = "";
+  const card = document.createElement("div");
+  card.className = "card";
+  card.style.borderColor = "var(--accent)";
+  card.innerHTML = `<h3 style="margin:0 0 4px">${t("model_panel_title")} — <span class="mono">${m.name}</span></h3>`;
+  if (!m.can_manage) {
+    const aviso = document.createElement("p");
+    aviso.className = "help muted";
+    aviso.textContent = t("model_readonly");
+    card.appendChild(aviso);
+  }
+  box.appendChild(card);
+
+  const modelo = await api.get(`/api/v1/models/${m.name}`, A);
+  card.appendChild(layersEditor(m, modelo.layers || []));
+  card.appendChild(await locksEditor(m));
+  card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+const ROLE_LABEL = {
+  base: "role_base",
+  telemetry: "role_telemetry",
+  wifi: "role_wifi",
+  extra: "role_extra",
+};
+
+function layersEditor(m, layers) {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `<h4 style="margin:14px 0 2px">${t("model_layers")}</h4>
+    <p class="help muted">${t("model_layers_help")}</p>`;
+  const table = document.createElement("table");
+
+  layers.forEach((c, idx) => {
+    const tr = document.createElement("tr");
+    const papel = c.role || "extra";
+    tr.innerHTML = `<td style="width:32px" class="muted">${idx + 1}</td>
+      <td class="mono">${c.file}</td>
+      <td><span class="pill ${papel === "base" ? "warn" : ""}">${t(ROLE_LABEL[papel] || "role_extra")}</span></td>
+      <td class="muted mono">${(c.md5 || "").slice(0, 10)}…</td>`;
+    const acoes = document.createElement("td");
+    acoes.style.textAlign = "right";
+    if (m.can_manage) {
+      const sobe = document.createElement("button");
+      sobe.className = "small";
+      sobe.textContent = "↑";
+      sobe.disabled = idx === 0;
+      sobe.onclick = async () => {
+        const ordem = layers.map((x) => x.file);
+        [ordem[idx - 1], ordem[idx]] = [ordem[idx], ordem[idx - 1]];
+        await api.put(`/api/v1/models/${m.name}/layers/order`, { files: ordem }, A);
+        showModel(m);
+      };
+      const del = document.createElement("button");
+      del.className = "small danger";
+      del.textContent = t("remove");
+      del.onclick = async () => {
+        await api.del(`/api/v1/models/${m.name}/layers/${encodeURIComponent(c.file)}`, A);
+        showModel(m);
+      };
+      acoes.append(sobe, " ", del);
+    }
+    tr.appendChild(acoes);
+    table.appendChild(tr);
+  });
+  if (!layers.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="5" class="muted">${t("model_empty_warning")}</td>`;
+    table.appendChild(tr);
+  }
+  wrap.appendChild(table);
+
+  if (m.can_manage) {
+    const linha = document.createElement("div");
+    linha.className = "actions";
+    linha.style.marginTop = "10px";
+    linha.style.flexWrap = "wrap";
+    const sel = document.createElement("select");
+    sel.style.maxWidth = "320px";
+    const arquivo = document.createElement("input");
+    arquivo.placeholder = "base.squashfs";
+    arquivo.style.maxWidth = "200px";
+    const md5 = document.createElement("input");
+    md5.placeholder = "md5";
+    md5.style.maxWidth = "260px";
+    md5.className = "mono";
+    const papelSel = document.createElement("select");
+    papelSel.style.maxWidth = "150px";
+    for (const r of ["extra", "base", "telemetry", "wifi"]) {
+      const o = document.createElement("option");
+      o.value = r;
+      o.textContent = t(ROLE_LABEL[r]);
+      papelSel.appendChild(o);
+    }
+
+    const add = document.createElement("button");
+    add.className = "primary";
+    add.textContent = t("model_layer_add");
+
+    api.get("/api/v1/layers/catalog", A).then((cat) => {
+      sel.innerHTML = `<option value="">${t("model_layer_manual")}</option>`;
+      for (const c of cat.layers) {
+        const o = document.createElement("option");
+        o.value = JSON.stringify({ file: c.file, md5: c.md5, cdn_url: c.cdn_url, role: c.role });
+        o.textContent = `${c.file} (${c.used_by.join(", ")})`;
+        sel.appendChild(o);
+      }
+    });
+    sel.onchange = () => {
+      const escolhido = sel.value ? JSON.parse(sel.value) : null;
+      arquivo.value = escolhido ? escolhido.file : "";
+      md5.value = escolhido ? escolhido.md5 : "";
+      if (escolhido?.role) papelSel.value = escolhido.role;
+    };
+    add.onclick = async () => {
+      const corpo = sel.value
+        ? JSON.parse(sel.value)
+        : { file: arquivo.value.trim(), md5: md5.value.trim() };
+      corpo.role = papelSel.value;
+      // trocar a base substitui a que já está lá: duas bases no mesmo modelo
+      // fazem a máquina baixar duas raízes e montá-las sobrepostas
+      if (papelSel.value === "base") corpo.replace_role = "base";
+      try {
+        await api.post(`/api/v1/models/${m.name}/layers`, corpo, A);
+        showModel(m);
+        load();
+      } catch (e) {
+        toast(`${t("error")}: ${e.message}`, true);
+      }
+    };
+    linha.append(sel, arquivo, md5, papelSel, add);
+    wrap.appendChild(linha);
+  }
+  return wrap;
+}
+
+async function locksEditor(m) {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `<h4 style="margin:18px 0 2px">${t("locks_title")}</h4>
+    <p class="help muted">${t("locks_help")}</p>`;
+  const data = await api.get(`/api/v1/models/${m.name}/schema`, A);
+  const table = document.createElement("table");
+  const estado = {};
+  for (const f of data.fields) {
+    estado[f.key] = f.locked;
+    const tr = document.createElement("tr");
+    const td0 = document.createElement("td");
+    td0.innerHTML = `<span class="mono">${f.key}</span><br><span class="muted">${tr_(f.label)}</span>`;
+    const td1 = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.className = "small";
+    btn.disabled = !m.can_manage;
+    const pinta = () => {
+      btn.textContent = estado[f.key] ? `🔒 ${t("field_locked")}` : `🔓 ${t("field_free")}`;
+      btn.className = "small" + (estado[f.key] ? " danger" : "");
+    };
+    btn.onclick = () => {
+      estado[f.key] = !estado[f.key];
+      pinta();
+    };
+    pinta();
+    td1.appendChild(btn);
+    tr.append(td0, td1);
+    table.appendChild(tr);
+  }
+  wrap.appendChild(table);
+  if (m.can_manage) {
+    const salvar = document.createElement("button");
+    salvar.className = "primary";
+    salvar.style.marginTop = "10px";
+    salvar.textContent = t("locks_save");
+    salvar.onclick = async () => {
+      await api.put(`/api/v1/models/${m.name}/schema/locks`, { locks: estado }, A);
+      toast(t("locks_saved"));
+    };
+    wrap.appendChild(salvar);
+  }
+  return wrap;
 }
 
 async function loadInvites() {
@@ -239,7 +532,7 @@ async function loadInvites() {
     const meta = document.createElement("td");
     meta.className = "muted";
     const perfil = inv.unlocked === false ? t("profile_official_short") : t("profile_free_short");
-    meta.textContent = `${inv.remaining} ${t("invite_remaining")} · ${perfil}${inv.template ? " · " + inv.template : ""}${inv.note ? " · " + inv.note : ""}`;
+    meta.textContent = `${inv.remaining} ${t("invite_remaining")} · ${perfil}${inv.model ? " · " + inv.model : ""}${inv.note ? " · " + inv.note : ""}`;
     tr.appendChild(meta);
     const td2 = document.createElement("td");
     const rev = document.createElement("button");
@@ -317,7 +610,7 @@ async function loadLayerBuilds() {
     const tr = document.createElement("tr");
     const cor = { done: "ok", failed: "bad", running: "warn" }[b.state] || "";
     tr.innerHTML = `<td><b>${b.name || ""}</b><br><span class="muted mono">${
-      b.image || b.template || ""
+      b.image || b.model || ""
     }</span></td>
       <td class="muted mono">${(b.packages || []).join(" ")}</td>
       <td><span class="pill ${cor}">${stateLabel(b.state)}</span>${
@@ -379,15 +672,6 @@ function renderLayerTargets() {
       sel.appendChild(o);
     }
   }
-  const tsel = $("#lay_tpl");
-  if (tsel) {
-    tsel.innerHTML = "";
-    for (const tpl of templates) {
-      const o = document.createElement("option");
-      o.value = o.textContent = tpl.name;
-      tsel.appendChild(o);
-    }
-  }
 }
 
 async function buildLayerFromTemplate() {
@@ -422,10 +706,18 @@ async function buildLayerForImage() {
 }
 
 async function showImageLayers(image) {
-  const [builds, layers] = await Promise.all([
-    api.get(`/api/v1/site-images/${image}/layerbuilds`, A),
-    api.get(`/api/v1/site-images/${image}/layers`, A),
-  ]);
+  // sem este try, uma das duas chamadas falhando deixava a promessa sem dono:
+  // o botão não abria painel nenhum e não dizia por quê
+  let builds, layers;
+  try {
+    [builds, layers] = await Promise.all([
+      api.get(`/api/v1/site-images/${image}/layerbuilds`, A),
+      api.get(`/api/v1/site-images/${image}/layers`, A),
+    ]);
+  } catch (e) {
+    toast(`${t("error")}: ${e.message}`, true);
+    return;
+  }
   const box = document.createElement("div");
   box.className = "detail";
   const inner = document.createElement("div");
@@ -509,51 +801,6 @@ async function loadPublish() {
   box.appendChild(table);
 }
 
-// ---------- cadeados por campo (template) ----------
-
-async function showLocks(template) {
-  const box = $("#lockpanel");
-  box.innerHTML = "";
-  const data = await api.get(`/api/v1/models/${template}/schema`, A);
-  const card = document.createElement("div");
-  card.innerHTML = `<h3 style="margin:0 0 4px">${t("locks_title")} — <span class="mono">${template}</span></h3>
-    <p class="help muted">${t("locks_help")}</p>`;
-  const table = document.createElement("table");
-  const estado = {};
-  for (const f of data.fields) {
-    estado[f.key] = f.locked;
-    const tr = document.createElement("tr");
-    const td0 = document.createElement("td");
-    td0.innerHTML = `<span class="mono">${f.key}</span><br><span class="muted">${tr_(f.label)}</span>`;
-    const td1 = document.createElement("td");
-    const btn = document.createElement("button");
-    btn.className = "small";
-    const pinta = () => {
-      btn.textContent = estado[f.key] ? `🔒 ${t("field_locked")}` : `🔓 ${t("field_free")}`;
-      btn.className = "small" + (estado[f.key] ? " danger" : "");
-    };
-    btn.onclick = () => {
-      estado[f.key] = !estado[f.key];
-      pinta();
-    };
-    pinta();
-    td1.appendChild(btn);
-    tr.append(td0, td1);
-    table.appendChild(tr);
-  }
-  card.appendChild(table);
-  const salvar = document.createElement("button");
-  salvar.className = "primary";
-  salvar.style.marginTop = "10px";
-  salvar.textContent = t("locks_save");
-  salvar.onclick = async () => {
-    await api.put(`/api/v1/models/${template}/schema/locks`, { locks: estado }, A);
-    toast(t("locks_saved"));
-  };
-  card.appendChild(salvar);
-  box.appendChild(card);
-}
-
 // rótulo do schema é {pt,en,es}
 function tr_(label) {
   if (!label) return "";
@@ -609,30 +856,50 @@ async function createImage() {
   const model = $("#newtpl").value;
   const unlocked = $("#newprofile").value === "free";
   if (!id) return;
+  let info;
   try {
     const wallpaper_locked = $("#newwalllock").checked;
-    const info = await api.post(
+    info = await api.post(
       "/api/v1/site-images",
-      { id, fullname, model: template, unlocked, wallpaper_locked },
+      { id, fullname, model, unlocked, wallpaper_locked },
       A
     );
-    // wallpaper opcional já na criação: sobe logo depois que a imagem existe
-    const arquivo = $("#newwall").files[0];
-    if (arquivo) {
-      $("#createstatus").textContent = t("uploading");
+  } catch (e) {
+    $("#createstatus").textContent = "";
+    toast(`${t("error")}: ${e.message}`, true);
+    return;
+  }
+
+  // Daqui para baixo a imagem JÁ EXISTE, com token e chaves que só aparecem
+  // uma vez. O wallpaper falhando (não é PNG, passa de 12 MB) não pode levar o
+  // cartão de credenciais junto: antes, quem escolhia um arquivo inválido via
+  // só um toast de erro e ia embora achando que nada tinha sido criado.
+  let aviso = "";
+  const arquivo = $("#newwall").files[0];
+  if (arquivo) {
+    $("#createstatus").textContent = t("uploading");
+    try {
       const fd = new FormData();
       fd.append("file", arquivo);
       await api.request("PUT", `/api/v1/site-images/${id}/wallpaper`, { raw: fd, kind: "admin" });
       $("#newwall").value = "";
+    } catch (e) {
+      aviso = `${t("wallpaper_upload_failed")}: ${e.message}`;
+      toast(aviso, true);
     }
-    $("#createstatus").textContent = "";
-    document.querySelector("main").prepend(credentialsCard(info));
-    $("#newid").value = $("#newname").value = "";
-    $("#newwalllock").checked = false;
-    load();
-  } catch (e) {
-    toast(`${t("error")}: ${e.message}`, true);
   }
+  $("#createstatus").textContent = "";
+  const cartao = credentialsCard(info);
+  if (aviso) {
+    const p = document.createElement("p");
+    p.className = "warn";
+    p.textContent = aviso;
+    cartao.prepend(p);
+  }
+  document.querySelector("main").prepend(cartao);
+  $("#newid").value = $("#newname").value = "";
+  $("#newwalllock").checked = false;
+  load();
 }
 
 async function bulkCreate() {
@@ -640,16 +907,11 @@ async function bulkCreate() {
   if (!tsv) return;
   $("#bulkstatus").textContent = t("loading");
   try {
-    const resp = await fetch("/api/v1/site-images/bulk?format=csv", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${api.adminKey()}`,
-        "Content-Type": "text/tab-separated-values",
-      },
-      body: tsv,
+    lastBulkCsv = await api.request("POST", "/api/v1/site-images/bulk?format=csv", {
+      kind: "admin",
+      raw: tsv,
+      contentType: "text/tab-separated-values",
     });
-    lastBulkCsv = await resp.text();
-    if (!resp.ok) throw new Error(lastBulkCsv);
     const rows = lastBulkCsv.trim().split("\n").slice(1);
     const ok = rows.filter((r) => r.split(",")[1] === "True").length;
     $("#bulkstatus").textContent = t("bulk_result", { ok, fail: rows.length - ok });
@@ -670,16 +932,51 @@ function downloadCsv() {
   URL.revokeObjectURL(a.href);
 }
 
+function abrirPainel() {
+  $("#login").classList.add("hidden");
+  $("#panel").classList.remove("hidden");
+  $("#logout").classList.remove("hidden");
+}
+
+function pedirChave() {
+  $("#panel").classList.add("hidden");
+  $("#logout").classList.add("hidden");
+  $("#login").classList.remove("hidden");
+}
+
+// Troca a chave digitada por um cookie de sessão. Daí em diante o navegador
+// manda o cookie sozinho: recarregar a página não pede nada de novo.
 async function enter() {
-  api.setAdminKey($("#key").value.trim());
+  const chave = $("#key").value.trim();
+  if (!chave) return;
+  try {
+    await api.login(chave);
+    $("#key").value = "";
+    await load();
+    abrirPainel();
+  } catch (e) {
+    toast(`${t("error")}: ${e.message}`, true);
+  }
+}
+
+// No carregamento: se já há sessão, entra direto.
+//
+// A versão anterior chamava enter() aqui, e enter() começava gravando o campo
+// de login — vazio num carregamento novo — por cima da credencial guardada.
+// Ou seja, a tentativa automática de entrar era exatamente o que deslogava.
+async function retomarSessao() {
   try {
     await load();
-    $("#login").classList.add("hidden");
-    $("#panel").classList.remove("hidden");
-    $("#logout").classList.remove("hidden");
+    abrirPainel();
   } catch (e) {
-    api.clearAdminKey();
-    toast(`${t("error")}: ${e.message}`, true);
+    // só falta de credencial volta para o login; um erro de rede ou uma
+    // seção que falhou não podem derrubar quem já está dentro
+    if (e.status === 401) {
+      pedirChave();
+    } else {
+      abrirPainel();
+      toast(`${t("error")}: ${e.message}`, true);
+    }
   }
 }
 
@@ -688,6 +985,7 @@ async function main() {
   $("#enter").onclick = enter;
   $("#key").onkeydown = (e) => e.key === "Enter" && enter();
   $("#create").onclick = createImage;
+  $("#mod_create").onclick = createModel;
   $("#bulkgo").onclick = bulkCreate;
   $("#bulkcsv").onclick = downloadCsv;
   $("#reload").onclick = load;
@@ -712,15 +1010,21 @@ async function main() {
     $("#lpane_img").classList.remove("hidden");
     $("#lpane_tpl").classList.add("hidden");
   };
-  $("#logout").onclick = () => {
-    api.clearAdminKey();
+  $("#logout").onclick = async () => {
+    try {
+      await api.logout();
+    } catch {
+      /* sessão já podia estar encerrada; o reload mostra o login de qualquer jeito */
+    }
     location.reload();
   };
   document.addEventListener("nb3:langchange", () => {
     apply();
+    if (eu) aplicarPerfil();
     if (images.length) renderImages();
+    if (modelos.length) renderModels();
   });
-  if (api.adminKey()) enter();
+  await retomarSessao();
 }
 
 main();

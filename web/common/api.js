@@ -1,8 +1,19 @@
 // Cliente da API do NutellaBoot 3.
 //
-// Credenciais: as telas de imagem (configureitor, hotconfig) recebem
-// ?id=<imagem>&tk=<token> na URL; a tela de administração guarda a chave de
-// admin no sessionStorage (não vai para a URL, não fica no histórico).
+// Duas formas de credencial, e nenhuma delas fica guardada aqui:
+//
+//   * telas de imagem (configureitor, hotconfig) — recebem
+//     ?id=<imagem>&tk=<token> na URL, lido a cada chamada. É o link que se
+//     entrega a uma sede, e ele não muda (invariante do projeto).
+//
+//   * console (/admin/) — SESSÃO. A chave de administração, ou o código de
+//     convite, é trocada uma vez por um cookie HttpOnly em
+//     POST /api/v1/session; daí em diante o navegador manda o cookie sozinho.
+//
+// NÃO volte a guardar a credencial em sessionStorage/localStorage. Além de
+// deixá-la ao alcance de qualquer script da página, foi essa ida e volta que
+// produziu o bug de deslogar a cada reload: a tela regravava o campo de login
+// (vazio no carregamento) por cima da chave boa. Há teste guardando isto.
 
 const params = new URLSearchParams(location.search);
 export const imageId = params.get("id") || "";
@@ -11,22 +22,11 @@ function imageToken() {
   return params.get("tk") || "";
 }
 
-export function adminKey() {
-  return sessionStorage.getItem("nb3-admin-key") || "";
-}
-
-export function setAdminKey(k) {
-  sessionStorage.setItem("nb3-admin-key", k);
-}
-
-export function clearAdminKey() {
-  sessionStorage.removeItem("nb3-admin-key");
-}
-
-function authHeader(kind) {
-  const key = kind === "admin" ? adminKey() : imageToken();
-  return key ? { Authorization: `Bearer ${key}` } : {};
-}
+// O cookie de sessão só é aceito pelo servidor junto deste cabeçalho. Um
+// <form> de outro site não consegue defini-lo, e um fetch cross-site com
+// cabeçalho custom esbarra no preflight — é o que impede CSRF agora que
+// existe cookie.
+const CONSOLE_HEADER = { "X-NB-Console": "1" };
 
 export class ApiError extends Error {
   constructor(status, detail) {
@@ -51,10 +51,16 @@ async function parse(resp) {
   return body;
 }
 
-export async function request(method, path, { body, kind = "image", raw } = {}) {
-  const opts = { method, headers: { ...authHeader(kind) } };
+export async function request(method, path, { body, kind = "image", raw, contentType } = {}) {
+  const headers = { ...CONSOLE_HEADER };
+  // no console a credencial é o cookie; nas telas de sede, o token da URL
+  if (kind !== "admin" && imageToken()) {
+    headers.Authorization = `Bearer ${imageToken()}`;
+  }
+  const opts = { method, headers, credentials: "same-origin" };
   if (raw) {
     opts.body = raw;
+    if (contentType) opts.headers["Content-Type"] = contentType;
   } else if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
@@ -68,7 +74,33 @@ export const put = (p, body, o) => request("PUT", p, { body, ...o });
 export const patch = (p, body, o) => request("PATCH", p, { body, ...o });
 export const del = (p, o) => request("DELETE", p, o);
 
+// --- sessão do console ---
+
+export async function login(key) {
+  return post("/api/v1/session", { key }, { kind: "admin" });
+}
+
+export async function logout(todos = false) {
+  return del(`/api/v1/session${todos ? "?all=true" : ""}`, { kind: "admin" });
+}
+
+export function wallpaperUrl(image, versao) {
+  // Mesmo caso do eventsUrl: <img> não manda cabeçalho, então a credencial vai
+  // na URL (token de sede) ou vem do cookie (console). O `v=` é só para o
+  // navegador não reaproveitar a imagem antiga depois de trocar.
+  const tk = imageToken();
+  const q = new URLSearchParams();
+  if (versao) q.set("v", versao);
+  if (tk) q.set("tk", tk);
+  const s = q.toString();
+  return `/api/v1/site-images/${encodeURIComponent(image)}/wallpaper${s ? `?${s}` : ""}`;
+}
+
 export function eventsUrl(image) {
-  const tk = imageToken() || adminKey();
-  return `/api/v1/site-images/${encodeURIComponent(image)}/events?tk=${encodeURIComponent(tk)}`;
+  // Com token de sede na URL, ele vai junto (o EventSource não manda
+  // cabeçalho). No console não vai credencial nenhuma: o cookie de sessão
+  // acompanha por ser mesma origem.
+  const tk = imageToken();
+  const q = tk ? `?tk=${encodeURIComponent(tk)}` : "";
+  return `/api/v1/site-images/${encodeURIComponent(image)}/events${q}`;
 }

@@ -26,6 +26,29 @@
   </div>
 
   <div id="panel" class="hidden">
+    <div class="card" id="whocard" style="border-color:var(--accent)">
+      <h2><span id="who_label"></span> <span id="who_kind" class="pill"></span></h2>
+      <p class="help muted" id="who_help"></p>
+      <div id="who_quotas" class="muted mono"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="models_section"></h2>
+      <p class="help muted" data-i18n="models_section_help"></p>
+      <div class="actions" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+        <label class="fld" style="max-width:220px"><span data-i18n="model_name"></span>
+          <input type="text" id="mod_name" placeholder="meulab2026"></label>
+        <label class="fld" style="flex:1;min-width:200px"><span data-i18n="model_description"></span>
+          <input type="text" id="mod_desc"></label>
+        <label class="fld" style="max-width:260px"><span data-i18n="model_from"></span>
+          <select id="mod_from"></select></label>
+        <button type="button" id="mod_create" class="primary" data-i18n="model_create"></button>
+      </div>
+      <p class="help muted" data-i18n="model_from_help"></p>
+      <div id="modlist" class="muted" style="margin-top:12px" data-i18n="loading"></div>
+      <div id="modpanel" style="margin-top:14px"></div>
+    </div>
+
     <div class="card">
       <h2 data-i18n="new_image"></h2>
       <div class="field">
@@ -63,7 +86,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" data-admin-only>
       <h2 data-i18n="bulk"></h2>
       <p class="help muted" data-i18n="bulk_help"></p>
       <textarea id="bulktsv" spellcheck="false"
@@ -84,7 +107,7 @@
       <div id="imglist" class="muted" data-i18n="loading"></div>
     </div>
 
-    <div class="card">
+    <div class="card" data-admin-only>
       <h2 data-i18n="invites"></h2>
       <p class="help muted" data-i18n="invites_help"></p>
       <div class="actions" style="flex-wrap:wrap; gap:12px; align-items:flex-end">
@@ -108,7 +131,7 @@
       <div id="invlist" class="muted" style="margin-top:12px" data-i18n="loading"></div>
     </div>
 
-    <div class="card">
+    <div class="card" data-admin-only>
       <h2 data-i18n="requests_admin"></h2>
       <div id="reqlist" class="muted" data-i18n="loading"></div>
     </div>
@@ -152,7 +175,7 @@
       <div id="laylist" class="muted" style="margin-top:12px" data-i18n="layer_none"></div>
     </div>
 
-    <div class="card">
+    <div class="card" data-admin-only>
       <h2 data-i18n="publish_section"></h2>
       <p class="help muted" data-i18n="publish_help"></p>
       <div class="actions">
@@ -162,11 +185,6 @@
       <div id="publist" class="muted" style="margin-top:10px" data-i18n="publish_none"></div>
     </div>
 
-    <div class="card">
-      <h2 data-i18n="template"></h2>
-      <div id="tpllist"></div>
-      <div id="lockpanel" style="margin-top:14px"></div>
-    </div>
   </div>
 </main>
 

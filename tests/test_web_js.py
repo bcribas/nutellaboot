@@ -1,0 +1,278 @@
+"""Variável não declarada no JavaScript das telas.
+
+"Erro: template is not defined" ao criar uma imagem: um renomeio trocou a
+declaração (`const model = ...`) e esqueceu um uso (`model: template`). Esse
+tipo de erro não aparece ao carregar a página — só explode no clique, na frente
+do usuário. Foi a segunda vez que resíduo de renomeio passou por todos os
+testes (a primeira foi o `sleep RAM` do shell).
+
+Não há motor de JS nesta máquina (sem node), então isto é um *no-undef* mínimo
+em Python: tokeniza fora comentários/strings/regex (preservando o código de
+`${...}` em template literals), coleta declarações e usos, e acusa uso sem
+declaração que não seja um global do navegador.
+
+Não é um linter de verdade. O desenho pende para o falso negativo (na dúvida,
+não acusa — ex.: o consequente de um ternário se confunde com chave de objeto
+e é pulado); falso positivo é que mataria o teste. Erros de tipo e de lógica
+continuam fora do alcance.
+"""
+
+import re
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[1]
+ARQUIVOS = sorted(
+    p for p in (REPO / "web").rglob("*.js") if "locales" not in p.parts
+)
+
+PALAVRAS_CHAVE = {
+    "const", "let", "var", "function", "return", "if", "else", "for", "while",
+    "do", "of", "in", "new", "try", "catch", "finally", "throw", "async",
+    "await", "class", "extends", "true", "false", "null", "undefined", "this",
+    "typeof", "instanceof", "delete", "void", "break", "continue", "switch",
+    "case", "default", "export", "import", "from", "as", "yield", "static",
+    "get", "set", "constructor", "super",
+}
+
+# Globals que o navegador fornece. Conjunto explícito de propósito: um nome
+# novo aqui é uma linha; um conjunto "esperto" seria um buraco.
+GLOBALS = {
+    "document", "window", "location", "history", "navigator", "console",
+    "fetch", "alert", "confirm", "prompt",
+    "setTimeout", "clearTimeout", "setInterval", "clearInterval",
+    "sessionStorage", "localStorage",
+    "URLSearchParams", "URL", "FormData", "Blob", "File",
+    "EventSource", "WebSocket", "AudioContext", "DOMParser", "CustomEvent",
+    "JSON", "Math", "Date", "Promise", "Array", "Object", "String", "Number",
+    "Boolean", "Set", "Map", "Error", "TypeError", "RegExp",
+    "encodeURIComponent", "decodeURIComponent", "parseInt", "parseFloat",
+    "isNaN", "isFinite", "structuredClone", "requestAnimationFrame",
+}
+
+IDENT = r"[A-Za-z_$][\w$]*"
+
+
+def tirar_nao_codigo(texto: str) -> str:
+    """Troca por espaços o que não é código: comentários, strings, regex e o
+    texto de template literals — preservando o código dentro de `${...}`.
+    Mantém os \\n para os números de linha continuarem certos."""
+    saida = list(texto)
+    i, n = 0, len(texto)
+
+    def apagar(a, b):
+        for k in range(a, min(b, n)):
+            if saida[k] != "\n":
+                saida[k] = " "
+
+    # pilha de contexto para `${ ... }` aninhado dentro de template literal
+    modo = ["codigo"]
+    ultimo_relevante = ""  # último caractere de código, para detectar regex
+    inicio = 0
+
+    while i < n:
+        c = texto[i]
+        estado = modo[-1]
+
+        if estado == "codigo":
+            if c == "/" and texto[i + 1 : i + 2] == "/":
+                fim = texto.find("\n", i)
+                fim = n if fim == -1 else fim
+                apagar(i, fim)
+                i = fim
+                continue
+            if c == "/" and texto[i + 1 : i + 2] == "*":
+                fim = texto.find("*/", i)
+                fim = n if fim == -1 else fim + 2
+                apagar(i, fim)
+                i = fim
+                continue
+            if c in "'\"":
+                inicio, alvo = i, c
+                i += 1
+                while i < n and texto[i] != alvo:
+                    i += 2 if texto[i] == "\\" else 1
+                apagar(inicio + 1, i)
+                i += 1
+                continue
+            if c == "`":
+                modo.append("template")
+                inicio = i + 1
+                i += 1
+                continue
+            if c == "/" and ultimo_relevante in "(,=:[!&|?{};\n" + "":
+                # heurística clássica: '/' depois de operador abre regex,
+                # depois de valor é divisão
+                inicio = i
+                i += 1
+                dentro_classe = False
+                while i < n:
+                    if texto[i] == "\\":
+                        i += 2
+                        continue
+                    if texto[i] == "[":
+                        dentro_classe = True
+                    elif texto[i] == "]":
+                        dentro_classe = False
+                    elif texto[i] == "/" and not dentro_classe:
+                        break
+                    elif texto[i] == "\n":
+                        break  # não era regex; desiste sem apagar
+                    i += 1
+                if i < n and texto[i] == "/":
+                    apagar(inicio + 1, i)
+                    i += 1
+                continue
+            if c == "}" and len(modo) > 1 and modo[-1] == "codigo":
+                # fecha um ${ ... }: volta ao texto do template
+                modo.pop()
+                inicio = i + 1
+                i += 1
+                continue
+            if not c.isspace():
+                ultimo_relevante = c
+            i += 1
+            continue
+
+        if estado == "template":
+            if c == "\\":
+                apagar(i, i + 2)
+                i += 2
+                continue
+            if c == "`":
+                apagar(inicio, i)
+                modo.pop()
+                i += 1
+                continue
+            if c == "$" and texto[i + 1 : i + 2] == "{":
+                apagar(inicio, i + 2)
+                modo.append("codigo")
+                ultimo_relevante = "{"
+                i += 2
+                continue
+            i += 1
+            continue
+
+    return "".join(saida)
+
+
+def _nomes(trecho: str) -> set[str]:
+    """Identificadores declarados num pedaço de lista (params, destructuring).
+    Em `a = 1` e `a: b` (rename de destructuring), o declarado é o certo."""
+    achados = set()
+    for parte in trecho.split(","):
+        # corta o valor padrao (`a = 1`, `{ x } = {}`) e desembrulha o
+        # destructuring — depois do split por virgula, `{a, b}` chega como
+        # `{a` e `b}`, e tirar as chaves resolve os dois
+        parte = parte.split("=")[0]
+        parte = parte.strip().lstrip(".").strip("{}[] \t")
+        if not parte:
+            continue
+        m = re.match(rf"({IDENT})\s*:\s*({IDENT})", parte)
+        if m:
+            achados.add(m.group(2))  # {original: renomeado} declara o renomeado
+            continue
+        m = re.match(rf"({IDENT})", parte)
+        if m:
+            achados.add(m.group(1))
+    return achados
+
+
+def declarados(codigo: str) -> set[str]:
+    d: set[str] = set()
+    for m in re.finditer(rf"\bimport\s+\*\s+as\s+({IDENT})", codigo):
+        d.add(m.group(1))
+    for m in re.finditer(r"\bimport\s*\{([^}]*)\}", codigo):
+        d |= _nomes(m.group(1))
+    for m in re.finditer(rf"\b(?:const|let|var)\s+({IDENT})", codigo):
+        d.add(m.group(1))
+    for m in re.finditer(r"\b(?:const|let|var)\s*\{([^}]*)\}", codigo):
+        d |= _nomes(m.group(1))
+    for m in re.finditer(r"\b(?:const|let|var)\s*\[([^\]]*)\]", codigo):
+        d |= _nomes(m.group(1))
+    for m in re.finditer(rf"\bfunction\s+({IDENT})?\s*\(([^)]*)\)", codigo):
+        if m.group(1):
+            d.add(m.group(1))
+        d |= _nomes(m.group(2))
+    for m in re.finditer(r"\(([^()]*)\)\s*=>", codigo):
+        d |= _nomes(m.group(1))
+    for m in re.finditer(rf"\b({IDENT})\s*=>", codigo):
+        d.add(m.group(1))
+    for m in re.finditer(rf"\bcatch\s*\(\s*({IDENT})", codigo):
+        d.add(m.group(1))
+    for m in re.finditer(rf"\bclass\s+({IDENT})", codigo):
+        d.add(m.group(1))
+    # parâmetros de método de classe (`constructor(a, b) {`). O padrão também
+    # casa `if (x) {` e declara `x` a mais — sobre-declarar só gera falso
+    # negativo, que é o lado escolhido deste verificador.
+    for m in re.finditer(rf"\b{IDENT}\s*\(([^()]*)\)\s*\{{", codigo):
+        d |= _nomes(m.group(1))
+    return d
+
+
+def usos_sem_declaracao(texto: str) -> list[tuple[int, str]]:
+    codigo = tirar_nao_codigo(texto)
+    conhecidos = declarados(codigo) | PALAVRAS_CHAVE | GLOBALS
+    problemas = []
+    for m in re.finditer(IDENT, codigo):
+        nome = m.group(0)
+        if nome in conhecidos:
+            continue
+        antes = codigo[: m.start()].rstrip()
+        depois = codigo[m.end() :].lstrip()
+        # acesso de propriedade (obj.x, obj?.x) não é uso de variável
+        if antes.endswith(".") or antes.endswith("?."):
+            continue
+        # chave de objeto ({x: ...}) e rótulo não são usos. O consequente de
+        # um ternário também cai aqui — falso negativo aceito de propósito.
+        if depois.startswith(":"):
+            continue
+        linha = texto[: m.start()].count("\n") + 1
+        problemas.append((linha, nome))
+    return problemas
+
+
+# --- o verificador aplicado às telas ---
+
+
+@pytest.mark.parametrize("arquivo", ARQUIVOS, ids=lambda p: str(p.relative_to(REPO / "web")))
+def test_nenhuma_variavel_sem_declaracao(arquivo):
+    problemas = usos_sem_declaracao(arquivo.read_text(encoding="utf-8"))
+    assert problemas == [], "; ".join(
+        f"{arquivo.name}:{linha}: '{nome}' não é declarado nem é um global conhecido"
+        for linha, nome in problemas
+    )
+
+
+# --- o verificador precisa pegar o bug que o motivou ---
+
+
+def test_o_verificador_acusa_o_bug_original():
+    """Reintroduz o `model: template` no admin/app.js de verdade (em memória)
+    e confere que o verificador aponta exatamente o `template`. Se um dia o
+    verificador afrouxar a ponto de deixar isso passar, este teste avisa."""
+    texto = (REPO / "web" / "admin" / "app.js").read_text(encoding="utf-8")
+    alvo = "{ id, fullname, model, unlocked, wallpaper_locked }"
+    assert alvo in texto, "a linha da criação de imagem mudou; atualize o teste"
+    quebrado = texto.replace(alvo, "{ id, fullname, model: template, unlocked, wallpaper_locked }")
+
+    nomes = {nome for _, nome in usos_sem_declaracao(quebrado)}
+    assert nomes == {"template"}, nomes
+
+
+def test_o_verificador_entende_o_que_nao_e_codigo():
+    """As três armadilhas do tokenizador: string com aspas, template literal
+    com código dentro, e regex com aspas no meio."""
+    trecho = '''
+const a = "isto nao e codigo: fantasma1";
+const b = `texto ${a} mais texto ${outra} fim`;
+const c = a.split(/["']+/);
+const d = { chave: valor };
+obj.propriedade = 1;
+'''
+    nomes = {nome for _, nome in usos_sem_declaracao(trecho)}
+    # `outra` (dentro do ${}) e `valor` (valor de chave) são usos reais sem
+    # declaração; `fantasma1` (string), `chave` (chave) e `propriedade`
+    # (acesso) não são
+    assert nomes == {"outra", "valor", "obj"}, nomes

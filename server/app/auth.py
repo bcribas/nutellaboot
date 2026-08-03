@@ -13,7 +13,7 @@ import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request
 
 from . import fsdb
 from .settings import settings
@@ -29,10 +29,19 @@ def key_hash(key: str) -> str:
 
 @dataclass
 class Principal:
-    kind: str  # "admin" | "service" | "image" | "machine"
+    kind: str  # "admin" | "subadmin" | "service" | "image" | "machine"
     name: str = ""
     scopes: set[str] = field(default_factory=set)
     images: list[str] = field(default_factory=list)  # globs (serviço)
+
+    @property
+    def owner(self) -> str:
+        """Identidade usada no campo `owner` de modelos e site-images."""
+        if self.kind == "admin":
+            return "admin"
+        if self.kind == "subadmin":
+            return self.name
+        return ""
 
     def can_see_image(self, image_id: str) -> bool:
         if self.kind == "admin":
@@ -41,6 +50,10 @@ class Principal:
             return not self.images or any(
                 fnmatch.fnmatch(image_id, pat) for pat in self.images
             )
+        if self.kind == "subadmin":
+            from .services import store
+
+            return store.site_image_owner(image_id) == self.name
         return self.name == image_id
 
 
@@ -79,7 +92,26 @@ def identify(token: str | None, image_id: str | None = None) -> Principal | None
         stored = (fsdb.read_text(_site_image_dir(image_id) / "token") or "").strip()
         if stored and secrets.compare_digest(token, stored):
             return Principal("image", image_id)
-    return None
+
+    return identify_subadmin(token)
+
+
+def identify_subadmin(token: str | None) -> Principal | None:
+    """O próprio código do convite é a credencial do sub-admin — sem cadastro
+    separado, sem senha para esquecer. Quem revoga o convite tira o acesso."""
+    from .services import invites, owners
+
+    if not token or not invites.looks_like_code(token):
+        return None
+    code = invites.normalize(token)
+    ok, _ = invites.is_valid_for_console(code)
+    if not ok:
+        return None
+    oid = owners.owner_id(code)
+    if owners.disabled(oid):
+        return None
+    owners.ensure(code)
+    return Principal("subadmin", oid)
 
 
 def identify_machine(machine_key: str | None, image_id: str) -> Principal | None:
@@ -127,11 +159,68 @@ def _unauthorized() -> HTTPException:
     return HTTPException(401, "credencial ausente ou inválida")
 
 
-async def require_admin(authorization: str | None = Header(None)) -> Principal:
-    p = identify(_bearer(authorization))
+# Cabeçalho que a autenticação por COOKIE exige. Um <form> de outro site não
+# consegue definir cabeçalho, e um fetch cross-site com cabeçalho custom
+# dispara preflight (não há CORS configurado, então morre ali). É esta linha
+# que segura o CSRF que o cookie introduziria — em especial nos POST sem corpo
+# obrigatório (lock_all, rotate_token, disable_owner...), os únicos que um
+# formulário simples conseguiria disparar.
+HEADER_CONSOLE = "x-nb-console"
+
+
+def principal(request: Request | None, authorization: str | None, image_id: str | None = None):
+    """A credencial, de onde ela vier — num ponto só.
+
+    Ordem: `Authorization: Bearer` primeiro (ferramentas, MOJ, máquinas — nada
+    mudou para elas), cookie de sessão depois. O cookie só vale com o cabeçalho
+    de console.
+
+    É pública porque rota que não usa `Depends` (as de camada por imagem, que
+    misturam credencial de console com token da imagem) precisa chamá-la. Ler
+    `Authorization` na mão fora daqui já custou caro: as rotas de layerbuild
+    faziam isso e ficaram 401 para o console inteiro quando a sessão por cookie
+    entrou.
+    """
+    p = identify(_bearer(authorization), image_id=image_id)
+    if p is not None:
+        return p
+    if request is None:
+        return None
+    if request.headers.get(HEADER_CONSOLE) is None:
+        return None
+
+    from .services import sessions
+
+    return sessions.resolve(request.cookies.get(sessions.COOKIE, ""))
+
+
+async def require_admin(
+    request: Request = None, authorization: str | None = Header(None)
+) -> Principal:
+    p = principal(request, authorization)
     if not p or p.kind != "admin":
         raise _unauthorized()
     return p
+
+
+async def require_console(
+    request: Request, authorization: str | None = Header(None)
+) -> Principal:
+    """Console de administração: chave de admin ou código de convite.
+
+    O código de convite é curto o bastante para ser digitado à mão, então o
+    erro é limitado por IP — sem isso, adivinhar um código seria só uma
+    questão de tempo de CPU alheio.
+    """
+    from .services import ratelimit
+
+    p = principal(request, authorization)
+    if p and p.kind in ("admin", "subadmin"):
+        return p
+    ip = ratelimit.client_ip(request)
+    if not ratelimit.allow(f"console:{ip}", rate=0.2, burst=10):
+        raise HTTPException(429, "muitas tentativas; tente de novo em instantes")
+    raise _unauthorized()
 
 
 def require_image_access(*, service_scope: str | None = None, allow_machine: bool = False):
@@ -141,23 +230,36 @@ def require_image_access(*, service_scope: str | None = None, allow_machine: boo
 
     async def dep(
         image: str,
+        request: Request = None,
         authorization: str | None = Header(None),
         x_nb_machine_key: str | None = Header(None),
     ) -> Principal:
-        if not _site_image_dir(image).is_dir():
-            raise HTTPException(404, "imagem não existe")
         if allow_machine:
             p = identify_machine(x_nb_machine_key, image)
             if p:
                 return p
-        p = identify(_bearer(authorization), image_id=image)
+        # a credencial vem ANTES da existência: conferir o diretório primeiro
+        # deixava um anônimo separar "imagem existe" (401) de "não existe"
+        # (404) sem credencial nenhuma
+        p = principal(request, authorization, image_id=image)
         if not p:
             raise _unauthorized()
         if p.kind == "service":
+            # serviço é credencial que a administração emitiu (o MOJ): erro
+            # claro vale mais que sigilo, e quem integra precisa distinguir
+            # "faltou escopo" de "essa sala não é sua"
             if service_scope is None or service_scope not in p.scopes:
                 raise HTTPException(403, "escopo insuficiente")
-        if not p.can_see_image(image):
-            raise HTTPException(403, "sem acesso a esta imagem")
+            if not _site_image_dir(image).is_dir():
+                raise HTTPException(404, "imagem não existe")
+            if not p.can_see_image(image):
+                raise HTTPException(403, "sem acesso a esta imagem")
+            return p
+        # invariante 11: para quem entra pelo console (ou com token de outra
+        # imagem), o que não é seu não existe. Um 403 aqui viraria oráculo de
+        # nomes de sala — e são ~26 rotas herdando esta dependência.
+        if not _site_image_dir(image).is_dir() or not p.can_see_image(image):
+            raise HTTPException(404, "imagem não existe")
         return p
 
     return dep
