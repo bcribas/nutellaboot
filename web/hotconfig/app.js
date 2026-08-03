@@ -2,7 +2,7 @@
 // em massa. O hotconfig do nb2 recarregava a lista inteira por polling manual
 // (0/1/5/10 min) — aqui o servidor empurra as mudanças.
 import * as api from "/common/api.js";
-import { init, t, apply } from "/common/i18n.js";
+import { init, t, apply, currentLang } from "/common/i18n.js";
 
 const $ = (s) => document.querySelector(s);
 let machines = [];
@@ -123,6 +123,7 @@ const KIND_LABEL = {
   "usb.phone": "usb_phone",
   "usb.network": "usb_network",
   "usb.other": "usb_other",
+  "media.cd": "media_cd",
 };
 
 function toast(msg, isError = false) {
@@ -362,6 +363,31 @@ async function loadAll() {
   }
 }
 
+// Relatório da sede por período: abre em outra aba, já com o token na URL —
+// é `<a href>` na prática, e link não manda cabeçalho.
+const PERIODOS = [
+  ["report_last_hour", 3600],
+  ["report_last_4h", 4 * 3600],
+  ["report_today", 0],
+];
+
+function abrirRelatorio() {
+  const escolhas = PERIODOS.map((p, i) => `${i + 1}) ${t(p[0])}`).join("\n");
+  const escolha = prompt(`${t("report_period")}\n${escolhas}`, "2");
+  if (!escolha) return;
+  const idx = Math.min(Math.max(parseInt(escolha, 10) || 2, 1), PERIODOS.length) - 1;
+  const agora = Math.floor(Date.now() / 1000);
+  let desde;
+  if (PERIODOS[idx][1]) {
+    desde = agora - PERIODOS[idx][1];
+  } else {
+    const meia = new Date();
+    meia.setHours(0, 0, 0, 0);
+    desde = Math.floor(meia.getTime() / 1000);
+  }
+  window.open(api.reportUrl(api.imageId, desde, agora, currentLang()), "_blank");
+}
+
 function connectEvents() {
   if (source) source.close();
   source = new EventSource(api.eventsUrl(api.imageId));
@@ -420,6 +446,7 @@ async function main() {
   $("#imginfo").textContent = api.imageId;
   renderFilters();
   $("#search").oninput = render;
+  $("#reportbtn").onclick = abrirRelatorio;
   $("#soundbtn").onclick = armarSom;
   atualizarBotaoSom();
   if (somArmado()) {

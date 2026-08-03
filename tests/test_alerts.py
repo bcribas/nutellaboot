@@ -240,3 +240,123 @@ def test_agente_monta_o_json_com_escape():
         capture_output=True, text=True, check=True,
     )
     assert json.loads(r.stdout)["vendor"] == 'Kingston "DT" 64GB'
+
+
+# --- o que é alerta e o que não é ---------------------------------------------
+#
+# "Máquinas com CDROM e/ou FLOPPY não precisam alertar, só se colocarem um
+# cdrom ou pendrive ou celular na máquina." O critério da varredura de boot era
+# só `removable == 1`, e isso inclui leitor de CD e drive de disquete, vazios,
+# em qualquer barramento: toda máquina com um deles alarmava "PENDRIVE
+# CONECTADO" a cada boot — e o alerta fica na tela até um fiscal dispensar.
+
+
+def varredura(tmp_path, discos):
+    """Roda a varredura de boot do agente de verdade contra um /sys de mentira.
+
+    `discos` é {nome: {"removable": "1", "size": "0", "usb": True, ...}}.
+    """
+    import subprocess
+
+    sysblock = tmp_path / "sys" / "block"
+    devices = tmp_path / "devices"
+    fila = tmp_path / "fila"
+    fila.mkdir(parents=True)
+    for nome, d in discos.items():
+        # o caminho real é o que diz se está pendurado no USB
+        real = devices / ("pci0000:00/usb1/1-1" if d.get("usb") else "pci0000:00/ata1") / nome
+        real.mkdir(parents=True)
+        (real / "removable").write_text(d.get("removable", "1") + "\n")
+        (real / "size").write_text(d.get("size", "0") + "\n")
+        (real / "device").mkdir()
+        (real / "device" / "model").write_text(d.get("model", nome) + "\n")
+        sysblock.mkdir(parents=True, exist_ok=True)
+        (sysblock / nome).symlink_to(real)
+
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "lsblk").write_text(
+        "#!/bin/sh\n"
+        # só o pendrive de boot tem a label
+        'case "$*" in *bootpen*) echo NB3CFG ;; *) echo ;; esac\n'
+    )
+    (fake / "lsblk").chmod(0o755)
+
+    corpo = f"""
+        USB_FILA="{fila}"
+        {_trecho_varredura()}
+    """
+    r = subprocess.run(
+        ["bash", "-c", corpo],
+        capture_output=True,
+        text=True,
+        env={"PATH": f"{fake}:/usr/bin:/bin", "SYSBLOCK": str(sysblock)},
+    )
+    assert r.returncode == 0, r.stderr
+    return {p.name: p.read_text() for p in fila.iterdir()}
+
+
+def _trecho_varredura() -> str:
+    """O laço de varredura do agente, com /sys/block parametrizado."""
+    texto = (CLIENTE / "usr/share/mlog/agent.sh").read_text()
+    inicio = texto.index("    for dev in /sys/block/*/removable; do")
+    fim = texto.index("\n    done\n", inicio) + len("\n    done\n")
+    return texto[inicio:fim].replace("/sys/block", '$SYSBLOCK')
+
+
+def test_leitor_de_cd_vazio_nao_alerta(tmp_path):
+    """Ter leitor de CD não é evento: a maioria das máquinas de laboratório
+    tem um, e ele nasce `removable=1`."""
+    assert varredura(tmp_path, {"sr0": {"size": "0", "model": "DVD-RAM GH24"}}) == {}
+
+
+def test_disco_no_leitor_alerta(tmp_path):
+    """Com mídia dentro o sysfs reporta tamanho — é o que distingue."""
+    fila = varredura(tmp_path, {"sr0": {"size": "1400000", "model": "DVD-RAM GH24"}})
+    assert "kind=media.cd" in fila["boot-sr0"]
+
+
+def test_drive_de_disquete_nunca_alerta(tmp_path):
+    """O kernel não emite troca de mídia para fd0 e o tamanho é fixo: não há o
+    que detectar, então nem o drive vazio nem com disquete geram ruído."""
+    assert varredura(tmp_path, {"fd0": {"size": "2880"}}) == {}
+
+
+def test_pendrive_no_boot_alerta(tmp_path):
+    fila = varredura(tmp_path, {"sdb": {"usb": True, "model": "SanDisk Ultra"}})
+    assert "kind=usb.storage" in fila["boot-sdb"]
+    assert "SanDisk Ultra" in fila["boot-sdb"]
+
+
+def test_pendrive_de_boot_nao_alerta(tmp_path):
+    assert varredura(tmp_path, {"bootpen": {"usb": True}}) == {}
+
+
+def test_disco_removivel_interno_nao_alerta(tmp_path):
+    """Gaveta hot-swap SATA é hardware da sala, não algo que alguém espetou."""
+    assert varredura(tmp_path, {"sdc": {"usb": False, "model": "ST1000"}}) == {}
+
+
+# --- o udev ---
+
+
+def test_udev_alerta_midia_e_nao_o_drive_vazio():
+    regra = (CLIENTE / "etc/udev/rules.d/99-nb3-usb.rules").read_text()
+    assert 'ACTION=="change"' in regra, "inserir um CD não disparava nada"
+    assert "ID_CDROM_MEDIA" in regra
+    # um gravador de DVD USB vazio não pode entrar pela regra de armazenamento
+    assert 'ENV{ID_CDROM}!="1"' in regra
+
+
+def test_o_script_do_udev_descarta_o_pendrive_de_boot():
+    """A exclusão por label na regra só pega o nó da PARTIÇÃO; o do disco
+    inteiro (sem label) escapava e alarmava a cada boot."""
+    script = (CLIENTE / "usr/share/mlog/usb-event.sh").read_text()
+    assert "NB3CFG" in script and "lsblk" in script
+
+
+def test_o_tipo_de_cd_nao_e_usb():
+    """`media.cd` vale para drive interno também — chamá-lo de `usb.*` faria a
+    tela dizer que alguém espetou um pendrive."""
+    script = (CLIENTE / "usr/share/mlog/usb-event.sh").read_text()
+    assert "media.cd" in script

@@ -145,7 +145,45 @@ cmd_resetcontaeditores() { rm -f "$STATE_DIR/editores"; }
 cmd_precontest() {
     cmd_cleanhomenow
     cmd_enablefirewall
+    # zerar a contagem faz parte de "começar a prova": o que interessa no
+    # relatório é o uso DURANTE a prova, não o da preparação da sala. O nb2
+    # fazia isso e o nb3 tinha perdido.
+    cmd_resetcontaeditores
     ensure_locked
+}
+
+# --- contagem de uso dos editores -------------------------------------------
+#
+# O instantâneo de `parts.d/30-operacoes.sh` diz o que está aberto no momento
+# da amostra. Para responder "quanto o time usou cada editor" é preciso somar
+# ao longo do tempo, e é isso que o nb2 fazia em /home/.idesacumula.
+#
+# Fica em arquivo (e não em memória) porque o agente pode ser reiniciado no
+# meio da prova; e é o mesmo arquivo que o `resetcontaeditores` apaga.
+
+EDITORES_ARQ="$STATE_DIR/editores"
+EDITORES_INTERVALO=${NB_EDITORES_INTERVAL:-60}
+EDITORES_LISTA="emacs vim geany clion code pycharm idea gedit codeblocks sublime"
+
+editors_loop() {
+    while :; do
+        sleep "$EDITORES_INTERVALO"
+        abertos=$(ps -U icpc -o comm= 2> /dev/null | tr 'A-Z' 'a-z')
+        # `total` é o denominador: sem ele, "vim=142" não diz se são 142 de 150
+        # amostras ou de 1000
+        {
+            for ed in $EDITORES_LISTA; do
+                atual=$(sed -n "s/^$ed=//p" "$EDITORES_ARQ" 2> /dev/null | sed -n 1p)
+                case "$abertos" in
+                    *"$ed"*) atual=$((${atual:-0} + 1)) ;;
+                    *) atual=${atual:-0} ;;
+                esac
+                [ "$atual" -gt 0 ] && echo "$ed=$atual"
+            done
+            total=$(sed -n "s/^total=//p" "$EDITORES_ARQ" 2> /dev/null | sed -n 1p)
+            echo "total=$((${total:-0} + 1))"
+        } > "$EDITORES_ARQ.tmp" && mv "$EDITORES_ARQ.tmp" "$EDITORES_ARQ"
+    done
 }
 
 # --- telemetria -------------------------------------------------------------
@@ -262,15 +300,43 @@ usb_loop() {
     # O que já estava conectado quando a máquina ligou: o udev não dispara
     # "add" para isso, e ligar com o pendrive espetado é justamente o jeito
     # mais fácil de escapar da regra.
+    #
+    # O critério era só `removable == 1`, e isso inclui LEITOR DE CD e DRIVE DE
+    # DISQUETE, vazios, em qualquer barramento: toda máquina que tem um deles
+    # alarmava "PENDRIVE CONECTADO" a cada boot, e o alerta fica na tela até um
+    # fiscal dispensar. Ter o drive não é o problema — pôr mídia nele é.
     for dev in /sys/block/*/removable; do
         [ -r "$dev" ] || continue
         [ "$(cat "$dev")" = 1 ] || continue
         nome=$(basename "$(dirname "$dev")")
+        caminho=$(readlink -f "/sys/block/$nome" 2> /dev/null || echo "")
+        modelo=$(cat "/sys/block/$nome/device/model" 2> /dev/null || echo "$nome")
+
+        case "$nome" in
+            sr* | scd*)
+                # drive óptico: só conta se houver DISCO dentro. Vazio, o
+                # sysfs reporta tamanho zero.
+                [ "$(cat "/sys/block/$nome/size" 2> /dev/null || echo 0)" -gt 0 ] || continue
+                printf 'kind=media.cd\nvendor=%s\ndetail=disc present at boot\n' \
+                    "$modelo" > "$USB_FILA/boot-$nome"
+                continue
+                ;;
+            fd*)
+                # disquete não gera evento de troca de mídia no Linux e o
+                # tamanho é fixo com ou sem disco: não há o que detectar
+                continue
+                ;;
+        esac
+
+        # o resto só interessa se estiver pendurado no barramento USB
+        case "$caminho" in
+            */usb*) ;;
+            *) continue ;;
+        esac
         # o pendrive de boot é o único removível esperado
         if ! lsblk -no LABEL "/dev/$nome" 2> /dev/null | grep -q NB3CFG; then
             printf 'kind=usb.storage\nvendor=%s\ndetail=present at boot\n' \
-                "$(cat "/sys/block/$nome/device/model" 2> /dev/null || echo "$nome")" \
-                > "$USB_FILA/boot-$nome"
+                "$modelo" > "$USB_FILA/boot-$nome"
         fi
     done
 
@@ -301,5 +367,6 @@ log "iniciando (imagem=$IMAGEROOT mac=$MAC servidor=$NB_SERVER)"
 telemetry_loop &
 logs_loop &
 usb_loop &
+editors_loop &
 lock_watchdog &
 commands_loop

@@ -30,6 +30,9 @@ TIPOS = (
     "usb.phone",  # celular em MTP/PTP
     "usb.network",  # tethering (RNDIS/CDC/NCM)
     "usb.other",
+    # disco inserido num drive óptico — que costuma ser interno, e por isso
+    # não é `usb.*`. Ter o leitor não alarma; pôr um disco nele, sim.
+    "media.cd",
 )
 
 MAX_ABERTOS = 50  # por máquina; acima disso o mais antigo cede lugar

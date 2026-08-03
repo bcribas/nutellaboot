@@ -9,10 +9,23 @@
 # eventos do sistema inteiro.
 
 # --- armazenamento (pendrive, HD externo, leitor de cartao) ---
-# O proprio pendrive de boot tem a label NB3CFG e NAO pode disparar o alarme:
-# em muitas salas ele fica espetado o dia todo.
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_LABEL}!="NB3CFG", \
+# O proprio pendrive de boot NAO pode disparar o alarme: em muitas salas ele
+# fica espetado o dia todo. A label NB3CFG so existe no no da PARTICAO, entao a
+# checagem de verdade e feita no usb-event.sh, que enxerga as particoes filhas.
+#
+# ID_CDROM!="1": um gravador de DVD USB VAZIO nao e alarme. Poe-se um disco
+# nele e a regra de midia, mais abaixo, dispara.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_CDROM}!="1", \
+    ENV{ID_FS_LABEL}!="NB3CFG", \
     RUN+="/usr/share/mlog/usb-event.sh storage $env{ID_MODEL} $env{ID_VENDOR} $kernel"
+
+# --- disco optico: o que importa e a MIDIA, nao o drive ---
+# Ter leitor de CD nao e alarme (a maioria das maquinas de laboratorio tem um).
+# Inserir um disco e: o kernel emite `change` e o cdrom_id poe ID_CDROM_MEDIA.
+# Vale para drive interno (SATA/IDE) e externo, que e o que faltava: antes,
+# NENHUMA regra casava `change`, entao por um CD inserido nao acontecia nada.
+ACTION=="change", SUBSYSTEM=="block", ENV{ID_CDROM}=="1", ENV{ID_CDROM_MEDIA}=="1", \
+    RUN+="/usr/share/mlog/usb-event.sh cd $env{ID_FS_LABEL} $env{ID_MODEL} $kernel"
 
 # --- celular em MTP (transferencia de arquivos) ou PTP (camera) ---
 ACTION=="add", SUBSYSTEM=="usb", ENV{ID_MTP_DEVICE}=="1", \
