@@ -134,7 +134,120 @@ telemetry_loop() {
     done
 }
 
+# --- logs (journal do kernel e do sistema) ----------------------------------
+#
+# O nb2 tinha isto e se perdeu na reescrita: journal do boot inteiro na
+# partida e o incremento a cada 5 minutos. É o que responde "o que aconteceu
+# naquela máquina às 14h32" depois que a prova acabou.
+#
+# NÃO vai em parts.d/: aquela saída é concatenada dentro do status.json, que é
+# sobrescrito a cada 45 s. Log precisa de histórico, então tem canal próprio.
+
+LOG_CURSOR="$STATE_DIR/journal.cursor"
+LOG_MAX_BYTES=${NB_LOG_MAX_BYTES:-524288}
+LOG_INTERVALO=${NB_LOG_INTERVAL:-300}
+
+# Corta antes de sair da máquina: o servidor recusa acima de 1 MiB, e mandar
+# para levar 413 é gastar rede da sala à toa.
+send_log() {
+    local origem=$1 texto=$2
+    [ -n "$texto" ] || return 0
+    printf '%s' "$texto" | tail -c "$LOG_MAX_BYTES" > "$STATE_DIR/journal.part"
+    curl_api "machines/$MAC/logs?origem=$origem" 30 \
+        -X POST -H 'Content-Type: text/plain' \
+        --data-binary @"$STATE_DIR/journal.part" > /dev/null
+    rm -f "$STATE_DIR/journal.part"
+}
+
+# --cursor-file marca onde parou e continua exatamente dali: não repete nem
+# perde linha entre um envio e outro. Sem ele (journalctl antigo), cai para a
+# janela de tempo, que pode duplicar nas bordas.
+journal_incremento() {
+    if journalctl --cursor-file="$LOG_CURSOR" -n 0 > /dev/null 2>&1; then
+        journalctl --cursor-file="$LOG_CURSOR" --no-pager 2> /dev/null
+    elif command -v journalctl > /dev/null 2>&1; then
+        journalctl -S "-${LOG_INTERVALO}s" --no-pager 2> /dev/null
+    else
+        dmesg -T 2> /dev/null
+    fi
+}
+
+logs_loop() {
+    # Na partida vai o boot inteiro: é onde estão os erros de hardware e de
+    # driver que explicam uma máquina que não sobe direito.
+    if command -v journalctl > /dev/null 2>&1; then
+        rm -f "$LOG_CURSOR"
+        send_log boot "$(journalctl -b --no-pager 2> /dev/null | tail -n 5000)"
+        journalctl --cursor-file="$LOG_CURSOR" -n 0 > /dev/null 2>&1
+    else
+        send_log boot "$(dmesg -T 2> /dev/null | tail -n 5000)"
+    fi
+
+    while :; do
+        sleep "$LOG_INTERVALO"
+        # incremento vazio não vira requisição: numa sala parada isso é a
+        # diferença entre nada e 100 requisições a cada 5 minutos
+        send_log journal "$(journal_incremento)"
+    done
+}
+
+# --- eventos de USB --------------------------------------------------------
+#
+# A regra em /etc/udev/rules.d/99-nb3-usb.rules enfileira um arquivo por
+# dispositivo conectado; aqui a fila é esvaziada e enviada NA HORA. Um pendrive
+# que fica dez segundos na máquina precisa chegar ao fiscal mesmo depois de
+# removido — por isso o alerta não sai da tela sozinho, só quando alguém
+# dispensa.
+
+USB_FILA="$STATE_DIR/usb-events"
+
+send_usb_event() {
+    local arq=$1 kind="" vendor="" detail=""
+    # shellcheck disable=SC1090
+    while IFS='=' read -r chave valor; do
+        case "$chave" in
+            kind) kind=$valor ;;
+            vendor) vendor=$valor ;;
+            detail) detail=$valor ;;
+        esac
+    done < "$arq"
+    [ -n "$kind" ] || return 0
+    log "dispositivo USB detectado: $kind $vendor $detail"
+    curl_api "machines/$MAC/events" 15 \
+        -X POST -H 'Content-Type: application/json' \
+        --data "$(nb3-json --escape kind "$kind" vendor "$vendor" detail "$detail")" \
+        > /dev/null
+}
+
+usb_loop() {
+    mkdir -p "$USB_FILA"
+    # O que já estava conectado quando a máquina ligou: o udev não dispara
+    # "add" para isso, e ligar com o pendrive espetado é justamente o jeito
+    # mais fácil de escapar da regra.
+    for dev in /sys/block/*/removable; do
+        [ -r "$dev" ] || continue
+        [ "$(cat "$dev")" = 1 ] || continue
+        nome=$(basename "$(dirname "$dev")")
+        # o pendrive de boot é o único removível esperado
+        if ! lsblk -no LABEL "/dev/$nome" 2> /dev/null | grep -q NB3CFG; then
+            printf 'kind=usb.storage\nvendor=%s\ndetail=present at boot\n' \
+                "$(cat "/sys/block/$nome/device/model" 2> /dev/null || echo "$nome")" \
+                > "$USB_FILA/boot-$nome"
+        fi
+    done
+
+    while :; do
+        for arq in "$USB_FILA"/*; do
+            [ -f "$arq" ] || continue
+            send_usb_event "$arq" && rm -f "$arq"
+        done
+        sleep 1
+    done
+}
+
 log "iniciando (imagem=$IMAGEROOT mac=$MAC servidor=$NB_SERVER)"
 telemetry_loop &
+logs_loop &
+usb_loop &
 lock_watchdog &
 commands_loop

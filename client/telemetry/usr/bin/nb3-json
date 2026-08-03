@@ -9,6 +9,7 @@ elimina uma classe inteira de erros.
 Uso:
     ... | nb3-json commands     -> uma linha "id<TAB>comando<TAB>args" por comando
     ... | nb3-json locked       -> "true" ou "false"
+    nb3-json --escape k v k v   -> {"k": "v", ...} com escape correto
 """
 
 import json
@@ -17,6 +18,15 @@ import sys
 
 def main() -> int:
     what = sys.argv[1] if len(sys.argv) > 1 else ""
+
+    # Montar JSON no shell com aspas é como o nb2 fazia, e o nome de um
+    # dispositivo USB vem do fabricante: basta uma aspa no modelo para o corpo
+    # sair quebrado e o alerta se perder.
+    if what == "--escape":
+        pares = sys.argv[2:]
+        print(json.dumps(dict(zip(pares[::2], pares[1::2])), ensure_ascii=False))
+        return 0
+
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):

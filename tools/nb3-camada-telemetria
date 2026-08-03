@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""nb3-camada-telemetria — empacota client/telemetry/ como camada squashfs.
+
+O agente, a tela de bloqueio e os temas moram em client/telemetry/ no layout
+final do sistema de arquivos (usr/bin/..., usr/share/...). Faltava a ferramenta
+que os transforma numa camada e a registra no modelo — e por isso o que roda em
+campo ainda é a `log23.squash`, a camada de 2023 da geração anterior.
+
+Não precisa de root: o `-all-root` do mksquashfs grava tudo como root:root sem
+privilégio nenhum.
+
+    tools/nb3-camada-telemetria --model maratonalinux2604 --publish
+    tools/nb3-camada-telemetria --dry-run
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+PADRAO_ORIGEM = REPO / "client" / "telemetry"
+
+# O que precisa existir para a camada valer alguma coisa. Sem o agente não há
+# telemetria nem comandos; sem o maratona-wait não há tela de bloqueio.
+OBRIGATORIOS = (
+    "usr/share/mlog/agent.sh",
+    "usr/bin/maratona-wait",
+)
+
+# Arquivos que o sistema executa diretamente precisam do bit de execução. No
+# repositório eles estão como 0644 (é assim que saem de um editor), e uma
+# camada publicada sem +x quebra em silêncio: a tela de bloqueio morre com
+# "permission denied", e o udev simplesmente ignora um RUN+= que não é
+# executável — o alerta de pendrive nunca dispararia.
+EXECUTAVEIS = ("usr/bin/", "usr/share/mlog/usb-event.sh")
+
+# Camadas de telemetria anteriores. Duas versões do agente no mesmo caminho
+# fazem a primeira da lista vencer em silêncio; trocar significa tirar a velha.
+ANTIGAS = ("log23.squash", "telemetria-")
+
+
+def erro(msg: str) -> None:
+    print(f"erro: {msg}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def api(metodo: str, url: str, chave: str, corpo: dict | None = None) -> dict:
+    dados = json.dumps(corpo).encode() if corpo is not None else None
+    req = urllib.request.Request(url, data=dados, method=metodo)
+    req.add_header("Authorization", f"Bearer {chave}")
+    if dados:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            texto = r.read().decode()
+            return json.loads(texto) if texto.strip() else {}
+    except urllib.error.HTTPError as e:
+        detalhe = e.read().decode()[:300]
+        erro(f"{metodo} {url} -> {e.code}: {detalhe}")
+    except urllib.error.URLError as e:
+        erro(f"nao consegui falar com {url}: {e.reason}")
+    return {}
+
+
+def montar_arvore(origem: Path, destino: Path) -> list[str]:
+    """Copia a arvore ajustando os modos. Devolve a lista de arquivos."""
+    shutil.copytree(origem, destino, dirs_exist_ok=True)
+    arquivos = []
+    for p in sorted(destino.rglob("*")):
+        rel = p.relative_to(destino).as_posix()
+        if p.is_dir():
+            p.chmod(0o755)
+            continue
+        p.chmod(0o755 if rel.startswith(EXECUTAVEIS) else 0o644)
+        arquivos.append(rel)
+    return arquivos
+
+
+def md5_de(p: Path) -> str:
+    h = hashlib.md5()
+    with open(p, "rb") as fh:
+        for bloco in iter(lambda: fh.read(1 << 20), b""):
+            h.update(bloco)
+    return h.hexdigest()
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--model", help="modelo onde registrar a camada")
+    ap.add_argument("--site-image", help="site-image onde anexar (em vez do modelo)")
+    ap.add_argument("--publish", action="store_true", help="publica no servidor de arquivos")
+    ap.add_argument("--dry-run", action="store_true", help="mostra o que faria e sai")
+    ap.add_argument(
+        "--manter-antiga",
+        action="store_true",
+        help="nao remove a camada de telemetria anterior do modelo",
+    )
+    ap.add_argument("--server", default=os.environ.get("NB3_BASE_URL", ""))
+    ap.add_argument("--admin-key", default=os.environ.get("NB3_ADMIN_KEY", ""))
+    ap.add_argument("--out", help="onde gravar o .squash (padrao: data/blobs)")
+    ap.add_argument(
+        "--from",
+        dest="origem",
+        default=str(PADRAO_ORIGEM),
+        help="arvore a empacotar (padrao: client/telemetry)",
+    )
+    args = ap.parse_args()
+
+    origem = Path(args.origem)
+    if not origem.is_dir():
+        erro(f"{origem} nao existe")
+    for rel in OBRIGATORIOS:
+        if not (origem / rel).is_file():
+            erro(f"falta {rel} em client/telemetry/ — a camada nao serviria para nada")
+    if not shutil.which("mksquashfs"):
+        erro("falta mksquashfs (pacote squashfs-tools)")
+
+    blobs = Path(args.out) if args.out else Path(
+        os.environ.get("NB3_DATA_ROOT", REPO / "data")
+    ) / "blobs"
+    blobs.mkdir(parents=True, exist_ok=True)
+
+    tmp = Path(tempfile.mkdtemp(prefix="nb3-telemetria-"))
+    try:
+        raiz = tmp / "root"
+        arquivos = montar_arvore(origem, raiz)
+        print(f">> {len(arquivos)} arquivos de {origem}")
+        for rel in arquivos:
+            modo = "rwxr-xr-x" if rel.startswith(EXECUTAVEIS) else "rw-r--r--"
+            print(f"   {modo}  {rel}")
+
+        provisorio = tmp / "camada.squash"
+        subprocess.run(
+            [
+                "mksquashfs", str(raiz), str(provisorio),
+                "-comp", "zstd", "-Xcompression-level", "15",
+                "-b", "1048576", "-noappend", "-quiet", "-no-progress",
+                # sem isto os arquivos sairiam com o uid de quem rodou o
+                # comando, e o sistema montado nao os enxergaria como do root
+                "-all-root",
+            ],
+            check=True,
+        )
+        md5 = md5_de(provisorio)
+        nome = f"telemetria-{time.strftime('%Y-%m-%d')}-{md5[:6]}.squash"
+        tamanho = provisorio.stat().st_size
+
+        print()
+        print(f"camada: {nome}")
+        print(f"  md5:  {md5}")
+        print(f"  tam:  {tamanho // 1024} kB")
+
+        if args.dry_run:
+            print("\n(--dry-run: nada foi gravado nem registrado)")
+            return
+
+        destino = blobs / nome
+        shutil.move(str(provisorio), destino)
+        print(f"  em:   {destino}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    url_publica = ""
+    if args.publish:
+        sys.path.insert(0, str(REPO))
+        from server.app.services import publish  # noqa: E402
+
+        if not publish.enabled():
+            erro("publicacao desligada em data/server.json (chave 'publish')")
+        estado = publish.publish_file(destino)
+        if estado.get("status") != "done":
+            erro(f"publicacao falhou: {estado.get('error', estado)}")
+        url_publica = estado.get("url", "")
+        print(f">> publicado em {url_publica}")
+
+    alvo = args.model or args.site_image
+    if not alvo:
+        print("\npara registrar, rode de novo com --model <modelo>")
+        return
+    if not args.server or not args.admin_key:
+        erro("informe --server e --admin-key (ou NB3_BASE_URL / NB3_ADMIN_KEY)")
+
+    base = args.server.rstrip("/")
+    camada = {"file": nome, "md5": md5, "size": tamanho}
+    if url_publica:
+        camada["cdn_url"] = url_publica
+
+    if args.site_image:
+        api("POST", f"{base}/api/v1/site-images/{args.site_image}/layers",
+            args.admin_key, camada)
+        print(f">> anexada a site-image {args.site_image}")
+        return
+
+    if not args.manter_antiga:
+        # a limpeza por nome fica como rede para o que veio antes da convencao
+        # de papel (log23.squash, e as telemetria-* geradas por versoes antigas
+        # desta ferramenta); quem tem papel sai pelo replace_role logo abaixo,
+        # que e a defesa que nao depende de adivinhar o nome do arquivo
+        modelo = api("GET", f"{base}/api/v1/models/{args.model}", args.admin_key)
+        for c in modelo.get("layers", []):
+            f = str(c.get("file", ""))
+            if c.get("role") == "telemetry":
+                continue
+            if f.startswith(ANTIGAS) or f in ANTIGAS:
+                api("DELETE", f"{base}/api/v1/models/{args.model}/layers/{f}", args.admin_key)
+                print(f">> removida a camada de telemetria anterior: {f}")
+
+    # posicao 0: a personalizacao tem que ganhar do sistema base no overlay
+    corpo = {**camada, "position": 0, "role": "telemetry"}
+    if not args.manter_antiga:
+        corpo["replace_role"] = "telemetry"
+    api("POST", f"{base}/api/v1/models/{args.model}/layers", args.admin_key, corpo)
+    print(f">> registrada no modelo {args.model} (posicao 0)")
+    print("\nas maquinas pegam a camada nova no proximo boot")
+
+
+if __name__ == "__main__":
+    main()
