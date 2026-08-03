@@ -65,8 +65,16 @@ def main() -> None:
     ap.add_argument("--keep", action="store_true", help="não encerra a VM ao final")
     args = ap.parse_args()
 
-    if not OVMF_CODE:
-        raise SystemExit("OVMF não encontrado (instale edk2-ovmf)")
+    # confere tudo de uma vez, com mensagem, como as irmãs rootless fazem: sem
+    # isto o que aparece é um FileNotFoundError cru do Python
+    faltando = [b for b in ("qemu-system-x86_64", "magick") if not shutil.which(b)]
+    if faltando:
+        raise SystemExit(
+            f"faltando: {', '.join(faltando)}\n"
+            "  sudo dnf install qemu-system-x86 ImageMagick"
+        )
+    if not OVMF_CODE or not OVMF_VARS:
+        raise SystemExit("OVMF não encontrado (sudo dnf install edk2-ovmf)")
 
     work = Path(tempfile.mkdtemp(prefix="nb3-qemu-"))
     varsfd = work / "OVMF_VARS.fd"

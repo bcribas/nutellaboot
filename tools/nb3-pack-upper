@@ -88,9 +88,19 @@ fi
 
 for IMAGEM in "${ANEXAR[@]}"; do
     echo ">> anexando a $IMAGEM"
-    curl -sS -X POST "$SERVIDOR/api/v1/images/$IMAGEM/layers" \
+    # --fail-with-body: sem isto o curl sai com codigo ZERO num 404 (nome de
+    # imagem errado) ou 401 (chave vencida), so imprimindo o JSON de erro — e o
+    # script termina dizendo que anexou. Foi assim que dois modelos ficaram
+    # vazios pelo gerar-squash.
+    curl -sS --fail-with-body -X POST "$SERVIDOR/api/v1/site-images/$IMAGEM/layers" \
         -H "Authorization: Bearer $CHAVE" \
         -H 'Content-Type: application/json' \
-        --data "{\"md5\":\"$MD5\",\"file\":\"$ARQUIVO\",\"size\":$TAMANHO}"
+        --data "{\"md5\":\"$MD5\",\"file\":\"$ARQUIVO\",\"size\":$TAMANHO}" || {
+        echo >&2
+        echo "erro: nao consegui anexar a '$IMAGEM'." >&2
+        echo "      confira o nome da imagem e a chave de admin:" >&2
+        echo "      curl \"$SERVIDOR/api/v1/site-images\" -H \"Authorization: Bearer \$NB3_ADMIN_KEY\"" >&2
+        exit 1
+    }
     echo
 done

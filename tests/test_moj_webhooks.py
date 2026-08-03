@@ -195,3 +195,96 @@ async def test_webhook_is_delivered_and_signed(data_root, image_testes3):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+# --- eventos que estavam no catálogo mas nunca eram emitidos ---
+
+
+def _emitidos(monkeypatch, acao):
+    """Roda `acao` capturando o que foi para o canal de webhook."""
+    from server.app.services import webhook_push
+
+    vistos = []
+    monkeypatch.setattr(webhook_push, "emit", lambda img, ev, data: vistos.append(ev))
+    acao()
+    return vistos
+
+
+@pytest.fixture
+def sede(client, data_root, image_testes3):
+    """Uma imagem com roster, para exercitar vínculo e configuração."""
+    from server.app.services.default_schema import build_default_schema
+
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "t" / "schema.json", build_default_schema())
+    h = {"Authorization": f"Bearer {image_testes3['token']}"}
+    client.put(
+        "/api/v1/site-images/testes3/roster",
+        json={"roster": [{"user_id": "team-001", "name": "Time 1"}]},
+        headers=h,
+    )
+    return h
+
+
+def test_vinculo_de_time_chega_ao_webhook(client, sede, monkeypatch):
+    """machine.bound e machine.unbound publicavam só no SSE: o painel via em
+    tempo real, mas um webhook do MOJ inscrito nesses eventos nunca disparava,
+    apesar de a documentação prometer."""
+    mac = "52-54-00-01-02-03"
+    rota = f"/api/v1/site-images/testes3/machines/{mac}/binding"
+
+    vistos = _emitidos(
+        monkeypatch,
+        lambda: client.put(rota, json={"user_id": "team-001", "seat": "1"}, headers=sede),
+    )
+    assert "machine.bound" in vistos, vistos
+
+    vistos = _emitidos(monkeypatch, lambda: client.delete(rota, headers=sede))
+    assert "machine.unbound" in vistos, vistos
+
+
+def test_config_updated_e_emitido(client, sede, monkeypatch):
+    """Estava no catálogo desde o começo e nenhum código o publicava."""
+    vistos = _emitidos(
+        monkeypatch,
+        lambda: client.put(
+            "/api/v1/site-images/testes3/config",
+            json={"values": {"TIMEZONE": "UTC"}},
+            headers=sede,
+        ),
+    )
+    assert "config.updated" in vistos, vistos
+
+
+def test_seeder_joined_e_emitido(client, sede, image_testes3, monkeypatch, data_root):
+    """Idem. E só no join, não a cada heartbeat: senão viraria um evento por
+    máquina a cada poucos minutos."""
+    from server.app import fsdb as _fsdb
+
+    chave = "nb3b_teste"
+    _fsdb.write_text(data_root / "site-images" / "testes3" / "boot.key", chave + "\n")
+
+    def entra():
+        client.post(f"/boot/v3/testes3/seeders/join?ip=10.0.0.5&key={chave}")
+
+    assert "seeder.joined" in _emitidos(monkeypatch, entra)
+    # segundo contato do mesmo IP é heartbeat, não entrada
+    assert "seeder.joined" not in _emitidos(monkeypatch, entra)
+
+
+def test_todo_evento_do_catalogo_tem_quem_o_emita():
+    """O catálogo é o que o MOJ lê para saber em que se inscrever. Evento
+    listado e nunca emitido é promessa que não se cumpre — aconteceu com
+    config.updated e seeder.joined, que ficaram anos na lista sem emissor."""
+    from pathlib import Path
+
+    from server.app.routers.webhooks import EVENTOS
+
+    app_dir = Path(__file__).resolve().parents[1] / "server" / "app"
+    fonte = "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in app_dir.rglob("*.py")
+        if p.name != "webhooks.py"  # o catálogo cita todos por definição
+    )
+    faltando = [e for e in EVENTOS if f'"{e}"' not in fonte]
+    assert faltando == [], f"eventos no catalogo que ninguem emite: {faltando}"

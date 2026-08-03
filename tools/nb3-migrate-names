@@ -67,14 +67,14 @@ class Migracao:
 
     # --- passos ---
 
-    def modelos(self) -> None:
+    def modelos(self) -> bool:
         origem, destino = self.data / "templates", self.data / "models"
         if not origem.is_dir():
             self.log("modelos: nada a fazer (já migrado ou instalação nova)")
-            return
+            return True
         if destino.exists():
             self.log(f"modelos: ATENÇÃO — {destino} já existe; não sobrescrevo")
-            return
+            return False
         self.log(f"renomeia {origem.name}/ -> {destino.name}/")
         if not self.dry:
             os.rename(origem, destino)
@@ -92,15 +92,16 @@ class Migracao:
             conteudo.setdefault("created_at", time.time())
             fsdb.write_json(d / "model.json", conteudo)
             antigo.unlink()
+        return True
 
-    def site_images(self) -> None:
+    def site_images(self) -> bool:
         origem, destino = self.data / "images", self.data / "site-images"
         if not origem.is_dir():
             self.log("site-images: nada a fazer")
-            return
+            return True
         if destino.exists():
             self.log(f"site-images: ATENÇÃO — {destino} já existe; não sobrescrevo")
-            return
+            return False
         self.log(f"renomeia {origem.name}/ -> {destino.name}/")
         if not self.dry:
             os.rename(origem, destino)
@@ -125,12 +126,13 @@ class Migracao:
                 self.log(f"  {d.name}: {', '.join(mudou)}")
             if not self.dry:
                 fsdb.write_json(arq, info)
+        return True
 
-    def invites(self) -> None:
+    def invites(self) -> bool:
         p = self.data / "invites.json"
         if not p.is_file():
             self.log("convites: nada a fazer")
-            return
+            return True
         dados = json.loads(p.read_text())
         n = 0
         for code, inv in dados.items():
@@ -141,12 +143,13 @@ class Migracao:
         self.log(f"convites: {n} com campo renomeado, {len(dados)} com cota de modelos")
         if not self.dry and dados:
             fsdb.write_json(p, dados, mode=0o600)
+        return True
 
-    def layerbuilds(self) -> None:
+    def layerbuilds(self) -> bool:
         base = self.data / "layerbuilds"
         if not base.is_dir():
             self.log("builds: nada a fazer")
-            return
+            return True
         n = 0
         for estado in ("queue", "running", "done", "failed"):
             for f in sorted((base / estado).glob("*.json")) if (base / estado).is_dir() else []:
@@ -157,12 +160,27 @@ class Migracao:
                     if not self.dry:
                         fsdb.write_json(f, job)
         self.log(f"builds: {n} com campo renomeado")
+        return True
 
     def relatorio(self) -> int:
-        """Procura resíduos do nome antigo."""
+        """Procura resíduos do nome antigo.
+
+        Também nos NOMES, não só no conteúdo: um `template.json` típico
+        (`{"layers": [...]}`) não contém a palavra em lugar nenhum, então
+        procurar só dentro do arquivo dizia "nenhum resíduo" com o diretório
+        antigo inteiro parado ali do lado.
+        """
         restos = []
+        for nome in ("templates", "images"):
+            if (self.data / nome).is_dir():
+                restos.append(f"{nome}/ (diretório com o nome antigo)")
         for f in self.data.rglob("*.json"):
             if f.name == ".migrations.json":
+                continue
+            # `image.json` continua sendo o nome certo dentro de site-images/;
+            # o que não pode sobrar é `template.json`
+            if f.name == "template.json":
+                restos.append(str(f.relative_to(self.data)))
                 continue
             try:
                 texto = f.read_text()
@@ -190,6 +208,7 @@ def main() -> int:
         return 1
 
     m = Migracao(args.data, args.dry_run)
+    pendentes: list[str] = []
     print(f"{'Simulando' if args.dry_run else 'Migrando'} {args.data}\n")
     for passo, funcao in (
         ("01-models-dir", m.modelos),
@@ -200,9 +219,20 @@ def main() -> int:
         if m.ja_aplicado(passo):
             print(f"  {passo}: já aplicado")
             continue
-        funcao()
-        m.marcar(passo)
-    return m.relatorio() if not args.dry_run else 0
+        # so marca o que REALMENTE aplicou: marcar um passo que desistiu por
+        # conflito ("destino ja existe") o pula para sempre, e quem resolvesse
+        # o conflito e rodasse de novo ficava com a migracao pela metade
+        if funcao():
+            m.marcar(passo)
+        else:
+            print(f"  {passo}: NAO aplicado — resolva o conflito e rode de novo")
+            pendentes.append(passo)
+    if args.dry_run:
+        return 0
+    if pendentes:
+        print(f"\npassos NAO aplicados: {', '.join(pendentes)}")
+        return 1
+    return m.relatorio()
 
 
 if __name__ == "__main__":

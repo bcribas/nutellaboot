@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""nb3-init — prepara um servidor novo. É o primeiro comando de uma instalação.
+
+Cria `data/` e a chave de administração, e a IMPRIME. Só o hash dela fica em
+disco: se a chave se perder aqui, não há como recuperá-la — só emitir outra.
+
+Foi essa ordem que faltou e trancou uma instalação: o comando de dados de teste
+gravava o hash da chave e estourava logo depois, antes de imprimir. O hash
+ficava, a chave sumia, e rodar de novo não adiantava porque o arquivo já
+existia. Aqui a chave sai na tela ANTES de qualquer passo que possa falhar.
+
+    tools/nb3-init                    # instalação nova
+    tools/nb3-init --nova-chave       # emite mais uma (a antiga continua valendo)
+    tools/nb3-init --id bruno         # identifica quem é o dono da chave
+
+Idempotente: rodar de novo não emite chave nem sobrescreve nada.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+VENV_PY = REPO / ".venv" / "bin" / "python3"
+if VENV_PY.exists() and Path(sys.prefix).resolve() != (REPO / ".venv").resolve():
+    os.execv(str(VENV_PY), [str(VENV_PY), __file__, *sys.argv[1:]])
+sys.path.insert(0, str(REPO))
+
+from server.app import auth, fsdb  # noqa: E402
+from server.app.settings import settings  # noqa: E402
+
+
+def emitir_chave(data: Path, ident: str) -> str:
+    """Grava mais uma chave de admin e devolve a versão em claro.
+
+    Acrescenta à lista em vez de substituir: quem já tem uma chave funcionando
+    não pode perdê-la porque alguém rodou o comando de novo.
+    """
+    arquivo = data / "keys" / "admin.json"
+    atual = fsdb.read_json(arquivo, {"keys": []}) or {"keys": []}
+    chave = auth.new_key("nb3a")
+    atual.setdefault("keys", []).append({"id": ident, "sha256": auth.key_hash(chave)})
+    fsdb.write_json(arquivo, atual, mode=0o600)
+    return chave
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--id", default="admin", help="identificador da chave (padrao: admin)")
+    ap.add_argument(
+        "--nova-chave",
+        action="store_true",
+        help="emite outra chave mesmo se ja houver (para trocar de maquina)",
+    )
+    ap.add_argument("--data", help="raiz de dados (padrao: data/)")
+    args = ap.parse_args()
+
+    data = Path(args.data) if args.data else settings.data_root
+    admin_file = data / "keys" / "admin.json"
+    tinha = admin_file.exists() and (fsdb.read_json(admin_file, {}) or {}).get("keys")
+
+    if tinha and not args.nova_chave:
+        print(f"{admin_file} ja existe, com {len(tinha)} chave(s).")
+        print("Nada foi alterado. Para emitir mais uma: tools/nb3-init --nova-chave")
+        return
+
+    chave = emitir_chave(data, args.id)
+
+    # imprime ANTES de qualquer outro passo: a chave em claro existe uma vez só
+    print()
+    print("=" * 68)
+    print(f"  CHAVE DE ADMINISTRACAO ({args.id})")
+    print()
+    print(f"  {chave}")
+    print()
+    print("  Guarde agora. Em disco fica so o hash — nao ha como recupera-la.")
+    print("=" * 68)
+    print()
+
+    if not (data / "server.json").exists():
+        fsdb.write_json(
+            data / "server.json",
+            {
+                "base_url": settings.base_url,
+                "cdn_base_url": "https://files.mdp.naquadah.com.br/maratonalinux",
+                "seeder_ttl_sec": 180,
+                "reserved_prefix_regex": "^[0-9]",
+            },
+        )
+        print(f"criado {data / 'server.json'}")
+    if not (data / "keys" / "services.json").exists():
+        fsdb.write_json(data / "keys" / "services.json", {}, mode=0o600)
+
+    print()
+    print("Servidor pronto. Proximos passos:")
+    print("  tools/nb3-dev                     # sobe em 127.0.0.1:8890")
+    print("  tools/nb3-nova-temporada --help   # cria o modelo da temporada")
+    print("  tools/nb3-seed-testdata           # (opcional) dados de teste")
+
+
+if __name__ == "__main__":
+    main()

@@ -11,7 +11,7 @@ Todos os comandos partem da raiz do repositório (`nutellaboot3/`).
 .venv/bin/python -m pytest
 ```
 
-Roda em poucos segundos. O que cada arquivo cobre:
+São 481 testes em cerca de 36 s. O que cada arquivo cobre:
 
 | Arquivo | O que garante |
 |---|---|
@@ -28,6 +28,28 @@ Roda em poucos segundos. O que cada arquivo cobre:
 | `test_layer_builder.py` | construção de camada **sem root**, ponta a ponta, com poda verificada — inclusive que nenhum hash de senha sai na camada |
 | `test_i18n_locales.py` | os três idiomas têm exatamente as mesmas chaves, sem valores vazios, e toda chave usada nas páginas existe |
 | `test_live_server.py` | sobe um `uvicorn` de verdade e testa SSE e latência de bloqueio por HTTP |
+| `test_models.py` | modelos criáveis: criar, duplicar herdando camadas e cadeados, montar/reordenar/remover camada, e que a ordem chega no manifest; apagar recusa (409) enquanto houver site-image derivada |
+| `test_subadmin.py` | o isolamento: o código de convite como credencial de console, nome reservado recusado, o que é de outro dono responde **404**, cotas contadas por varredura, suspensão e revogação, e que o token da imagem **não** vira console |
+| `test_legacy_paths.py` | `/api/v1/images/…` continua respondendo — lê o `agent.sh` embarcado nas camadas publicadas e confere caminho por caminho |
+| `test_migrate_names.py` | a migração de nomes: `--dry-run` não mexe em nada, é idempotente e não sobrescreve destino existente |
+| `test_web_js.py` | um *no-undef* mínimo para o JavaScript das telas (não há node nesta máquina): acusa uso de variável sem declaração que não seja global do navegador — a classe do "template is not defined" que só explodia no clique. Pende para o falso negativo de propósito; não substitui um linter de verdade |
+| `test_web_ids.py` | todo id que o JavaScript procura existe no HTML da tela (erro que deixaria a tela em branco, sem mensagem) |
+| `test_tool_routes.py` | toda rota `/api/v1/…` citada em `tools/` existe na API de verdade |
+| `test_boot_ui.py` | o kit de tela do boot: cada glifo da fonte tem 5 linhas, o banner quebra quando não cabe, o passo fecha a linha antes de um aviso, nenhum temporário é compartilhado entre funções (foi o que causou `sleep RAM`) e **nenhuma mensagem de tela tem acento** — o proxy de "sobrou português" |
+| `test_boot_screens.py` | as telas fatais: o diagnóstico de disco escolhe entre Fast Startup, pouco espaço, disco não detectado e sistema de arquivos não suportado; cada tela **cabe em 25 linhas** (senão o banner rola para fora, como aconteceu na primeira verificação em VM) e toda tela diz o que fazer |
+| `test_camada_telemetria.py` | a camada de telemetria nasce com todos os coletores, dono `root:root`, bit de execução onde faz falta e sem segredo; o nome muda quando o conteúdo muda |
+| `test_logs.py` | ingestão de log com teto por requisição (413) e por máquina (mantém a cauda), leitura da cauda, autenticação, e que a telemetria também passou a ter teto |
+| `test_session.py` | a sessão do console: o cookie sozinho entra (é o que o reload passa a fazer), as flags do cookie, expiração, e a revogação de verdade — trocar a chave de administração, revogar o convite ou suspender o sub-admin derruba a sessão na hora; mais o par de CSRF (cookie sem o cabeçalho `X-NB-Console` é recusado, com ele é aceito) e a garantia de que **Bearer continua funcionando** para as ferramentas e o MOJ |
+| `test_layer_roles.py` | o papel de cada camada: `role` inválido é recusado, `replace_role` troca a base **mantendo a posição** (por último), e registrar uma base com nome diferente deixa **uma** base e não duas — a regressão que fazia a máquina baixar duas raízes; mais a migração de papéis (dedução, idempotência, respeito ao que já foi marcado à mão) |
+| `test_nova_temporada.py` | o comando de temporada contra um uvicorn de verdade: herda camadas e cadeados, não toca no modelo anterior, preenche um modelo que ficou vazio, não empilha bases ao rodar duas vezes, e **falha alto** com nome de modelo errado ou chave errada (era o que terminava com sucesso sem registrar nada) |
+| `test_alerts.py` | o alerta de dispositivo **não some sozinho**, sobrevive a recarga, só dispensa com credencial de console, a máquina não dispensa o próprio alerta, e a regra de udev ignora o pendrive de boot |
+| `test_boot_key.py` | a chave de boot fecha os endpoints de boot e a rotação invalida a antiga |
+| `test_credentials.py` | as credenciais de uma imagem já criada podem ser relidas sem rotacionar (o que quebraria links já distribuídos) |
+| `test_schema_locks.py` | o cadeado por campo do modelo e o wallpaper travado por imagem |
+| `test_self_service.py` | criação por convite: cota, código inválido, nome reservado e modelo não-público |
+| `test_requests.py` | a fila de pedidos de quem não tem código: enviar, aprovar emitindo código, recusar |
+| `test_ratelimit.py` | o limite de taxa das rotas públicas, incluindo o respeito ao `X-Forwarded-For` |
+| `test_publish.py` | publicação de arquivos no servidor de arquivos externo, com repetição em caso de falha |
 
 Sobre o `test_live_server.py`: ele existe porque o transporte ASGI do `httpx`
 **não** faz streaming — executa a aplicação até o fim antes de devolver a
@@ -40,13 +62,21 @@ não estiverem instaladas (veja `docs/layer-builds.md`).
 ## 2. O ambiente local
 
 ```bash
-tools/nb3-seed-testdata     # cria chave de admin, template e a imagem testes3
+tools/nb3-init              # chave de administração (só na primeira vez)
+tools/nb3-seed-testdata     # modelo de exemplo e a imagem testes3
 tools/nb3-dev               # sobe o servidor em 127.0.0.1:8890
 ```
 
-O `nb3-seed-testdata` imprime as credenciais **uma vez**: chave de
-administração, token, chave de máquina e chave de boot da imagem `testes3`.
-Anote. Ele é idempotente — rodar de novo não sobrescreve o que já existe.
+Cada um imprime as credenciais que gera **uma vez**: o `nb3-init`, a chave de
+administração; o `nb3-seed-testdata`, o token, a chave de máquina e a chave de
+boot da imagem `testes3`. Anote. Os dois são idempotentes — rodar de novo não
+sobrescreve o que já existe, e o `nb3-init` não emite outra chave sem
+`--nova-chave`.
+
+São dois comandos porque eram um só: ele gravava o hash da chave de
+administração e estourava no passo seguinte, antes de imprimi-la. A chave em
+claro se perdia e o arquivo já existia, então repetir não adiantava — quem
+instalava numa máquina limpa ficava trancado do lado de fora.
 
 O `nb3-dev` sobe um único worker. Isso não é detalhe de configuração: o
 long-poll e o SSE mantêm os sinais de acordar em memória, então **mais de um
@@ -86,10 +116,10 @@ curl -s "$B/boot/v3/testes3/stuff" -H "X-NB-Boot-Key: $BK" | head -20
 curl -s -o /dev/null -w '%{http_code}\n' "$B/boot/v3/testes3/manifest"   # 401
 
 # configuração da imagem (token da imagem)
-curl -s "$B/api/v1/images/testes3/config" -H "Authorization: Bearer $TK"
+curl -s "$B/api/v1/site-images/testes3/config" -H "Authorization: Bearer $TK"
 
 # listagem de imagens (chave de administração)
-curl -s "$B/api/v1/images" -H "Authorization: Bearer $AK"
+curl -s "$B/api/v1/site-images" -H "Authorization: Bearer $AK"
 ```
 
 Vale conferir que o `stuff` gerado é shell válido antes de mandar para uma

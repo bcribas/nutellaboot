@@ -194,7 +194,7 @@ cliente e falha se aparecer `--check-certificate=false` ou
 ### A chave de boot
 
 Os endpoints de boot não são abertos. Cada imagem tem uma chave própria
-(`data/images/<id>/boot.key`, prefixo `nb3b_`), que vai no `nutellaboot.conf`
+(`data/site-images/<id>/boot.key`, prefixo `nb3b_`), que vai no `nutellaboot.conf`
 do pendrive e é enviada em toda requisição de `manifest`, `stuff`, `wallpaper`,
 `lockinfo`, `lockstate` e registro de seeder. Sem ela, o servidor responde 401.
 
@@ -210,8 +210,8 @@ do cliente fala de um jeito:
 | Cabeçalho `X-NB-Boot-Key` | `aria2c` (que faz GET) e a tela de bloqueio |
 | Query string (`?key=…`) | conveniência para depuração com `curl` |
 
-Para pegar a chave: `GET /api/v1/images/<imagem>/boot-key` (admin). Para
-trocá-la: `POST /api/v1/images/<imagem>/boot-key/rotate` — mas atenção, todo
+Para pegar a chave: `GET /api/v1/site-images/<imagem>/boot-key` (admin). Para
+trocá-la: `POST /api/v1/site-images/<imagem>/boot-key/rotate` — mas atenção, todo
 pendrive daquela imagem precisa ter o `nutellaboot.conf` atualizado depois,
 senão para de bootar.
 
@@ -239,6 +239,7 @@ variáveis de configuração daquela imagem:
 | Módulo | O que faz |
 |---|---|
 | `00-header.sh` | `nb_log`, `nb_warn`, `nb_fatal`, `nb_retry` — a política de erro |
+| `05-ui.sh` | o visual: cor, etapas, `[ OK ]`/`[ WARN ]`/`[ FAIL ]` e as telas de erro com letras grandes |
 | `20-download.sh` | `nb_download` (multi-URL, TLS, retry), `nutella_md5sum`, `download_boot_files` |
 | `30-storage.sh` | `nutella_findblock` (acha disco), checagem de virtualização e de RAM mínima |
 | `40-mount.sh` | monta as camadas em overlayfs, home persistente, swap em disco e zram |
@@ -266,13 +267,68 @@ Os ajustes de `60-postmount.d/` são:
 | `75-clionkey.sh` | licença do CLion |
 | `80-nm-wifi.sh` | perfis de wifi do NetworkManager |
 
+### As mensagens da tela
+
+Tudo que o boot escreve na tela está **em inglês** e sai pelo `05-ui.sh`. É a
+única parte do sistema que não é traduzida em tempo de execução: quando a
+mensagem aparece, muitas vezes não há rede, nem disco, nem forma de carregar um
+dicionário. (O campo `LANGUAGE` do formulário continua valendo para a tela de
+bloqueio e o agente, que rodam com o sistema já montado.)
+
+Três níveis:
+
+```
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   faixa de etapa
+  ~~  STORAGE - looking for a disk to store the system     ~~
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  > Looking for local storage                       [  OK  ]   passo
+  [ WARN ] using /dev/sda3                                     aviso
+```
+
+E, para o que é fatal, uma tela cheia com o nome do problema em letras
+grandes, o que foi encontrado e o que fazer:
+
+```
+  ############################################################
+  ##  ##   ####       ####    ###   ####  ##  ##            ##
+  ##  ## # ##  ##  ##  ##  ##  ##  ##  ##  ####             ##
+  ############################################################
+
+  This computer has no disk where the system can be stored.
+  ...
+```
+
+**As letras são espaços com fundo colorido**, não caracteres de desenho. No
+console do initrd não há `tput`, terminfo nem garantia de qual fonte foi
+carregada; espaço é o único glifo que existe em qualquer fonte. É por isso que
+a tela sai igual em toda máquina.
+
+As telas fatais **limpam o console antes de desenhar** e cabem em 25 linhas —
+o piso do que se encontra em sala (VGA texto 80x25). Sem isso o banner rola
+para fora e some justamente a parte que faz a pessoa olhar; há teste medindo a
+altura de cada tela.
+
+Telas existentes: `NO IMAGE`, `NO NETWORK`, `NO SERVER`, `NO DISK`,
+`NO SYSTEM`, `LOW RAM`, `NO VM` e `REMOVED`. A de disco é a mais elaborada:
+usa o registro que o próprio scan produziu para dizer a causa mais provável —
+Fast Startup do Windows, BitLocker, falta de espaço ou controladora em RAID —
+e o que fazer em cada caso.
+
+**Uma fonte só.** O `05-ui.sh` é servido junto com o `stuff` **e** copiado
+para dentro do initrd como `/scripts/nb3-ui` (pelo hook, na hora do
+`nb3-build-initrd`). O bootstrap o carrega se existir; um initrd antigo,
+gerado antes do kit, continua bootando com as funções originais do
+initramfs-tools — perde o visual, não quebra.
+
 ### As três regras do stuff
 
 **1. Nada de `read` interativo.** Máquina de prova boota sozinha, muitas vezes
 com a sala vazia. Um `read -p "Continue anyway?"` no caminho de erro — como o
 NutellaBoot 2 tinha no download do wallpaper — significa uma máquina parada
 esperando alguém que não está lá. Erro grave usa `nb_fatal`, que mostra a
-mensagem, espera 30 segundos e reinicia. Erro contornável usa `nb_warn` e
+mensagem, espera 30 segundos e reinicia (60 nas telas com instrução, para dar
+tempo de ler ou fotografar). Erro contornável usa `nb_warn` e
 segue. Um teste (`test_no_interactive_read_in_client_scripts`) impede que isso
 volte.
 
@@ -305,15 +361,31 @@ NB_LANGUAGE='pt'
 
 Quem lê esse arquivo:
 
-- **`/usr/share/mlog/agent.sh`**, iniciado pelo `rc.local`. Roda dois laços: um
-  de comandos, pendurado em long-poll de até 25 segundos, que volta no instante
-  em que alguém manda algo pelo painel; e um de telemetria, que reporta o
-  estado a cada ~45 segundos. Um terceiro laço, o `lock_watchdog`, garante que
-  a tela de bloqueio volte em até 3 segundos se alguém matar o processo.
+- **`/usr/share/mlog/agent.sh`**, iniciado pelo `rc.local`. Roda cinco laços:
+  - **comandos** — long-poll de até 25 s, que volta no instante em que alguém
+    manda algo pelo painel;
+  - **telemetria** — o estado da máquina a cada ~45 s;
+  - **logs** — o journal do boot na partida e o incremento a cada 5 min
+    (`journalctl --cursor-file`, que não repete nem perde linha); incremento
+    vazio não vira requisição;
+  - **USB** — esvazia a fila que a regra de udev enche e reporta na hora;
+  - **`lock_watchdog`** — garante que a tela de bloqueio volte em até 3 s se
+    alguém matar o processo.
 - **`/usr/bin/maratona-wait`**, a tela de bloqueio. Lê o tema, o idioma e o
   hash da senha de emergência daqui. No nb2, esses valores eram corrigidos em
   tempo de execução com um `sed -i 16d` — apagar a linha 16 do arquivo, por
   número.
+- **`/etc/udev/rules.d/99-nb3-usb.rules`**, que dispara
+  `/usr/share/mlog/usb-event.sh` quando alguém conecta pendrive, celular
+  (MTP/PTP) ou tethering. É udev e não varredura porque o laço de telemetria
+  roda a cada ~45 s: um pendrive espetado por dez segundos passaria batido, e
+  é exatamente esse o caso que interessa. O script só enfileira um arquivo e
+  sai — esperar rede dentro da fila do udev atrasaria a enumeração de
+  dispositivos da máquina inteira. O pendrive de boot (label `NB3CFG`) é
+  excluído da regra: em muitas salas ele fica espetado o dia todo.
+
+Tudo isso vive numa camada squashfs construída por
+`tools/nb3-camada-telemetria` a partir de `client/telemetry/`.
 
 No fim do boot, `fixnetworktoreconnect()` devolve a rede ao NetworkManager do
 sistema: limpa os endereços do initrd, desliga o `systemd-networkd` e encerra o

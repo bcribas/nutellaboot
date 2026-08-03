@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-"""Popula data/ com dados de teste: admin key, template importado do
-nutellaboot2 e a imagem `testes3`. Imprime as credenciais UMA vez.
+"""nb3-seed-testdata — dados de teste: um modelo e a imagem `testes3`.
 
-Uso: tools/nb3-seed-testdata [--nb2 DIR_DO_NUTELLABOOT2]
-Idempotente: não sobrescreve chaves/imagens existentes.
+NÃO é o comando de instalação. Quem está preparando um servidor de verdade roda
+`tools/nb3-init`, que emite a chave de administração e para por aí.
+
+Se o NutellaBoot 2 estiver ao lado, o modelo nasce com as camadas de lá; se não
+estiver, nasce vazio, que é o suficiente para exercitar o console e as telas.
+Antes ele **exigia** o nb2 sem dizer: gravava o esquema, não gravava o modelo, e
+estourava ao criar a imagem — depois de já ter gravado o hash de uma chave de
+admin que nunca chegou a ser impressa. Instalação nova ficava trancada.
+
+    tools/nb3-seed-testdata [--nb2 DIR_DO_NUTELLABOOT2]
+
+Idempotente: não sobrescreve chaves nem imagens que já existem.
 """
 
 import argparse
@@ -17,13 +26,13 @@ if VENV_PY.exists() and Path(sys.prefix).resolve() != (REPO / ".venv").resolve()
     os.execv(str(VENV_PY), [str(VENV_PY), __file__, *sys.argv[1:]])
 sys.path.insert(0, str(REPO))
 
-from server.app import auth, fsdb  # noqa: E402
-from server.app.services import store  # noqa: E402
+from server.app import fsdb  # noqa: E402
+from server.app.services import layer_roles, store  # noqa: E402
 from server.app.services.default_schema import build_default_schema  # noqa: E402
 from server.app.settings import settings  # noqa: E402
 
 NB2_DEFAULT = REPO.parent / "nutellaboot" / "nutellaboot" / "nutellaboot2"
-TEMPLATE_NAME = "maratonalinux2404"
+MODELO = "maratonalinux2404"
 
 
 def parse_nb2_template(path: Path) -> list[dict]:
@@ -34,58 +43,55 @@ def parse_nb2_template(path: Path) -> list[dict]:
             continue
         md5, file, url = line.split(None, 2)
         layers.append({"md5": md5, "file": file, "cdn_url": url.strip()})
-    return layers
+    # o papel vem junto: camada sem papel faz a troca de base da temporada
+    # seguinte errar o alvo e empilhar duas raízes, em silêncio
+    return layer_roles.marcar(layers)
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--nb2", type=Path, default=NB2_DEFAULT)
     args = ap.parse_args()
 
     data = settings.data_root
-    creds: dict[str, str] = {}
-
-    if not (data / "server.json").exists():
-        fsdb.write_json(
-            data / "server.json",
-            {
-                "base_url": settings.base_url,
-                "cdn_base_url": "https://files.mdp.naquadah.com.br/maratonalinux",
-                "seeder_ttl_sec": 180,
-                "reserved_prefix_regex": "^[0-9]",
-            },
+    if not (data / "keys" / "admin.json").exists():
+        sys.exit(
+            "sem chave de administracao em data/keys/admin.json.\n"
+            "Rode primeiro: tools/nb3-init"
         )
 
-    admin_file = data / "keys" / "admin.json"
-    if not admin_file.exists():
-        key = auth.new_key("nb3a")
-        fsdb.write_json(admin_file, {"keys": [{"id": "admin", "sha256": auth.key_hash(key)}]}, mode=0o600)
-        creds["admin_key"] = key
+    creds: dict[str, str] = {}
 
-    if not (data / "keys" / "services.json").exists():
-        fsdb.write_json(data / "keys" / "services.json", {}, mode=0o600)
-
-    tpl_dir = data / "models" / TEMPLATE_NAME
-    nb2_template = args.nb2 / TEMPLATE_NAME / "template"
-    if not (tpl_dir / "model.json").exists() and nb2_template.exists():
-        fsdb.write_json(tpl_dir / "model.json", {"layers": parse_nb2_template(nb2_template)})
-        print(f"template '{TEMPLATE_NAME}' importado de {nb2_template}")
-    if not (tpl_dir / "schema.json").exists():
-        fsdb.write_json(tpl_dir / "schema.json", build_default_schema())
-        print(f"esquema de configuração padrão criado em {tpl_dir / 'schema.json'}")
+    mdir = data / "models" / MODELO
+    nb2_template = args.nb2 / MODELO / "template"
+    if not (mdir / "model.json").exists():
+        if nb2_template.exists():
+            camadas = parse_nb2_template(nb2_template)
+            print(f"modelo '{MODELO}' importado de {nb2_template} ({len(camadas)} camadas)")
+        else:
+            camadas = []
+            print(f"modelo '{MODELO}' criado vazio (sem NutellaBoot 2 em {args.nb2})")
+            print("  registre a camada base com: tools/nb3-nova-temporada --help")
+        fsdb.write_json(mdir / "model.json", {"layers": camadas})
+    if not (mdir / "schema.json").exists():
+        fsdb.write_json(mdir / "schema.json", build_default_schema())
+        print(f"esquema de configuração padrão criado em {mdir / 'schema.json'}")
 
     # usa a MESMA função da API: assim a imagem de teste nasce com todas as
     # credenciais (inclusive a chave de boot) e nada fica diferente da produção
     if not store.site_image_exists("testes3"):
-        criada = store.create_site_image(
-            "testes3", "Imagem de teste do NutellaBoot 3", TEMPLATE_NAME, unlocked=True
-        )
+        try:
+            criada = store.create_site_image(
+                "testes3", "Imagem de teste do NutellaBoot 3", MODELO, unlocked=True
+            )
+        except store.ImageError as e:
+            sys.exit(f"nao consegui criar a imagem de teste: {e}")
         creds["testes3_token"] = criada["token"]
         creds["testes3_machine_key"] = criada["machine_key"]
         creds["testes3_boot_key"] = criada["boot_key"]
 
     if creds:
-        print("\n== CREDENCIAIS (admin fica só como hash; as da imagem ficam em data/images/testes3/, 0600) ==")
+        print("\n== CREDENCIAIS DA IMAGEM DE TESTE (tambem em data/site-images/testes3/, 0600) ==")
         for k, v in creds.items():
             print(f"{k} = {v}")
     else:

@@ -11,15 +11,29 @@ autenticação nenhuma, que interpolava parâmetros do usuário direto em `rm` e
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from .. import auth, fsdb
 from ..services import machines as m
 from ..services import store
+from ..services import webhook_push
 from ..services.notify import notify
 
 router = APIRouter(prefix="/api/v1")
+
+
+def _publish(image: str, event: str, data: dict) -> None:
+    """Avisa a tela (SSE) E os sistemas externos (webhooks).
+
+    Estas duas rotas publicavam só no SSE: o painel via o vínculo mudar em
+    tempo real, mas um webhook do MOJ inscrito em machine.bound nunca
+    disparava, apesar de a documentacao prometer.
+    """
+    notify.publish(image, {"event": event, "data": data, "at": time.time()})
+    webhook_push.emit(image, event, data)
 
 LOGO_MAX = 2 * 1024 * 1024
 LOGO_TYPES = {
@@ -114,7 +128,7 @@ async def put_binding(
     d = m.machine_dir(image, mac)
     d.mkdir(parents=True, exist_ok=True)
     fsdb.write_json(d / "binding.json", binding)
-    notify.publish(image, {"event": "machine.bound", "data": {"mac": mac}, "at": 0})
+    _publish(image, "machine.bound", {"mac": mac, **binding})
     return binding
 
 
@@ -124,7 +138,7 @@ async def delete_binding(
 ) -> None:
     mac = m.normalize_mac(mac)
     (m.machine_dir(image, mac) / "binding.json").unlink(missing_ok=True)
-    notify.publish(image, {"event": "machine.unbound", "data": {"mac": mac}, "at": 0})
+    _publish(image, "machine.unbound", {"mac": mac})
 
 
 @router.get("/site-images/{image}/bindings")

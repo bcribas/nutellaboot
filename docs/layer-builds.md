@@ -65,10 +65,18 @@ passos:
 7. calcular o md5 e copiar do terminal;
 8. editar o `template.extra` da sede no servidor, colando md5 e nome.
 
+(Aquele campo se chamava `template.extra` no NutellaBoot 2; hoje o conceito
+equivalente é a lista de camadas do **modelo**.)
+
 Cada passo dependia de alguém lembrar. Na prática, a poda variava muito: uma
 camada foi publicada com `/tmp` inteiro dentro; outra ainda tinha `/etc/shadow`
 com o hash real da senha de root. E o passo 8, feito à mão, produzia linhas com
 a URL literal `unk` quando ninguém preenchia o campo.
+
+> **Este documento é sobre camadas EXTRA** — pacotes por cima do sistema. A
+> **camada base** (o sistema operacional inteiro) é outra coisa e se gera de
+> outro jeito: `tools/nb3-gerar-squash` a partir da imagem-mestre `.raw`, com
+> o roteiro completo em [operations.md](operations.md), seção 1.
 
 ## O caminho automático
 
@@ -80,7 +88,7 @@ curl -X POST "$SERVER/api/v1/layerbuilds" \
     -H 'Content-Type: application/json' \
     -d '{
           "name": "linguagens-extras",
-          "template": "maratonalinux2604",
+          "model": "maratonalinux2604",
           "packages": ["ghc", "sbcl", "fp-compiler"],
           "attach_to": ["26spsp"]
         }'
@@ -93,6 +101,11 @@ Isso devolve um `id` de job. O trabalho fica numa fila em disco
 tools/nb3-layer-worker            # fica observando a fila
 tools/nb3-layer-worker --once     # processa o que houver e sai
 ```
+
+Um **sub-admin** também pode pedir build, com a mesma rota e o código de
+convite como credencial: só nos modelos que ele administra e nas imagens dele,
+gastando a `build_quota` do convite. A cota conta **tentativas**, não sucessos
+— senão uma fila de builds quebrados sairia de graça.
 
 Acompanhe pelo id:
 
@@ -167,14 +180,14 @@ curl -X POST "$SERVER/api/v1/layerbuilds/<id>/attach" \
 Para remover de uma imagem:
 
 ```bash
-curl -X DELETE "$SERVER/api/v1/images/26spsp/layers/<arquivo.squash>" \
+curl -X DELETE "$SERVER/api/v1/site-images/26spsp/layers/<arquivo.squash>" \
     -H "Authorization: Bearer $NB3_ADMIN_KEY"
 ```
 
 Para ver o que a imagem tem hoje:
 
 ```bash
-curl "$SERVER/api/v1/images/26spsp/layers" -H "Authorization: Bearer $TOKEN"
+curl "$SERVER/api/v1/site-images/26spsp/layers" -H "Authorization: Bearer $TOKEN"
 ```
 
 ## O dono da imagem constrói a própria camada (com cota)
@@ -184,7 +197,7 @@ pacotes, sem chave de administração. A rota é por imagem e aceita o **token d
 imagem** (o mesmo do configureitor):
 
 ```bash
-curl -X POST "$SERVER/api/v1/images/meu-lab/layerbuilds" \
+curl -X POST "$SERVER/api/v1/site-images/meu-lab/layerbuilds" \
     -H "Authorization: Bearer $TOKEN_DA_IMAGEM" \
     -H 'Content-Type: application/json' \
     -d '{"name": "meus-extras", "packages": ["htop", "tmux"]}'
@@ -205,7 +218,7 @@ Diferenças em relação ao caminho da administração:
 Acompanhe o andamento (dono ou administração):
 
 ```bash
-curl "$SERVER/api/v1/images/meu-lab/layerbuilds" \
+curl "$SERVER/api/v1/site-images/meu-lab/layerbuilds" \
     -H "Authorization: Bearer $TOKEN_DA_IMAGEM"
 ```
 
@@ -292,7 +305,7 @@ O manifest que a máquina baixa lista as camadas nesta ordem:
 
 ```
 <camadas extras da imagem>     ← primeiro
-<camadas do template>          ← depois (a base)
+<camadas do modelo>           ← depois (a base)
 ```
 
 E o overlayfs monta na mesma ordem, o que significa: **camada extra tem

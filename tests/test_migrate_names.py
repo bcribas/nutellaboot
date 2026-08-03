@@ -122,3 +122,41 @@ def test_nao_sobrescreve_se_o_destino_ja_existe(tmp_path):
     r = roda(d)
     assert "não sobrescrevo" in r.stdout
     assert (d / "templates").exists(), "os dados antigos continuam lá para inspeção"
+    # e o passo NÃO pode ficar marcado como aplicado: ele não fez nada
+    assert r.returncode != 0, "desistir por conflito tem que sair diferente de zero"
+
+
+def test_depois_de_resolver_o_conflito_a_migracao_completa(tmp_path):
+    """O passo era marcado como aplicado mesmo tendo desistido: quem resolvia
+    o conflito e rodava de novo ouvia "já aplicado" e ficava com o
+    `templates/` intacto para sempre — e o relatório final ainda dizia
+    "nenhum resíduo", porque procurava a palavra dentro dos JSON, e um
+    `template.json` típico não a contém."""
+    d = monta_dados_antigos(tmp_path)
+    (d / "models" / "outro").mkdir(parents=True)
+    roda(d)
+
+    # o operador resolve o conflito
+    (d / "models" / "outro").rmdir()
+    (d / "models").rmdir()
+
+    r = roda(d)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (d / "models" / "modelo1" / "model.json").is_file()
+    assert not (d / "templates").exists()
+
+
+def test_o_relatorio_ve_o_diretorio_antigo(tmp_path):
+    """Procurar a palavra dentro dos JSON dizia "nenhum resíduo" com o
+    `templates/` inteiro parado ao lado — o conteúdo de um `template.json`
+    típico (`{"layers": [...]}`) não contém a palavra em lugar nenhum."""
+    d = monta_dados_antigos(tmp_path)
+    roda(d)  # migra tudo, marcando os passos
+    # e alguém repõe o diretório antigo (restauração de backup, por exemplo)
+    (d / "templates" / "modelo1").mkdir(parents=True)
+    (d / "templates" / "modelo1" / "template.json").write_text(json.dumps({"layers": []}))
+
+    r = roda(d)
+    assert r.returncode != 0, r.stdout
+    assert "resíduos" in r.stdout
+    assert "templates/" in r.stdout

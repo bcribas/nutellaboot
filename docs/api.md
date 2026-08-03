@@ -16,14 +16,58 @@ o esquema cru em `/api/v1/openapi.json`.
 | Classe | Prefixo | Como enviar |
 |---|---|---|
 | Administração | `nb3a_` | `Authorization: Bearer nb3a_…` |
+| Sub-administração | `NB3-` | `Authorization: Bearer NB3-XXXX-XXXX-XXXX` |
 | Serviço (MOJ) | `nb3s_` | `Authorization: Bearer nb3s_…` |
-| Imagem | `nb3i_` | `Authorization: Bearer nb3i_…` |
+| Site-image | `nb3i_` | `Authorization: Bearer nb3i_…` |
 | Máquina | `nb3m_` | cabeçalho `X-NB-Machine-Key: nb3m_…` |
 | Boot | `nb3b_` | POST `key=nb3b_…`, cabeçalho `X-NB-Boot-Key: nb3b_…` ou `?key=nb3b_…` |
 
-Nas tabelas abaixo, a coluna **Cred.** usa: **A** administração, **S** serviço
-(com escopo), **I** token da imagem, **M** chave de máquina, **B** chave de
-boot, **—** aberto.
+A credencial de sub-administração **é o próprio código de convite** — não há
+cadastro nem senha separada. Quem recebeu um código cria a imagem em
+`/criar/` e volta com o mesmo código pelo console em `/admin/`. Revogar o
+convite (`DELETE /api/v1/invites/{code}`) corta o acesso.
+
+### Sessão do console (navegador)
+
+As telas de administração não guardam credencial. A chave (de administração ou
+o código de convite) é trocada uma vez por um **cookie de sessão**, e o
+navegador cuida do resto — recarregar a página não pede nada de novo.
+
+| Método | Caminho | Corpo | Resposta |
+|---|---|---|---|
+| POST | `/api/v1/session` | `{key}` | `Set-Cookie: nb3_session=…` + o mesmo corpo do `whoami` |
+| GET | `/api/v1/session` | — | quem está logado, quando expira e as outras sessões desta identidade |
+| DELETE | `/api/v1/session[?all=true]` | — | encerra esta sessão (ou todas as da identidade) |
+
+O cookie é `HttpOnly` (nenhum script da página o lê), `Secure`,
+`SameSite=Strict` e vale **30 dias**.
+
+**Requisição autenticada por cookie precisa do cabeçalho `X-NB-Console: 1`.**
+É o que impede CSRF: um `<form>` de outro site consegue fazer o navegador
+mandar o cookie, mas não consegue definir cabeçalho, e um `fetch` cross-site
+com cabeçalho próprio esbarra no *preflight*. Sem o cabeçalho, o cookie é
+simplesmente ignorado.
+
+Sessão é só para quem entra pelo console (`admin` e `subadmin`). Chave de
+serviço, token de imagem e chave de máquina continuam **só no Bearer** — são
+credenciais de programa, e nada mudou para elas: as ferramentas de linha de
+comando e a integração do MOJ seguem exatamente iguais.
+
+A sessão é revogável de verdade, porque a identidade é revalidada a cada
+requisição: trocar a chave de administração, revogar o convite ou suspender o
+sub-admin derruba as sessões na hora, mesmo dentro dos 30 dias.
+
+Nas tabelas abaixo, a coluna **Cred.** usa: **A** administração, **C** console
+(administração **ou** sub-administração), **S** serviço (com escopo), **I**
+token da site-image, **M** chave de máquina, **B** chave de boot, **—** aberto.
+
+> Rotas marcadas **C** respondem **404** — não 403 — quando o objeto é de
+> outro dono. Um 403 confirmaria que o nome está tomado, e nomes são livres
+> por ordem de chegada. Vale também para as rotas de uma site-image
+> (`config`, `machines`, `roster`, `alerts`, `layers`): sem credencial é
+> **401**, exista a imagem ou não; com credencial de outro dono, **404**.
+> A chave de **serviço** é a exceção: como é a administração que a emite, ela
+> recebe 403 de escopo ou de glob, que é o erro útil para quem integra.
 
 ---
 
@@ -109,44 +153,118 @@ ALLOWNETWORKCHANGE='f'
 
 | Método | Caminho | Cred. | Resposta |
 |---|---|---|---|
-| GET | `/api/v1/health` | — | `{"status","version","images","disk_free_gb"}` |
+| GET | `/api/v1/health` | — | `{"status","version","images","models","disk_free_gb"}` |
 | GET | `/healthz` | — | `{"status":"ok"}` |
 | GET | `/api/v1/events/types` | — | catálogo de eventos e escopos disponíveis |
 
-### Imagens
+### Site-images
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| POST | `/api/v1/images` | A | `{id, fullname, template, unlocked?}` | imagem criada **com as credenciais em claro** (única vez) |
-| POST | `/api/v1/images/bulk` | A | TSV ou `{rows:[…]}` | `{results:[…]}`; com `?format=csv`, CSV das credenciais |
-| GET | `/api/v1/images?prefix=` | A | — | `{images:[…]}` |
-| GET | `/api/v1/images/{img}` | A, I | — | `image.json` |
-| PATCH | `/api/v1/images/{img}` | A | `{fullname?, unlocked?, template?}` | imagem atualizada |
-| DELETE | `/api/v1/images/{img}` | A | — | `204` |
-| POST | `/api/v1/images/{img}/token/rotate` | A | — | `{token}` |
-| GET | `/api/v1/images/{img}/boot-key` | A | — | `{boot_key}` |
-| POST | `/api/v1/images/{img}/boot-key/rotate` | A | — | `{boot_key}` (exige atualizar os pendrives) |
+| POST | `/api/v1/site-images` | C | `{id, fullname, model, unlocked?, wallpaper_locked?}` | imagem criada **com as credenciais em claro** (única vez) |
+| POST | `/api/v1/site-images/bulk` | A | TSV ou `{rows:[…]}` | `{results:[…]}`; com `?format=csv`, CSV das credenciais |
+| GET | `/api/v1/site-images?prefix=` | C | — | `{images:[…]}` (o sub-admin vê só as dele) |
+| GET | `/api/v1/site-images/{img}` | C, I | — | `image.json` |
+| PATCH | `/api/v1/site-images/{img}` | C | `{fullname?, unlocked?, model?, wallpaper_locked?}` | imagem atualizada |
+| DELETE | `/api/v1/site-images/{img}` | C | — | `204` |
+| POST | `/api/v1/site-images/{img}/token/rotate` | C | — | `{token}` |
+| GET | `/api/v1/site-images/{img}/credentials` | C | — | token, chaves e links prontos |
+| GET | `/api/v1/site-images/{img}/boot-key` | C | — | `{boot_key}` |
+| POST | `/api/v1/site-images/{img}/boot-key/rotate` | C | — | `{boot_key}` (exige atualizar os pendrives) |
 
 Identificadores começando com dígito ficam no espaço reservado à
 administração (`namespace: "contest"`); os demais são `personal`. O `id` aceita
-2 a 32 caracteres em `[a-z0-9._-]`.
+2 a 32 caracteres em `[a-z0-9._-]`. **Sub-admins não criam nomes começando por
+dígito nem nomes reservados** (`maratona`, `icpc`, `admin`, … — a lista está
+em `reserved_names` no `data/server.json`); recebem 403 com a explicação.
 
-### Templates
+Cada site-image guarda o campo `owner` (`"admin"` ou `"invite:<CÓDIGO>"`), que
+é o que faz o console filtrar.
+
+> **`/api/v1/site-images/…` continua respondendo, para sempre**, como alias de
+> `/api/v1/site-images/…`. O agente de telemetria embarcado nas camadas já
+> publicadas chama o caminho antigo, e não há como atualizá-lo remotamente. Não
+> remova o alias (`LegacyImagePathMiddleware`, `server/app/main.py`).
+
+### Modelos
+
+Um **modelo** é o que se configura uma vez: as camadas (sistema base,
+telemetria, wifi, pacotes) e o formulário que cada sede preenche
+(`schema.json`, com o cadeado por campo). Toda site-image deriva de um modelo.
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/templates` | A | — | `{templates:[nomes]}` |
-| GET | `/api/v1/templates/{nome}` | A | — | camadas + `schema` do formulário |
-| PUT | `/api/v1/templates/{nome}/layers` | A | `{layers:[{md5,file,cdn_url,size}]}` | `{ok, layers}` |
+| POST | `/api/v1/models` | C | `{name, description?, public?, from?}` | modelo criado |
+| POST | `/api/v1/models/{n}/duplicate` | C | `{name, description?}` | cópia com as mesmas camadas e o mesmo formulário |
+| GET | `/api/v1/models` | C | — | `{models:[{name, description, public, owner, mine, layers, used_by, can_manage}]}` |
+| GET | `/api/v1/models/{n}` | C | — | `model.json` + `schema` |
+| PATCH | `/api/v1/models/{n}` | C | `{public?, description?}` | modelo atualizado (só **A** publica) |
+| DELETE | `/api/v1/models/{n}` | C | — | `204`; **409** se alguma site-image ainda deriva dele |
+| POST | `/api/v1/models/{n}/layers` | C | `{file, md5, cdn_url?, size?, position?, role?, replace_role?}` | `{layers:[…]}` |
+| DELETE | `/api/v1/models/{n}/layers/{file}` | C | — | `{layers:[…]}` |
+| PUT | `/api/v1/models/{n}/layers/order` | C | `{files:[…]}` | `{layers:[…]}` |
+| PUT | `/api/v1/models/{n}/layers` | C | `{layers:[…]}` | substitui a lista inteira (prefira o `POST`: uma leitura desatualizada aqui apaga o que outro acabou de acrescentar) |
+| GET | `/api/v1/layers/catalog` | C | — | camadas já em uso, com `used_by` |
+| GET | `/api/v1/models/{n}/schema` | C | — | campos com `default`, `label`, `help` e `locked` |
+| PUT | `/api/v1/models/{n}/schema/locks` | C | `{locks:{CAMPO:true|false}}` | schema atualizado |
+| PATCH | `/api/v1/models/{n}/schema/fields/{key}` | C | `{default?, locked?, label?, help?}` | schema atualizado |
+
+Notas que economizam depuração:
+
+- **A ordem das camadas é a prioridade no overlayfs — a primeira ganha.**
+  `position: 0` (o padrão de `POST …/layers`) põe a camada na frente, que é
+  quase sempre o que se quer para uma personalização.
+- **`role`** diz o que a camada é: `base` (o sistema inteiro, sempre por
+  último), `telemetry`, `wifi` ou `extra` (padrão). Valor fora dessa lista é
+  recusado.
+- **`replace_role: "base"`** troca a camada que tem aquele papel, mantendo a
+  posição dela. É como se troca a base entre temporadas: casar por nome de
+  arquivo não serve, porque o nome muda todo ano (`icpc-latam2025` →
+  `maratonalinux2026`) e o modelo ficaria com as duas — a máquina baixaria as
+  duas raízes e as montaria sobrepostas, sem erro em lugar nenhum.
+- `from` (ou `duplicate`) copia camadas **e** formulário, cadeados inclusive.
+  É o caminho para "quero um modelo novo que já tenha telemetria e wifi". A
+  cópia é independente: mexer nela não mexe na origem.
+- `PATCH …/schema/fields/{key}` ajusta um campo existente. Não cria campos:
+  variável nova só teria efeito se algum módulo do `stuff` a lesse, o que é
+  mudança de cliente. `label` e `help` exigem os três idiomas.
+- Modelo sem camada nenhuma gera uma site-image que **não boota**; a criação
+  devolve `warning` avisando disso.
+- Só a administração marca um modelo como `public`. Modelo público é visível
+  e derivável por todos os sub-admins, mas **somente leitura** para eles — se
+  pudessem editá-lo, soltar um cadeado derrubaria a trava de todas as sedes
+  que usam o mesmo modelo.
+
+### Sub-administração
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| GET | `/api/v1/whoami` | C | — | `{kind, label, owner, can_create_reserved, can_publish_models, can_manage_invites, quotas, usage}` |
+| GET | `/api/v1/owners` | A | — | `{owners:[{id, label, quotas, usage, console_ok}]}` |
+| POST | `/api/v1/owners/{id}/disable` | A | `{disabled?: true}` | suspende (ou reativa) o console |
+| PATCH | `/api/v1/owners/{id}/quotas` | A | `{max_models?, max_images?, build_quota?}` | `{id, quotas, usage}` |
+
+`GET /api/v1/whoami` é o que a tela consulta ao abrir para saber o que
+mostrar; sem ele o console descobriria as próprias permissões apanhando de
+401/404.
+
+**Cotas** vêm do convite (`max_models`, `max_images`, `build_quota`) e o uso é
+contado **varrendo o disco**, não por contador: apagar um modelo libera a vaga
+na hora, e nenhuma limpeza feita por fora deixa a cota travada por engano.
+
+**Suspender × revogar.** `POST /owners/{id}/disable` corta o console e
+preserva o histórico e o dono dos objetos. `DELETE /invites/{code}` apaga a
+credencial: se o convite já criou alguma coisa, responde **409** listando o
+que ficaria órfão e só prossegue com `?force=true`.
 
 ### Configuração e wallpaper
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/images/{img}/config` | A, I | — | `{image, schema, values, wallpaper, can_edit_locked}` |
-| PUT | `/api/v1/images/{img}/config` | A, I, S`config:write` | `{values:{…}}` | `{ok, values}` |
-| PUT | `/api/v1/images/{img}/wallpaper` | A, I, S`config:write` | multipart `file` | `{md5, size, filename, content_type}` |
-| DELETE | `/api/v1/images/{img}/wallpaper` | A, I, S`config:write` | — | `204` |
+| GET | `/api/v1/site-images/{img}/config` | C, I | — | `{image, schema, values, wallpaper, can_edit_locked}` |
+| PUT | `/api/v1/site-images/{img}/config` | C, I, S`config:write` | `{values:{…}}` | `{ok, values}` |
+| PUT | `/api/v1/site-images/{img}/wallpaper` | C, I, S`config:write` | multipart `file` | `{md5, size, filename, content_type}` |
+| DELETE | `/api/v1/site-images/{img}/wallpaper` | C, I, S`config:write` | — | `204` |
 
 Campos marcados como `locked` no esquema só aceitam escrita de administração
 (ou se a imagem estiver marcada `unlocked`). Senhas nunca voltam pela API:
@@ -156,36 +274,80 @@ guardam-se apenas como hash com sal, e enviar vazio mantém a atual.
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/images/{img}/roster` | A, I, S`roster:read` | — | `{roster:[…]}` |
-| PUT | `/api/v1/images/{img}/roster` | A, I, S`roster:write` | `{roster:[{user_id, name, display_name, organization, country, seat}]}` | `{ok, entries}` |
-| PUT | `/api/v1/images/{img}/roster/logos/{org}` | A, I, S`roster:write` | multipart `file` (SVG ou PNG) | `{ok, org_id, format, size}` |
-| PUT | `/api/v1/images/{img}/machines/{mac}/binding` | A, I, S`bindings:write` | `{user_id}` ou `{name, seat}` | vínculo criado |
-| DELETE | `/api/v1/images/{img}/machines/{mac}/binding` | A, I, S`bindings:write` | — | `204` |
-| GET | `/api/v1/images/{img}/bindings` | A, I, S`machines:read` | — | `{bindings:[{mac, …}]}` |
+| GET | `/api/v1/site-images/{img}/roster` | C, I, S`roster:read` | — | `{roster:[…]}` |
+| PUT | `/api/v1/site-images/{img}/roster` | C, I, S`roster:write` | `{roster:[{user_id, name, display_name, organization, country, seat}]}` | `{ok, entries}` |
+| PUT | `/api/v1/site-images/{img}/roster/logos/{org}` | C, I, S`roster:write` | multipart `file` (SVG ou PNG) | `{ok, org_id, format, size}` |
+| PUT | `/api/v1/site-images/{img}/machines/{mac}/binding` | C, I, S`bindings:write` | `{user_id}` ou `{name, seat}` | vínculo criado |
+| DELETE | `/api/v1/site-images/{img}/machines/{mac}/binding` | C, I, S`bindings:write` | — | `204` |
+| GET | `/api/v1/site-images/{img}/bindings` | C, I, S`machines:read` | — | `{bindings:[{mac, …}]}` |
 
 ### Máquinas e telemetria
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| POST | `/api/v1/images/{img}/machines/{mac}/status` | M | JSON livre da telemetria | `{pending_commands, lock}` |
-| GET | `/api/v1/images/{img}/machines` | A, I, S`machines:read` | — | `{machines:[…]}` |
-| GET | `/api/v1/images/{img}/machines/{mac}` | A, I, S`machines:read` | — | estado completo da máquina |
-| GET | `/api/v1/images/{img}/seeders` | A, I | — | `{seeders:[{ip, last_seen, ttl_left}]}` |
-| DELETE | `/api/v1/images/{img}/seeders/{ip}` | A, I | — | `204` |
+| POST | `/api/v1/site-images/{img}/machines/{mac}/status` | M | JSON livre da telemetria (teto de 256 kB) | `{pending_commands, lock}` |
+| GET | `/api/v1/site-images/{img}/machines` | C, I, S`machines:read` | — | `{machines:[…]}` |
+| GET | `/api/v1/site-images/{img}/machines/{mac}` | C, I, S`machines:read` | — | estado completo da máquina |
+| GET | `/api/v1/site-images/{img}/seeders` | C, I | — | `{seeders:[{ip, last_seen, ttl_left}]}` |
+| DELETE | `/api/v1/site-images/{img}/seeders/{ip}` | C, I | — | `204` |
 
 Cada máquina devolve `online`, `seconds_since_contact`, `status` (última
-telemetria), `binding`, `lock` e `pending`. O MAC é aceito com `:` ou `-` e
-normalizado para minúsculas com hífen.
+telemetria), `binding`, `lock`, `pending`, `logs` e `alerts`. O MAC é aceito
+com `:` ou `-` e normalizado para minúsculas com hífen.
+
+O corpo do `status` é JSON livre de propósito: um coletor novo em
+`parts.d/` no cliente entra sem mudança no servidor. Livre não é infinito —
+acima de 256 kB a resposta é **413**.
+
+### Logs (journal do kernel e do sistema)
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| POST | `/api/v1/site-images/{img}/machines/{mac}/logs?origem=` | M | `text/plain`, até 1 MiB | `{ok, stored, at}` |
+| GET | `/api/v1/site-images/{img}/machines/{mac}/logs?tail=500` | C, I, S`machines:read` | — | `{bytes, journal, acks}` |
+
+O agente manda o journal do boot na partida e, a cada 5 minutos, só o que
+apareceu desde o envio anterior (usando `journalctl --cursor-file`, que não
+repete nem perde linha). Incremento vazio não vira requisição.
+
+**Dois tetos, porque log enche disco em silêncio:** 1 MiB por requisição
+(**413** acima disso) e 2 MiB por máquina, mantendo a cauda. 100 máquinas
+cabem em 200 MB por construção.
+
+O `GET` devolve também as confirmações de comando (`acks`), que até então
+eram gravadas e não podiam ser lidas por rota nenhuma.
+
+### Alertas (pendrive, celular, tethering)
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| POST | `/api/v1/site-images/{img}/machines/{mac}/events` | M | `{kind, detail?, vendor?}` | `{ok, id}` |
+| GET | `/api/v1/site-images/{img}/alerts` | C, I, S`machines:read` | — | `{alerts:[…]}` abertos da sede |
+| POST | `/api/v1/site-images/{img}/machines/{mac}/alerts/{id}/dismiss` | C, I, S`commands:write` | — | `{ok, alert}` |
+| POST | `/api/v1/site-images/{img}/machines/{mac}/alerts/dismiss-all` | C, I, S`commands:write` | — | `{ok, dismissed}` |
+| GET | `/api/v1/site-images/{img}/machines/{mac}/alerts/history` | C, I, S`machines:read` | — | `{history:[…]}` datado |
+
+`kind` conhecido: `usb.storage` (pendrive, HD externo), `usb.phone` (MTP/PTP),
+`usb.network` (tethering) e `usb.other`. Um `kind` desconhecido **é aceito** —
+o cliente pode ganhar um detector novo sem esperar o servidor.
+
+**O alerta fica até alguém dispensar.** Não some quando o dispositivo é
+removido: quem espeta um pendrive por cinco segundos não escapa do registro.
+Sobrevive a reboot da máquina, a recarga da página e a reinício do servidor
+(está em disco). Dispensar grava quem foi e quando, no histórico.
+
+A máquina **não** dispensa o próprio alerta: adulterar o agente não apaga o
+rastro. O evento `alert.raised` também vai por webhook, para o MOJ.
 
 ### Comandos e bloqueio de tela
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| POST | `/api/v1/images/{img}/commands` | A, I, S`commands:write` | `{command, target, args?, delay?}` | `{command_id, machines}` |
-| GET | `/api/v1/images/{img}/machines/{mac}/commands?wait=25` | M | — | `{commands:[…], lock}` (long-poll) |
-| POST | `/api/v1/images/{img}/machines/{mac}/commands/{cid}/ack` | M | `{status, output?}` | `{ok, found}` |
-| POST | `/api/v1/images/{img}/lock` · `/unlock` | A, I, S`commands:write` | — | `{command_id, machines, locked}` |
-| POST | `/api/v1/images/{img}/machines/{mac}/lock` · `/unlock` | A, I, S`commands:write` | — | idem, para uma máquina |
+| POST | `/api/v1/site-images/{img}/commands` | C, I, S`commands:write` | `{command, target, args?, delay?}` | `{command_id, machines}` |
+| GET | `/api/v1/site-images/{img}/machines/{mac}/commands?wait=25` | M | — | `{commands:[…], lock}` (long-poll) |
+| POST | `/api/v1/site-images/{img}/machines/{mac}/commands/{cid}/ack` | M | `{status, output?}` | `{ok, found}` |
+| POST | `/api/v1/site-images/{img}/lock` · `/unlock` | C, I, S`commands:write` | — | `{command_id, machines, locked}` |
+| POST | `/api/v1/site-images/{img}/machines/{mac}/lock` · `/unlock` | C, I, S`commands:write` | — | idem, para uma máquina |
 
 `target` é `"all"` ou uma lista de MACs. `delay` adia a execução em segundos.
 Comandos aceitos: `donottouch`, `cantouch`, `cleanhomenow`, `mlreboot`,
@@ -199,7 +361,7 @@ chegar comando ou estourar o tempo. O agente usa `wait=25`.
 
 | Método | Caminho | Cred. | Resposta |
 |---|---|---|---|
-| GET | `/api/v1/images/{img}/events?tk=<token>` | A, I, S | fluxo `text/event-stream` |
+| GET | `/api/v1/site-images/{img}/events?tk=<token>` | C, I, S | fluxo `text/event-stream` |
 
 O token vai na query porque `EventSource` não permite cabeçalhos. Formato de
 cada evento:
@@ -211,20 +373,21 @@ data: {"machines": ["52-54-00-12-34-56"]}
 
 Eventos: `machine.first_seen`, `machine.status`, `machine.locked`,
 `machine.unlocked`, `machine.bound`, `machine.unbound`, `command.sent`,
-`command.acked`, `config.updated`, `seeder.joined`. Linhas `: ping` a cada 20
-segundos mantêm a conexão viva.
+`command.acked`, `config.updated`, `seeder.joined`, `alert.raised`,
+`alert.dismissed`. A lista viva está em `GET /api/v1/events/types`. Linhas
+`: ping` a cada 20 segundos mantêm a conexão viva.
 
 ### Camadas extras
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| POST | `/api/v1/layerbuilds` | A | `{name, template, packages:[…], attach_to?}` | job criado |
-| GET | `/api/v1/layerbuilds` | A | — | `{builds:[{…, state}]}` |
-| GET | `/api/v1/layerbuilds/{job}` | A | — | job + últimos 8000 caracteres do log |
-| POST | `/api/v1/layerbuilds/{job}/attach` | A | `{image_ids:[…]}` | `{ok, layer, images}` |
-| GET | `/api/v1/images/{img}/layers` | A, I | — | `{extra:[…], all:[…]}` |
-| POST | `/api/v1/images/{img}/layers` | A | `{md5, file, size?, cdn_url?}` | `{ok, layer}` |
-| DELETE | `/api/v1/images/{img}/layers/{file}` | A | — | `204` |
+| POST | `/api/v1/layerbuilds` | C | `{name, model, packages:[…], attach_to?}` | job criado (sub-admin gasta `build_quota`) |
+| GET | `/api/v1/layerbuilds` | C | — | `{builds:[{…, state}]}` (filtrado por dono) |
+| GET | `/api/v1/layerbuilds/{job}` | C | — | job + últimos 8000 caracteres do log |
+| POST | `/api/v1/layerbuilds/{job}/attach` | C | `{image_ids:[…]}` | `{ok, layer, images}` |
+| GET | `/api/v1/site-images/{img}/layers` | C, I | — | `{extra:[…], all:[…]}` |
+| POST | `/api/v1/site-images/{img}/layers` | C | `{md5, file, size?, cdn_url?}` | `{ok, layer}` |
+| DELETE | `/api/v1/site-images/{img}/layers/{file}` | C | — | `204` |
 
 Nomes de pacote são validados contra `^[a-z0-9][a-z0-9+._-]*$`, então não há
 como injetar opções ou comandos. Camadas anexadas entram **no começo** da
@@ -234,11 +397,13 @@ lista, que é o que lhes dá prioridade no overlayfs.
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/images/{img}/webhooks` | A | — | lista com o segredo mascarado (`***`) |
-| PUT | `/api/v1/images/{img}/webhooks` | A | `{webhooks:[{url, secret, events}]}` | `{ok, webhooks}` |
+| GET | `/api/v1/site-images/{img}/webhooks` | A | — | lista com o segredo mascarado (`***`) |
+| PUT | `/api/v1/site-images/{img}/webhooks` | A | `{webhooks:[{url, secret, events}]}` | `{ok, webhooks}` |
 | POST | `/api/v1/service-keys` | A | `{name, scopes:[…], images:[globs]}` | `{name, key, scopes, images}` |
 | GET | `/api/v1/service-keys` | A | — | lista sem as chaves |
 | DELETE | `/api/v1/service-keys/{nome}` | A | — | `204` |
+
+Eventos disponíveis: `machine.first_seen`, `machine.status`, `machine.locked`, `machine.unlocked`, `machine.bound`, `machine.unbound`, `command.sent`, `command.acked`, `config.updated`, `seeder.joined`, `alert.raised` e `alert.dismissed` (a lista viva está em `GET /api/v1/events/types`).
 
 `events` vazio significa "todos os eventos". A URL precisa começar com
 `http://` ou `https://`, e cada evento é validado contra o catálogo.
@@ -276,7 +441,7 @@ Resposta (a chave aparece **uma única vez**):
 ### 2. Enviar o roster dos times
 
 ```bash
-curl -sS -X PUT https://nutellaboot.naquadah.com.br/api/v1/images/26brbr/roster \
+curl -sS -X PUT https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/roster \
   -H "Authorization: Bearer $MOJ_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -297,7 +462,7 @@ curl -sS -X PUT https://nutellaboot.naquadah.com.br/api/v1/images/26brbr/roster 
 
 ```bash
 curl -sS -X PUT \
-  https://nutellaboot.naquadah.com.br/api/v1/images/26brbr/roster/logos/unb \
+  https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/roster/logos/unb \
   -H "Authorization: Bearer $MOJ_KEY" \
   -F file=@unb.svg
 ```
@@ -309,7 +474,7 @@ barra nem `..`.
 
 ```bash
 curl -sS -X PUT \
-  https://nutellaboot.naquadah.com.br/api/v1/images/26brbr/machines/52-54-00-12-34-56/binding \
+  https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/machines/52-54-00-12-34-56/binding \
   -H "Authorization: Bearer $MOJ_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"user_id": "team-001"}'
@@ -323,12 +488,12 @@ logotipo, a bandeira e o lugar.
 
 ```bash
 # a sala inteira
-curl -sS -X POST https://nutellaboot.naquadah.com.br/api/v1/images/26brbr/lock \
+curl -sS -X POST https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/lock \
   -H "Authorization: Bearer $MOJ_KEY"
 
 # uma máquina
 curl -sS -X POST \
-  https://nutellaboot.naquadah.com.br/api/v1/images/26brbr/machines/52-54-00-12-34-56/unlock \
+  https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/machines/52-54-00-12-34-56/unlock \
   -H "Authorization: Bearer $MOJ_KEY"
 ```
 
@@ -338,7 +503,7 @@ máquinas recebem em poucos segundos, porque estão penduradas no long-poll.
 ### 6. Ler telemetria
 
 ```bash
-curl -sS https://nutellaboot.naquadah.com.br/api/v1/images/26brbr/machines \
+curl -sS https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/machines \
   -H "Authorization: Bearer $MOJ_KEY"
 ```
 
@@ -365,7 +530,7 @@ curl -sS https://nutellaboot.naquadah.com.br/api/v1/images/26brbr/machines \
 Configuração (pela administração):
 
 ```bash
-curl -sS -X PUT https://nutellaboot.naquadah.com.br/api/v1/images/26brbr/webhooks \
+curl -sS -X PUT https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/webhooks \
   -H "Authorization: Bearer $ADMIN_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -416,7 +581,7 @@ comando de bloqueio — o envio acontece em segundo plano.
 | `400` | dados inválidos (comando fora da lista, MAC malformado, campo desconhecido, pacote com nome suspeito) |
 | `401` | credencial ausente, inválida ou chave de boot errada |
 | `403` | credencial válida sem escopo suficiente, ou sem acesso àquela imagem |
-| `404` | imagem, template, job ou recurso inexistente |
+| `404` | imagem, modelo, job ou recurso inexistente |
 | `413` | arquivo grande demais (wallpaper acima de 12 MB, logotipo acima de 2 MB) |
 
 O corpo do erro segue o padrão do FastAPI: `{"detail": "mensagem em português"}`.

@@ -19,8 +19,12 @@ set -euo pipefail
 UPPER=${NB3_UPPER:-/dev/newroot/upper}
 SAIDA=${1:-}
 
+if [ "$SAIDA" = "--help" ] || [ "$SAIDA" = "-h" ]; then
+    sed -n '2,16p' "$0" | sed 's/^# \?//'
+    exit 0
+fi
 if [ -z "$SAIDA" ]; then
-    echo "uso: nb3-capture-upper <arquivo.tar>" >&2
+    echo "uso: nb3-capture-upper <arquivo.tar>   (--help para os detalhes)" >&2
     exit 1
 fi
 if [ ! -d "$UPPER" ]; then

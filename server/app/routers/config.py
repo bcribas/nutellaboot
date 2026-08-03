@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import time
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse
 
 from .. import auth, fsdb
 from ..services import config as cfg
-from ..services import store
+from ..services import sessions, store, webhook_push
+from ..services.notify import notify
 
 router = APIRouter(prefix="/api/v1")
 
@@ -57,7 +60,43 @@ async def put_config(
         applied = cfg.write_values(image, values, is_admin=(p.kind == "admin"))
     except cfg.ConfigError as e:
         raise HTTPException(400, str(e))
+    # o evento existia no catálogo desde o começo e nunca era emitido: quem
+    # inscrevesse um webhook em config.updated não recebia nada
+    notify.publish(image, {"event": "config.updated", "data": {"keys": sorted(applied)}, "at": time.time()})
+    webhook_push.emit(image, "config.updated", {"keys": sorted(applied)})
     return {"ok": True, "values": applied}
+
+
+@router.get("/site-images/{image}/wallpaper")
+async def get_wallpaper(image: str, request: Request, tk: str = Query("")):
+    """O arquivo em si, para a prévia do configureitor.
+
+    `<img src>` não manda cabeçalho: aceita o token da imagem em `?tk=` ou o
+    cookie de sessão SEM exigir `X-NB-Console` — mesmo desenho, e mesma razão,
+    do SSE em `machines.py`. É GET, não muda estado, e sem CORS uma página de
+    outro site não lê a resposta.
+
+    A tela apontava para `/boot/v3/{id}/wallpaper`, que pede a chave de boot —
+    credencial que a sede não tem e que um `<img>` não conseguiria mandar. A
+    prévia nunca carregou em imagem nenhuma.
+    """
+    p = auth.principal(request, request.headers.get("authorization"), image_id=image)
+    if p is None and tk:
+        p = auth.identify(tk, image_id=image)
+    if p is None:
+        p = sessions.resolve(request.cookies.get(sessions.COOKIE, ""))
+    if p is None or not p.can_see_image(image):
+        raise HTTPException(401, "credencial ausente ou inválida")
+
+    d = store.site_image_dir(image)
+    meta = fsdb.read_json(d / "wallpaper.json")
+    if not meta or not (d / "wallpaper.png").is_file():
+        raise HTTPException(404, "sem wallpaper")
+    return FileResponse(
+        d / "wallpaper.png",
+        media_type=meta.get("content_type", "image/png"),
+        headers={"ETag": f'"{meta["md5"]}"'},
+    )
 
 
 @router.put("/site-images/{image}/wallpaper")

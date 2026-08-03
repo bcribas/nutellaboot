@@ -77,8 +77,16 @@ PUBLISH=${PUBLISH:-0}
 if [ "$FETCH_KEY" = 1 ]; then
     [ -n "$IMAGEROOT" ] || { echo "--fetch-key exige --imageroot" >&2; exit 1; }
     [ -n "$ADMIN_KEY" ] || { echo "--fetch-key exige --admin-key (ou NB3_ADMIN_KEY)" >&2; exit 1; }
-    API=${SERVER:-${NB3_BASE_URL:-https://nutellaboot.naquadah.com.br}}
-    BOOT_KEY=$(curl -sS --fail "$API/api/v1/images/$IMAGEROOT/boot-key" \
+    # sem padrao embutido: as irmas apontam para o ambiente de teste e esta
+    # apontava para producao. Pendrive e coisa que se grava uma vez e some pela
+    # sala — buscar a chave do servidor errado nao pode ser o comportamento
+    # padrao de ninguem.
+    API=${SERVER:-${NB3_BASE_URL:-}}
+    [ -n "$API" ] || {
+        echo "--fetch-key exige --server (ou NB3_BASE_URL): de qual servidor?" >&2
+        exit 1
+    }
+    BOOT_KEY=$(curl -sS --fail "$API/api/v1/site-images/$IMAGEROOT/boot-key" \
         -H "Authorization: Bearer $ADMIN_KEY" |
         sed -n 's/.*"boot_key":"\([^"]*\)".*/\1/p')
     [ -n "$BOOT_KEY" ] || { echo "não consegui obter a chave de boot de $IMAGEROOT" >&2; exit 1; }
@@ -104,7 +112,7 @@ trap 'rm -rf "$WORK"' EXIT
     if [ -n "$BOOT_KEY" ]; then
         echo "NB_BOOT_KEY=$BOOT_KEY"
     else
-        echo "#NB_BOOT_KEY=  # chave de boot da imagem (/api/v1/images/<id>/boot-key)"
+        echo "#NB_BOOT_KEY=  # chave de boot da imagem (/api/v1/site-images/<id>/boot-key)"
     fi
     [ -n "$SERVER" ] && echo "NB_SERVER=$SERVER"
     for h in ${HOSTS+"${HOSTS[@]}"}; do
@@ -215,12 +223,17 @@ if [ "$PUBLISH" = 1 ]; then
     mkdir -p "$REPO/data/usb"
     [ "$(readlink -f "$OUT")" = "$(readlink -f "$REPO/data/usb/$(basename "$OUT")")" ] ||
         cp -f "$OUT" "$REPO/data/usb/"
+    # publish_file() nunca levanta excecao (falha vira status: failed), entao
+    # sem o sys.exit o SSH fora do ar imprimia "failed" no meio da saida e o
+    # script terminava com "pronto:", como se tivesse publicado
     "$REPO/.venv/bin/python" -c "
 import sys; sys.path.insert(0, '$REPO')
 from server.app.services import publish
 e = publish.publish_file('$REPO/data/usb/$(basename "$OUT")', 'usb')
 print('   ', e['status'], e.get('url', e.get('error', '')))
-"
+if e.get('status') != 'done':
+    sys.exit('publicacao falhou: ' + str(e.get('error', e)))
+" || exit 1
 fi
 
 echo

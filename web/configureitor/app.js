@@ -205,11 +205,20 @@ function renderWallpaper(meta) {
   }
   $("#wallremove").disabled = !canEditWallpaper;
   const img = document.createElement("img");
-  img.src = `/boot/v3/${encodeURIComponent(api.imageId)}/wallpaper?v=${meta.md5}`;
+  img.src = api.wallpaperUrl(api.imageId, meta.md5);
   img.style.cssText = "max-width:320px;border-radius:8px;border:1px solid var(--line)";
   const info = document.createElement("div");
   info.className = "muted mono";
   info.textContent = `${(meta.size / 1024).toFixed(0)} kB · md5 ${meta.md5.slice(0, 12)}…`;
+  // sem isto, prévia quebrada é um ícone mudo — foi assim que ninguém percebeu
+  // que ela apontava para a rota da chave de boot
+  img.onerror = () => {
+    img.remove();
+    const aviso = document.createElement("div");
+    aviso.className = "muted";
+    aviso.textContent = t("wallpaper_preview_failed");
+    box.prepend(aviso);
+  };
   box.append(img, info);
 }
 

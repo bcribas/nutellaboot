@@ -12,48 +12,155 @@ Todos os comandos assumem que você está na raiz do repositório
 ## 1. Preparar o serviço
 
 Isso se faz uma vez por temporada, quando sai a nova imagem base do sistema
-(no caso da maratona, o Maratona Linux do ano).
+(no caso da maratona, o Maratona Linux do ano). O caminho inteiro, do arquivo
+`.raw` até uma máquina bootando:
 
-### 1.1 Criar o template
-
-O **template** é o conjunto de camadas base mais o formulário de configuração
-que as sedes vão preencher. As imagens das sedes derivam dele.
-
-```bash
-# cria o diretório do template com o esquema padrão de configuração
-tools/nb3-seed-testdata          # em ambiente de teste, já cria um pronto
+```
+imagem-mestre .raw  (dezenas de GB)
+   │
+   │  1.1  sudo nb3-gerar-squash --raw ... --name ... --publish
+   ▼
+camada base .squash  em data/blobs/  e no servidor de arquivos
+   │
+   │  1.2  nb3-nova-temporada --de <ano passado> --para <ano> --base <arquivo>
+   ▼
+MODELO da temporada  (base nova + telemetria, wifi e extras herdados)
+   │
+   │  1.3  nb3-camada-telemetria --model <ano> --publish    (se o agente mudou)
+   │  2.   criar a site-image de cada sede a partir do modelo
+   ▼
+SITE-IMAGE  →  GET /boot/v3/<sede>/manifest  →  a máquina baixa e monta
 ```
 
-Em produção, crie o diretório `data/templates/maratonalinux2604/` com um
-`template.json` (lista de camadas, pode começar vazia) e um `schema.json` (o
-formulário — copie de outro template ou gere com
-`server/app/services/default_schema.py`).
+### As camadas e seus papéis
 
-### 1.2 Gerar a camada base
+Cada camada diz o que é. Isso não é enfeite: é o que faz trocar a base
+substituir a certa, já que o nome do arquivo muda a cada temporada.
 
-Transforma a imagem-mestre do sistema (por exemplo, o Maratona Linux) num
-`.squash` e registra no template:
+| Papel | O que é | Onde fica na lista |
+|---|---|---|
+| `base` | o sistema operacional inteiro | **por último** |
+| `telemetry` | agente, tela de bloqueio, detecção de USB | na frente |
+| `wifi` | perfis de rede sem fio | na frente |
+| `extra` | pacotes, navegador, licenças, wallpaper | na frente |
+
+**A ordem é a prioridade no overlay: a primeira ganha.** A base fica por
+último justamente para perder para todas as personalizações — inverter faz o
+sistema base sobrescrever tudo, em silêncio.
+
+> Se você tem modelos de antes desta convenção, rode
+> `tools/nb3-migrate-roles --dry-run` e depois sem a flag. Ele deduz o papel
+> pelo nome do arquivo e pela posição, mostrando o antes/depois.
+
+### 1.1 Gerar a camada base
+
+Transforma a imagem-mestre num `.squash`:
 
 ```bash
-sudo tools/nb3-gerar-squash \
-    --raw /caminho/ubuntu-24.04-initial.raw \
-    --name icpc-latam2026
-
-# ou já publicando no template (precisa da chave de admin):
-sudo -E NB3_ADMIN_KEY=nb3a_... tools/nb3-gerar-squash \
-    --raw /caminho/ubuntu-24.04-initial.raw \
-    --name icpc-latam2026 \
-    --register maratonalinux2604 \
-    --server https://nutellaboot.naquadah.com.br
+sudo -E NB3_ADMIN_KEY=nb3a_... NB3_BASE_URL=https://nutellaboot.naquadah.com.br \
+    tools/nb3-gerar-squash \
+        --raw /caminho/ubuntu-24.04-initial.raw \
+        --name maratonalinux2026 \
+        --publish
 ```
 
 **Por que sudo:** o comando precisa de `losetup` e `mount` para abrir a
-partição raiz de dentro do arquivo `.raw`. É o único motivo.
+partição raiz de dentro do `.raw`. É o único motivo — todo o resto do fluxo
+roda como usuário comum.
 
-Demora bastante (a imagem tem alguns GB). No fim ele imprime o md5, que é o que
-o boot vai conferir em cada máquina.
+Demora bastante (dezenas de GB). No fim ele imprime o caminho, o md5 e o
+tamanho, e diz qual é o comando seguinte.
 
-### 1.3 Gerar o kernel e o initrd
+**Use `--publish`.** Sem ele a camada fica marcada para ser baixada da própria
+máquina de gestão — para a base, isso é a sala inteira puxando vários GB do
+mesmo servidor que responde à API durante a prova. Com `--publish`, o arquivo
+vai para o servidor de arquivos e é de lá que as máquinas baixam.
+
+O `--register <modelo>` registra direto num modelo que já existe, trocando a
+base dele. Para começar a temporada, prefira o passo seguinte.
+
+### 1.2 Criar o modelo da temporada
+
+O **modelo** é o conjunto de camadas mais o formulário que as sedes preenchem.
+Toda site-image deriva de um.
+
+Um comando faz a temporada inteira — duplica o modelo do ano passado
+(herdando telemetria, wifi, extras **e os cadeados do formulário**) e troca só
+a base:
+
+```bash
+export NB3_BASE_URL=https://nutellaboot.naquadah.com.br
+export NB3_ADMIN_KEY=nb3a_...
+
+# sempre veja antes o que vai acontecer
+tools/nb3-nova-temporada --de maratonalinux2404 --para maratona2026 \
+    --base data/blobs/maratonalinux2026.squash-2026-08-02-12-36 --dry-run
+
+# e então, de verdade
+tools/nb3-nova-temporada --de maratonalinux2404 --para maratona2026 \
+    --base data/blobs/maratonalinux2026.squash-2026-08-02-12-36 --publish
+```
+
+Ele imprime as camadas antes e depois, e confere no fim que sobrou **uma**
+base. O modelo do ano anterior **não é tocado**: as sedes que ainda usam
+aquele modelo seguem bootando o que bootam hoje.
+
+Casos que ele trata:
+
+- **primeira temporada** (não há modelo anterior): omita `--de`. Nasce só com
+  a base; a telemetria entra no passo 1.3.
+- **o modelo de destino já existe e está vazio** (resultado típico de um
+  registro que falhou): as camadas e os cadeados do `--de` são copiados, e só
+  então a base é trocada.
+- **regerar a base e registrar de novo**: continua com uma base só.
+
+Também dá para fazer pela tela, em `/admin/` → **Modelos** → *Partir de* — mas
+aí a camada base tem que ser adicionada à mão, com o md5 do arquivo.
+
+### Conferir que colou
+
+Este passo não é opcional. Até esta versão, um erro de digitação no nome do
+modelo fazia o registro falhar **em silêncio** (o `curl` devolvia código de
+sucesso num 404), e dava para terminar achando que registrou:
+
+```bash
+curl "$SERVER/api/v1/models/maratona2026" -H "Authorization: Bearer $ADMIN" |
+    python3 -m json.tool | grep -E '"file"|"role"'
+```
+
+Tem que aparecer a base nova, com `"role": "base"`, por último. Se a lista vier
+vazia, o registro não aconteceu — confira o nome do modelo em
+`GET /api/v1/models`.
+
+### 1.3 Embarcar a telemetria
+
+O agente, a tela de bloqueio e a regra que detecta pendrive moram em
+`client/telemetry/`, já no layout final do sistema de arquivos. Um comando os
+transforma em camada, publica e registra no modelo:
+
+```bash
+export NB3_BASE_URL=https://nutellaboot.naquadah.com.br
+export NB3_ADMIN_KEY=nb3a_...
+
+tools/nb3-camada-telemetria --dry-run                       # ver antes
+tools/nb3-camada-telemetria --model maratonalinux2604 --publish
+```
+
+Não precisa de root: o `-all-root` do `mksquashfs` grava tudo como `root:root`
+sem privilégio nenhum.
+
+O comando **remove do modelo a camada de telemetria anterior**. Sem isso, duas
+versões do agente disputariam `/usr/share/mlog/agent.sh` e a primeira da lista
+venceria em silêncio. Use `--manter-antiga` se quiser as duas (raramente é o
+que se quer).
+
+A camada entra na **posição 0**, na frente do sistema base — é a regra do
+overlay: a primeira ganha.
+
+Rode este comando toda vez que mexer em `client/telemetry/`. As máquinas pegam
+a versão nova no próximo boot; nada precisa ser feito nelas.
+
+### 1.4 Gerar o kernel e o initrd
 
 ```bash
 sudo tools/nb3-build-initrd --raw /caminho/ubuntu-24.04-initial.raw
@@ -68,7 +175,7 @@ máquina virtual: suba a imagem-mestre, copie `client/initramfs-tools/` para
 `/etc/initramfs-tools/`, rode `update-initramfs -c -k <versão>` e traga
 `vmlinuz` e `initrd.img` de volta para `client/build/`. O resultado é idêntico.
 
-### 1.4 Gravar o pendrive
+### 1.5 Gravar o pendrive
 
 ```bash
 # pendrive genérico: a sede é escolhida editando o arquivo na partição
@@ -96,7 +203,7 @@ Depois de gravado, o pendrive é uma partição FAT normal: monte em qualquer
 computador e edite `nutellaboot.conf` (sede, chave de boot) e `wifi.conf`
 (redes) com um editor de texto.
 
-### 1.5 Publicação de arquivos (files.mdp)
+### 1.6 Publicação de arquivos (files.mdp)
 
 Camadas têm vários GB e imagens de pendrive têm centenas de MB. Servir isso
 pela máquina de gestão significa uma sala inteira baixando do mesmo servidor
@@ -178,7 +285,7 @@ listagem, o que é oficial e o que é de terceiros.
 ### Uma de cada vez
 
 Abra `/admin/` no navegador, informe a chave de administração e preencha
-identificador, nome e template. A tela devolve, **uma única vez**, o token, a
+identificador, nome e modelo. A tela devolve, **uma única vez**, o token, a
 chave de máquina, a chave de boot e o link de configuração. Copie tudo antes de
 sair da página.
 
@@ -197,7 +304,7 @@ Se preferir travar (ou destravar) o papel de parede de uma imagem que já
 existe, use a API:
 
 ```bash
-curl -X PATCH https://nutellaboot.naquadah.com.br/api/v1/images/26spsp \
+curl -X PATCH https://nutellaboot.naquadah.com.br/api/v1/site-images/26spsp \
     -H "Authorization: Bearer $NB3_ADMIN_KEY" \
     -H 'Content-Type: application/json' \
     -d '{"wallpaper_locked": true}'
@@ -236,9 +343,18 @@ Guarde esse arquivo com cuidado — é a única cópia em claro dos tokens.
 tools/nb3-import-nb2 --dry-run          # mostra o que vai fazer
 tools/nb3-import-nb2                    # importa de verdade
 tools/nb3-import-nb2 --glob '25br*'     # só um subconjunto
+tools/nb3-migrate-roles --dry-run       # confira o papel deduzido de cada camada
+tools/nb3-migrate-roles                 # e grave
 ```
 
-Ele converte nome, template (inclusive detectando o perfil desbloqueado),
+**O `nb3-migrate-roles` não é opcional aqui.** O NutellaBoot 2 não tinha papel
+de camada; sem ele, a troca de base da temporada seguinte não reconhece a base
+importada, deixa as duas no modelo, e a máquina monta duas raízes sobrepostas
+sem erro em lugar nenhum. Importações feitas a partir desta versão já saem com
+papel — o comando existe para as anteriores. O `nb3-nova-temporada` e o
+`nb3-gerar-squash --register` recusam modelo com camada sem papel.
+
+Ele converte nome, modelo (inclusive detectando o perfil desbloqueado),
 valores de configuração, camadas extras e o wallpaper — se o arquivo estiver na
 cópia local do site. Tokens e senhas antigas **não** são importados: a senha de
 seeder do nb2 era `md5("qwer <sede>")`, derivável por qualquer pessoa. Cada
@@ -250,13 +366,13 @@ Nem toda imagem precisa passar por você. Um professor, um laboratório ou uma
 instituição pode criar a própria imagem com um **código de convite**. O código
 é a credencial: quem o recebe cria sozinho, dentro de uma cota que você define.
 
-**Passo 1 — marque ao menos um template como público.** Só templates públicos
-podem ser usados na criação por convite (os templates de prova bloqueados ficam
-privados, fora do alcance de terceiros). No `/admin/`, na seção de templates,
+**Passo 1 — marque ao menos um modelo como público.** Só modelos públicos
+podem ser usados na criação por convite (os modelos de prova bloqueados ficam
+privados, fora do alcance de terceiros). No `/admin/`, na seção de Modelos,
 clique em "Tornar público". Ou pela API:
 
 ```bash
-curl -X PATCH "$SERVER/api/v1/templates/generico" \
+curl -X PATCH "$SERVER/api/v1/models/generico" \
     -H "Authorization: Bearer $NB3_ADMIN_KEY" \
     -H 'Content-Type: application/json' \
     -d '{"public": true, "description": "Ubuntu genérico para laboratórios"}'
@@ -270,26 +386,61 @@ por imagem, e clique em gerar. Ou pela API:
 curl -X POST "$SERVER/api/v1/invites" \
     -H "Authorization: Bearer $NB3_ADMIN_KEY" \
     -H 'Content-Type: application/json' \
-    -d '{"count": 10, "max_images": 1, "build_quota": 5}'
+    -d '{"count": 10, "max_images": 1, "max_models": 2, "build_quota": 5,
+         "label": "Laboratório de Computação da UFXX"}'
 ```
 
-Cada código sai no formato `NB3-XXXX-XXXX`. Os campos: `count` (quantos códigos
-gerar), `max_images` (quantas imagens o código cria, padrão 1), `build_quota`
-(quantas camadas de pacotes cada imagem criada pode construir, padrão 5),
-`template` (opcional — fixa o template, senão a pessoa escolhe entre os
-públicos) e `expires_at` (opcional, epoch). Entregue o código por um canal
-privado.
+Cada código sai no formato `NB3-XXXX-XXXX-XXXX`. Os campos: `count` (quantos
+códigos gerar), `max_images` (quantas site-images o código cria, padrão 1),
+`max_models` (quantos modelos próprios, padrão 2), `build_quota` (quantas
+camadas de pacotes, padrão 5), `label` (nome amigável que aparece no console
+de quem recebe), `model` (opcional — fixa o modelo, senão a pessoa escolhe
+entre os públicos) e `expires_at` (opcional, epoch). Entregue o código por um
+canal privado.
+
+**O código é credencial de longa duração**, não um bilhete de uso único: é
+com ele que a pessoa volta ao console (veja a seção seguinte). Por isso os
+códigos novos têm três grupos (60 bits) em vez de dois; os antigos, de dois
+grupos, continuam valendo.
 
 **Passo 3 — a pessoa cria.** Ela abre `/criar/`, na aba "Tenho um código de
 convite", cola o código, escolhe um nome (que **não** pode começar com dígito),
-um nome de exibição e o template público. Ao criar, a tela devolve — **uma
+um nome de exibição e o modelo público. Ao criar, a tela devolve — **uma
 única vez** — o token, a chave de boot, a chave de máquina e os links prontos do
 configureitor e do painel. A partir daí ela cuida da própria imagem, e pode até
 instalar pacotes extras (ver [layer-builds.md](layer-builds.md)), dentro da
 cota do código.
 
+**Passo 4 — a pessoa volta.** O mesmo código abre um **console de
+sub-administração** em `/admin/`: a mesma tela que você usa, mostrando só o
+que é dela. Lá ela cria modelos próprios (partindo dos públicos), deriva
+outras site-images dentro da cota, monta camadas e vê as credenciais das
+imagens dela. Não vê convites, pedidos, publicação nem criação em massa, e não
+cria nome começando por dígito nem nome reservado.
+
 Para revisar ou revogar códigos, use a lista na seção Convites do `/admin/` (o
-botão "Revogar") ou `DELETE /api/v1/invites/<código>`.
+botão "Revogar") ou `DELETE /api/v1/invites/<código>`. **Atenção:** revogar
+tira o console de quem já criou coisas. Se o convite tiver objetos, a API
+responde 409 dizendo o que ficaria órfão e só apaga com `?force=true`. Para
+apenas tirar o acesso sem perder o histórico, prefira suspender:
+
+```bash
+curl -X POST "$SERVER/api/v1/owners/invite:NB3-XXXX-XXXX-XXXX/disable" \
+     -H "Authorization: Bearer $NB3_ADMIN_KEY" \
+     -H 'Content-Type: application/json' -d '{"disabled": true}'
+```
+
+Para ver quem são os sub-admins, quanto já usaram e aumentar a cota de alguém
+sem emitir um convite novo (que criaria uma segunda identidade e espalharia os
+objetos entre as duas):
+
+```bash
+curl "$SERVER/api/v1/owners" -H "Authorization: Bearer $NB3_ADMIN_KEY"
+
+curl -X PATCH "$SERVER/api/v1/owners/invite:NB3-XXXX-XXXX-XXXX/quotas" \
+     -H "Authorization: Bearer $NB3_ADMIN_KEY" \
+     -H 'Content-Type: application/json' -d '{"max_images": 5, "max_models": 3}'
+```
 
 ### Fila de pedidos (para quem não tem código)
 
@@ -319,11 +470,19 @@ protege — e um ajuste de proxy que você precisa garantir.
   criações; cada imagem criada só constrói `build_quota` camadas de pacotes.
   Estourou, a pessoa pede à administração para aumentar (ou você gera outro
   código).
-- **Namespace reservado.** Nomes começando com dígito são recusados na criação
-  por convite — continuam só da administração.
-- **Templates públicos, só os marcados.** Quem é de fora nunca parte de um
-  template de prova bloqueado.
-- **Limite de taxa por IP.** As rotas públicas (`/api/v1/public/images` e
+- **Namespace reservado.** Nomes começando com dígito são recusados para quem
+  entra por convite — em `/criar/` e também no console de sub-administração.
+  O mesmo vale para a lista de nomes da casa (`maratona`, `icpc`, `sbc`,
+  `admin`, …), configurável em `reserved_names` no `data/server.json`.
+- **Isolamento por dono.** Cada modelo e cada site-image guarda quem criou. O
+  que é de outro dono responde **404** para um sub-admin, não 403 — um 403
+  confirmaria que o nome está tomado, e nomes são livres por ordem de chegada.
+- **Erro de código limitado por IP.** Tentativa repetida de credencial de
+  console leva 429; sem isso, adivinhar um código seria só questão de tempo de
+  CPU alheio.
+- **Modelos públicos, só os marcados.** Quem é de fora nunca parte de um
+  modelo de prova bloqueado.
+- **Limite de taxa por IP.** As rotas públicas (`/api/v1/public/site-images` e
   `/api/v1/public/requests`) têm um limite por IP; uma rajada leva `429`.
 
 > **Ressalva importante de operação.** O limite de taxa enxerga o IP de quem
@@ -341,6 +500,32 @@ protege — e um ajuste de proxy que você precisa garantir.
 > O servidor usa o primeiro endereço de `X-Forwarded-For` como chave do limite.
 
 ## 3. Entregar a configuração para as pessoas
+
+### Entrar no console
+
+Informe a chave uma vez, em `/admin/` (ou na caixa de administração da página
+inicial). A partir daí o navegador guarda uma **sessão de 30 dias**:
+recarregar a página, abrir outra aba ou voltar no dia seguinte não pedem a
+chave de novo. A chave em si não fica guardada no navegador — o que fica é um
+cookie que nenhum script da página consegue ler.
+
+O mesmo vale para quem entra com código de convite: o código abre a sessão do
+console de sub-administração.
+
+**Sair** encerra a sessão daquele navegador. Se uma máquina se perdeu com a
+sessão aberta, dá para derrubar todas de uma vez:
+
+```bash
+curl -X DELETE "$SERVER/api/v1/session?all=true" \
+    -H 'X-NB-Console: 1' -b cookies.txt
+```
+
+E, como último recurso, **trocar a chave de administração derruba todas as
+sessões abertas com ela** — a identidade é reconferida a cada requisição.
+
+> Se você usava a versão anterior e a tela pedia a chave a cada recarregamento,
+> era um defeito: o console regravava o campo de login (vazio no carregamento)
+> por cima da chave guardada. Não é mais preciso contornar isso.
 
 ### A página inicial
 
@@ -415,11 +600,11 @@ Quem preferir a API:
 
 ```bash
 # ver os campos e o estado de cada cadeado
-curl https://nutellaboot.naquadah.com.br/api/v1/templates/maratonalinux2604/schema \
+curl https://nutellaboot.naquadah.com.br/api/v1/models/maratonalinux2604/schema \
     -H "Authorization: Bearer $NB3_ADMIN_KEY"
 
 # abrir a RAM mínima e fechar o fuso horário
-curl -X PUT https://nutellaboot.naquadah.com.br/api/v1/templates/maratonalinux2604/schema/locks \
+curl -X PUT https://nutellaboot.naquadah.com.br/api/v1/models/maratonalinux2604/schema/locks \
     -H "Authorization: Bearer $NB3_ADMIN_KEY" \
     -H 'Content-Type: application/json' \
     -d '{"locks": {"MINRAM": false, "TIMEZONE": true}}'
@@ -449,9 +634,9 @@ Como se define:
   pílula **Oficial/Livre** e um botão que alterna — é assim que você "volta uma
   imagem com tudo liberado", sem recriar nada nem invalidar links.
 
-Quais campos são obrigatórios em cada perfil é decisão do **template** (campos
+Quais campos são obrigatórios em cada perfil é decisão do **modelo** (campos
 marcados `locked` no `schema.json`), não da imagem. Ou seja: dá para ter um
-template de prova rígido e um template de laboratório mais frouxo.
+modelo de prova rígido e um modelo de laboratório mais frouxo.
 
 ### Wallpaper: agora é upload
 
@@ -494,11 +679,73 @@ não há botão de recarregar):
 - **borda vermelha**: em alerta (memória, carga ou swap acima do limite)
 - **borda cinza**: offline
 - **cadeado**: tela bloqueada
+- **contorno vermelho + 🔌**: dispositivo USB conectado nesta máquina
 
 O cartão mostra o time vinculado, o lugar, uso de memória, carga e estado do
-firewall. Clique duplo abre o detalhe com a telemetria completa.
+firewall. Clique duplo abre o detalhe, com duas abas: **Estado agora** (a
+telemetria completa) e **Logs** (o journal que a máquina envia).
 
-Filtros rápidos: todas, bloqueadas, em alerta, sem time, offline.
+Filtros rápidos: todas, com dispositivo, bloqueadas, em alerta, sem time,
+offline.
+
+### Pendrive e celular: a faixa vermelha
+
+Quando alguém conecta um **pendrive**, um **celular** (transferência de
+arquivos) ou liga **tethering** numa máquina, uma faixa vermelha aparece no
+topo do painel, pisca e apita — uma linha por dispositivo, com a máquina, o
+time, o modelo e a hora.
+
+**A faixa não some sozinha.** O dispositivo pode ser removido no segundo
+seguinte; o alerta fica até um fiscal clicar em *Dispensar*, e o clique é
+registrado com nome e hora. Quem espeta um pendrive por cinco segundos não
+escapa do registro. O alerta também sobrevive a reboot da máquina, a recarga da
+página e a reinício do servidor.
+
+O som só toca depois de você clicar em **🔔 Ativar som** (é uma regra do
+navegador, não uma escolha do sistema); a escolha fica guardada naquele
+computador.
+
+O que é detectado, e como:
+
+| Situação | Como é vista |
+|---|---|
+| Pendrive, HD externo, leitor de cartão | dispositivo de bloco no barramento USB |
+| Celular em modo de transferência (MTP/PTP) | propriedade `ID_MTP_DEVICE` ou interface de câmera |
+| Tethering pelo celular (RNDIS/CDC/NCM) | interface de rede que aparece no barramento USB |
+
+O **pendrive de boot não dispara o alarme** (é reconhecido pela label
+`NB3CFG`), porque em muitas salas ele fica espetado o dia todo. Dispositivo já
+conectado quando a máquina liga também é reportado.
+
+A detecção é feita por regra de `udev`, não por varredura: o ciclo de
+telemetria é de ~45 segundos e um pendrive espetado por dez segundos passaria
+batido.
+
+Para ver tudo o que já apareceu numa máquina, incluindo o que foi dispensado:
+
+```bash
+curl "$SERVER/api/v1/site-images/26spsp/machines/$MAC/alerts/history" \
+    -H "Authorization: Bearer $TOKEN"
+```
+
+### Logs da máquina
+
+Cada máquina envia o journal do boot na partida e, a cada 5 minutos, só o que
+apareceu desde o envio anterior. É o que responde "o que aconteceu naquela
+máquina às 14h32" **depois** que a prova acabou.
+
+No painel: clique duplo no cartão → aba **Logs**. Ou pela API:
+
+```bash
+curl "$SERVER/api/v1/site-images/26spsp/machines/$MAC/logs?tail=2000" \
+    -H "Authorization: Bearer $TOKEN"
+```
+
+A resposta traz também as confirmações dos comandos enviados àquela máquina
+(quando chegou e com que resultado).
+
+Não enche disco: o teto é de 1 MiB por envio e 2 MiB por máquina, mantendo
+sempre a parte mais recente. Cem máquinas cabem em 200 MB.
 
 ### Ações em massa
 
@@ -523,7 +770,7 @@ enviado pela API, junto com os logotipos das instituições. O vínculo aponta
 para uma entrada do roster:
 
 ```bash
-curl -X PUT "$SERVER/api/v1/images/26spsp/machines/$MAC/binding" \
+curl -X PUT "$SERVER/api/v1/site-images/26spsp/machines/$MAC/binding" \
     -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' \
     -d '{"user_id": "team-001"}'
@@ -543,7 +790,7 @@ placa de rede, aparece como máquina nova e o vínculo precisa ser refeito.
 
 ### Véspera
 
-- [ ] Camada base gerada e registrada no template (`nb3-gerar-squash`)
+- [ ] Camada base gerada e registrada no modelo (`nb3-gerar-squash`)
 - [ ] `vmlinuz` e `initrd.img` atualizados (`nb3-build-initrd`)
 - [ ] Pendrives gravados e testados em **pelo menos uma máquina real** da sede
 - [ ] `wifi.conf` com as redes da sede (e a rede reserva)
@@ -634,22 +881,41 @@ computador e edite.
 O `NB_BOOT_KEY` do `nutellaboot.conf` não bate com o da imagem. Pegue a atual:
 
 ```bash
-curl "$SERVER/api/v1/images/26spsp/boot-key" -H "Authorization: Bearer $NB3_ADMIN_KEY"
+curl "$SERVER/api/v1/site-images/26spsp/boot-key" -H "Authorization: Bearer $NB3_ADMIN_KEY"
 ```
 
 Se alguém rodou `boot-key/rotate`, **todos** os pendrives daquela imagem
-precisam ser atualizados.
+precisam ser atualizados. Por isso a rotação só existe por linha de comando: o
+console mostra a chave, mas não oferece um botão para trocá-la — é a única
+operação do sistema que invalida material já distribuído fisicamente.
 
-### "Nenhum disco utilizável"
+### A tela vermelha "NO DISK"
 
-O boot precisa de uma partição ext3/ext4/NTFS gravável com pelo menos ~14 GB
-livres, para o cache das camadas e a home persistente. Se a máquina só tem
-NTFS, o motivo mais comum é o Windows ter sido "desligado" com Fast Startup
-ligado: o sistema de arquivos fica marcado como em uso. Faça um desligamento
-completo (Shift + Desligar) e tente de novo.
+A máquina não achou onde guardar o sistema: precisa de uma partição
+ext3/ext4/NTFS gravável com pelo menos 15 GB **livres**, para o cache das
+camadas e a home persistente. Nada é apagado — só espaço livre é usado.
 
-O boot imprime na tela um relatório de cada partição encontrada e por que foi
-recusada.
+**A própria tela diz a causa provável e o que fazer.** Ela lista cada partição
+encontrada e por que foi recusada, e escolhe entre quatro diagnósticos:
+
+| O que a tela diz | O que fazer |
+|---|---|
+| `WINDOWS FAST STARTUP` | o Windows foi hibernado, não desligado, e deixou o disco travado. Iniciar o Windows e rodar `shutdown /s /t 0`, ou desligar o Fast Startup nas Opções de Energia |
+| `NOT ENOUGH FREE SPACE` | há disco, mas nenhum com 15 GB livres |
+| `THE DISK WAS NOT DETECTED AT ALL` | controladora em RAID / Intel RST; trocar para AHCI no setup da BIOS |
+| `NO SUPPORTED FILESYSTEM` | só exFAT/FAT32, ou partição com BitLocker (que não pode ser lida) |
+
+A máquina reinicia sozinha 60 segundos depois — tempo para ler ou fotografar a
+tela.
+
+As demais telas vermelhas seguem o mesmo padrão: `NO NETWORK` (cabo, switch,
+wifi), `NO SERVER` (nome do servidor, portal cativo, relógio da BIOS errado),
+`NO IMAGE` (falta `IMAGEROOT=` no pendrive), `LOW RAM`, `NO VM` e `REMOVED`.
+
+> As mensagens do boot são **em inglês**, em todas as sedes. É a única parte do
+> sistema que não é traduzida: quando a mensagem aparece, muitas vezes não há
+> rede nem disco para carregar um dicionário. A tela de bloqueio e o agente
+> continuam seguindo o campo *Idioma* do formulário.
 
 ### O wifi não conecta
 
@@ -670,7 +936,7 @@ naquele seeder morto.
 Confira quem está semeando:
 
 ```bash
-curl "$SERVER/api/v1/images/26spsp/seeders" -H "Authorization: Bearer $TOKEN"
+curl "$SERVER/api/v1/site-images/26spsp/seeders" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### O wallpaper não apareceu

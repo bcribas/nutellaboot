@@ -77,16 +77,17 @@ no meio de uma prova — abrir o arquivo e olhar sempre funciona.
 ```
 data/
 ├── server.json                  configuração global do servidor
-├── invites.json                 {"NB3-XXXX-XXXX": {max_images, used_images, build_quota, template, expires_at, note}}
+├── invites.json                 {"NB3-XXXX-XXXX-XXXX": {max_images, max_models, used_images, build_quota, model, label, expires_at, note}}
+├── owners/<invite_CODIGO>.json  sub-admin: {id, kind, label, created_at, last_seen, disabled?}
 ├── requests/<id>.json           pedidos de imagem (wanted_name, contact, note, status)
 ├── keys/
 │   ├── admin.json               {"keys":[{"id","sha256"}]}  — só hashes
 │   └── services.json            {"<nome>": {"sha256","scopes","images"}}
-├── templates/<nome>/
-│   ├── template.json            {"layers":[…], "public": bool, "description"}
+├── models/<nome>/
+│   ├── model.json               {"layers":[…], "public", "description", "owner", "derived_from", "created_at"}
 │   └── schema.json              formulário de configuração (rótulos pt/en/es) + `locked` por campo
-├── images/<id>/
-│   ├── image.json               id, fullname, template, namespace, unlocked, wallpaper_locked; nas de auto-atendimento também self_service e build_quota
+├── site-images/<id>/
+│   ├── image.json               id, fullname, model, namespace, unlocked, owner, wallpaper_locked; nas de auto-atendimento também self_service e build_quota
 │   ├── token                    nb3i_… — credencial do configureitor (0600)
 │   ├── machine.key              nb3m_… — credencial das máquinas (0600)
 │   ├── boot.key                 nb3b_… — credencial do pendrive (0600)
@@ -99,12 +100,15 @@ data/
 │   ├── roster/logos/<org>.svg   logotipos das instituições (svg ou png)
 │   ├── webhooks.json            destinos de eventos (0600, guarda o segredo)
 │   └── machines/<mac>/
-│       ├── machine.json         mac, first_seen, last_seen
-│       ├── status.json          última telemetria recebida
+│       ├── machine.json         mac, first_seen, last_seen, logs_at, logs_bytes
+│       ├── status.json          última telemetria recebida (sobrescrita, teto 256 kB)
 │       ├── binding.json         vínculo com o roster (user_id, seat)
 │       ├── lockstate.json       {locked, since, by}
 │       ├── queue/<ts>-<cid>.json  comandos pendentes (um arquivo cada)
-│       └── acks.log             confirmações, JSONL com teto de tamanho
+│       ├── acks.log             confirmações, JSONL com teto de tamanho
+│       ├── journal.log          journal do kernel/sistema, com teto de 2 MiB
+│       ├── alerts.json          alertas ABERTOS (pendrive, celular, tethering)
+│       └── alerts.log           histórico datado dos alertas, com quem dispensou
 ├── layerbuilds/
 │   ├── queue/<job>.json         pedidos de construção de camada
 │   ├── running/<job>.json+log   em andamento
@@ -166,7 +170,7 @@ virarem JSON, o boot para de funcionar em toda máquina já gravada.
 **4. Camadas extras vêm antes no manifest.** A ordem das linhas é a ordem dos
 `lowerdir` do overlayfs, e no overlayfs quem vem primeiro tem prioridade. É
 assim que uma camada extra sobrepõe um arquivo da imagem base. `store.image_layers()`
-concatena `layers-extra.json` **antes** das camadas do template — inverter
+concatena `layers-extra.json` **antes** das camadas do modelo — inverter
 isso faz a camada extra ser silenciosamente ignorada.
 
 **5. Toda string de interface nasce nos três idiomas.** As telas funcionam em
@@ -177,9 +181,9 @@ arquivos: uma string a menos em espanhol quebra a suíte.
 
 ### Onde ficam as travas
 
-A trava **por campo** vive no `schema.json` do template (a chave `locked` de
-cada campo) e vale para todas as imagens Oficiais daquele template; ela é
-editável pela tela do `/admin/` ou por `PUT /api/v1/templates/{nome}/schema/locks`,
+A trava **por campo** vive no `schema.json` do modelo (a chave `locked` de
+cada campo) e vale para todas as imagens Oficiais daquele modelo; ela é
+editável pela tela do `/admin/` ou por `PUT /api/v1/models/{nome}/schema/locks`,
 que só altera essa chave e preserva o resto do formulário. Já a trava do
 **papel de parede** é por imagem, no `wallpaper_locked` do `image.json`, e é
 verificada na rota de upload. As duas seguem a mesma regra: administração
@@ -196,7 +200,8 @@ Toda comparação usa `secrets.compare_digest`.
 
 | Classe | Prefixo | Como é enviada | O que pode |
 |---|---|---|---|
-| Administração | `nb3a_` | `Authorization: Bearer` | tudo: criar/apagar imagens, templates, camadas, webhooks, chaves de serviço |
+| Administração | `nb3a_` | `Authorization: Bearer` | tudo: criar/apagar imagens, modelos, camadas, webhooks, chaves de serviço |
+| Sub-administração | `NB3-…` (o próprio convite) | `Authorization: Bearer` | o mesmo console, restrito ao que ela criou; sem nomes reservados, sem convites/pedidos/publicação |
 | Serviço (MOJ) | `nb3s_` | `Authorization: Bearer` | só o que os escopos permitirem, e só nas imagens que o filtro de globs permitir |
 | Imagem | `nb3i_` | `Authorization: Bearer` | configurar a própria imagem, ver e comandar as máquinas dela |
 | Máquina | `nb3m_` | cabeçalho `X-NB-Machine-Key` | enviar telemetria, buscar comandos pelo long-poll, confirmar execução |
@@ -210,11 +215,44 @@ todas.
 O token de imagem só é reconhecido no contexto da própria imagem — apresentá-lo
 em outra rota não identifica ninguém.
 
+### Logs e alertas: dois canais, dois comportamentos
+
+A telemetria (`status.json`) é um **retrato do agora**: sobrescrita a cada
+~45 s, sem histórico. Isso resolve "como está a sala neste momento" e não
+resolve mais nada — e havia dois casos que precisavam de outra coisa.
+
+**Logs** (`journal.log`) são histórico: a máquina manda o journal do boot na
+partida e o incremento a cada 5 minutos. Respondem "o que aconteceu naquela
+máquina às 14h32" depois que a prova acabou. É o que o nb2 tinha e se perdeu na
+reescrita. Dois tetos, porque log enche disco em silêncio: 1 MiB por requisição
+(413 acima disso) e 2 MiB por máquina, mantendo a cauda — cem máquinas cabem em
+200 MB por construção.
+
+**Alertas** (`alerts.json`) são um estado que **espera ação humana**. Quando
+alguém conecta pendrive, celular ou tethering, o alerta entra e **fica até um
+fiscal dispensar** — não some quando o dispositivo é removido. Essa é a decisão
+central: quem espeta um pendrive por cinco segundos não pode escapar do
+registro. Consequências que caem dela:
+
+- o alerta vive em disco, não em memória do processo: sobrevive a reboot da
+  máquina, a recarga da página e a reinício do servidor;
+- dispensar grava quem foi e quando, no `alerts.log`;
+- **a máquina não dispensa o próprio alerta** (a chave de máquina não serve na
+  rota de dispensa): adulterar o agente não apaga o rastro;
+- a detecção é por regra de `udev`, não por varredura — o ciclo de telemetria
+  é de ~45 s e um pendrive espetado por dez segundos passaria batido.
+
+O `kind` do alerta não é validado contra uma lista fechada: o cliente pode
+ganhar um detector novo sem esperar uma versão do servidor. A lista conhecida
+(`usb.storage`, `usb.phone`, `usb.network`, `usb.other`) só serve para a tela
+traduzir e escolher o ícone.
+
 ### O código de convite: autorização, não identidade
 
 A criação de imagens por pessoas de fora usa um **código de convite**
-(`NB3-XXXX-XXXX`, em `data/invites.json`). É importante ser honesto sobre o que
-ele é: um mecanismo de **autorização**, não de **autenticação de identidade**.
+(`NB3-XXXX-XXXX-XXXX`, em `data/invites.json`). É importante ser honesto sobre
+o que ele é: um mecanismo de **autorização**, não de **autenticação de
+identidade**.
 Sem um provedor externo de identidade (e-mail verificado, OAuth, a conta do
 MOJ), o servidor não tem como saber *quem* é a pessoa do outro lado — o código
 *é* a credencial, exatamente como o token de imagem e a chave de boot. A
@@ -228,8 +266,9 @@ Por isso o abuso é contido por **cota e limite de taxa**, e não por identidade
 - as rotas públicas (`server/app/routers/public.py`) passam por um limite de
   taxa por IP (`server/app/services/ratelimit.py`), que só é confiável se o
   proxy repassar `X-Forwarded-For` — ver [operations.md](operations.md);
-- nomes reservados (dígito inicial) e templates não-públicos são recusados na
-  criação por convite.
+- nomes reservados (dígito inicial e a lista `reserved_names`) e modelos
+  não-públicos são recusados na criação por convite;
+- errar a credencial de console repetidamente leva 429, por IP.
 
 Imagens criadas assim recebem `self_service: true` e a `build_quota` herdada do
 código no `image.json`. O dono da imagem (o token dela) pode disparar builds de
@@ -239,11 +278,44 @@ Quem não tem código deixa um pedido (`data/requests/<id>.json`), que a
 administração aprova emitindo um código ou recusa. O pedido não cria nada
 sozinho.
 
+### Sub-admins: o convite como credencial de console
+
+O mesmo código também abre o console (`/admin/`) como **sub-admin**. Foi uma
+decisão deliberada: um cadastro separado (usuário e senha) exigiria
+recuperação de senha, verificação de e-mail e um lugar para guardar hashes —
+infraestrutura de identidade que este serviço não tem e não quer ter. O código
+já é o segredo entregue; reusá-lo evita inventar um segundo.
+
+Três consequências que valem registrar:
+
+1. **O registro do sub-admin é separado do convite.** O convite vive em
+   `invites.json`; a identidade em `data/owners/<slug>.json`. O campo `owner`
+   de cada modelo e site-image aponta para a identidade, então apagar o
+   convite (que é o que revoga o acesso) não deixa objetos apontando para o
+   nada. `POST /owners/{id}/disable` corta o acesso preservando tudo;
+   `DELETE /invites/{code}` exige `?force=true` quando há objetos.
+2. **O código nunca é gravado dentro da site-image.** Antes, `image.json`
+   guardava o campo `invite`; agora guarda só `owner`. Se o código continuasse
+   lá, quem tivesse apenas o token da imagem (que lê o `image.json` pelo
+   configureitor) poderia escalar para o console de sub-admin. A migração
+   `tools/nb3-migrate-names` remove o campo dos dados existentes.
+3. **Cotas contam varrendo o disco**, não por contador incrementado
+   (`services/owners.py`). Um contador que só sobe trava a cota depois de uma
+   limpeza feita por fora, e o erro só aparece quando alguém não consegue
+   criar sem motivo aparente.
+
+O isolamento vive em `services/ownership.py`, e a regra é: **o que é de outro
+dono responde 404, não 403**. Um 403 confirmaria que o nome está tomado, e
+nomes são livres por ordem de chegada — seria um oráculo de existência de
+graça. A exceção deliberada são os modelos públicos: visíveis e deriváveis por
+todos, mas somente leitura, porque soltar um cadeado neles derrubaria a trava
+de todas as sedes que usam o mesmo modelo.
+
 ### A chave de boot
 
 No NutellaBoot 2 os endpoints de boot eram completamente abertos: bastava
 saber o nome da sede para baixar a configuração inteira e o script de boot. No
-NutellaBoot 3 cada imagem tem uma **chave de boot** (`data/images/<id>/boot.key`),
+NutellaBoot 3 cada imagem tem uma **chave de boot** (`data/site-images/<id>/boot.key`),
 que o pendrive carrega no `nutellaboot.conf` e envia a cada requisição. Sem
 ela, o servidor não entrega manifest nem `stuff`.
 
@@ -266,7 +338,7 @@ Duas exceções continuam abertas, de propósito:
 Uma imagem sem o arquivo `boot.key` volta a ser aberta. Isso é o modo de
 depuração e desaparece assim que a imagem é criada pelo próprio nutellaboot3,
 que sempre gera a chave. Ao rotacionar a chave
-(`POST /api/v1/images/{img}/boot-key/rotate`), lembre-se de que **todo pendrive
+(`POST /api/v1/site-images/{img}/boot-key/rotate`), lembre-se de que **todo pendrive
 daquela imagem precisa ter o `nutellaboot.conf` atualizado** — é um arquivo de
 texto na partição FAT, mas ainda assim é preciso passar em cada um.
 
@@ -310,7 +382,7 @@ transformar o servidor em alvo de milhares de requisições.
 O agente faz uma requisição que **fica pendurada**:
 
 ```
-GET /api/v1/images/{img}/machines/{mac}/commands?wait=25
+GET /api/v1/site-images/{img}/machines/{mac}/commands?wait=25
 ```
 
 No servidor, `poll_commands` verifica a fila em disco; se estiver vazia, espera
@@ -354,7 +426,7 @@ e 50 máquinas pendendo simultaneamente atendidas em menos de 3 s.
 | Acesso ao boot | endpoints abertos: sabendo o nome da sede, qualquer um baixava configuração e script de boot | chave de boot por imagem, carregada no `nutellaboot.conf` do pendrive |
 | TLS | `--check-certificate=false` em todo download | certificado validado sempre; relógio acertado antes, para não falhar por data errada |
 | WiFi | suporte presente no initrd, mas desativado — o `stuff` sobrescrevia a função de rede e deixava de chamá-lo | rede é responsabilidade exclusiva do bootstrap, com espera real de associação; `wifi.conf` no pendrive é a fonte única |
-| Configuração travada | dois diretórios de template mantidos à mão (`…` e `…-desbloqueado`) | campo `locked` no `schema.json`, com validação no servidor |
+| Configuração travada | dois diretórios de modelo mantidos à mão (`…` e `…-desbloqueado`) | campo `locked` no `schema.json`, com validação no servidor |
 | Wallpaper | URL colada à mão; o servidor baixava ao salvar e uma URL ruim derrubava o salvamento inteiro (e podia travar o boot num prompt) | upload do arquivo, md5 calculado no envio; falha ao baixar nunca impede o boot |
 | Camada extra | tar manual do overlay em RAM, poda manual, mksquashfs manual, md5 copiado à mão | construção automática sem root (`unshare` + `squashfuse` + `fuse-overlayfs` + `bwrap`), com poda automática |
 | Credenciais em camada | camadas reais chegaram a ser publicadas com `/etc/shadow` dentro | poda neutraliza hashes de senha e remove backups de credencial |

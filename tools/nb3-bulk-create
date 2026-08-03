@@ -8,7 +8,7 @@
 #     26brbr<TAB>Brazilian Finals<TAB>maratonalinux2604
 #     26brspsp<TAB>SEDE: SP, São Paulo<TAB>maratonalinux2604
 #
-# O template pode ser omitido (usa o primeiro cadastrado). Linhas começando
+# O modelo pode ser omitido (usa o primeiro em ordem alfabética). Linhas começando
 # com # são ignoradas. Cada linha é independente: um id inválido não impede
 # as outras.
 
@@ -30,7 +30,7 @@ done
 [ -n "$ARQUIVO" ] && [ -f "$ARQUIVO" ] || { echo "informe o arquivo TSV" >&2; exit 1; }
 [ -n "$CHAVE" ] || { echo "defina NB3_ADMIN_KEY ou use --admin-key" >&2; exit 1; }
 
-curl -sS --fail-with-body -X POST "$SERVIDOR/api/v1/images/bulk?format=csv" \
+curl -sS --fail-with-body -X POST "$SERVIDOR/api/v1/site-images/bulk?format=csv" \
     -H "Authorization: Bearer $CHAVE" \
     -H 'Content-Type: text/tab-separated-values' \
     --data-binary "@$ARQUIVO"

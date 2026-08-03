@@ -1,4 +1,11 @@
-"""Configuração de webhooks e chaves de serviço (MOJ)."""
+"""Configuração de webhooks e chaves de serviço (MOJ).
+
+Tudo aqui é `require_admin`, diferente de config/roster/camadas, que o
+sub-admin dono administra. É de propósito: um webhook faz o servidor bater
+numa URL escolhida por quem o configura, de dentro da rede da máquina de
+gestão. Entregar isso a quem entrou por convite é dar um cliente HTTP na rede
+interna de graça.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +28,8 @@ EVENTOS = [
     "command.acked",
     "config.updated",
     "seeder.joined",
+    "alert.raised",
+    "alert.dismissed",
 ]
 
 ESCOPOS = [

@@ -10,7 +10,8 @@ projeto).
 É a terceira geração do sistema. As duas anteriores rodaram por anos em
 dezenas de sedes de maratona; esta reescreve o servidor em Python, enxuga o
 cliente, fecha as pontas soltas que doíam na operação e abre a criação de
-imagens para além da administração (por código de convite).
+imagens para além da administração (por código de convite, com console
+próprio).
 
 ```
 pendrive              servidor                         máquina da sala
@@ -39,43 +40,72 @@ pendrive              servidor                         máquina da sala
 | Wallpaper | URL colada à mão; falha derrubava o salvamento e travava o boot | upload do arquivo; falha no boot só registra e segue |
 | Pacotes extras | subir VM, instalar, `tar` do overlay em RAM, podar à mão, `mksquashfs`, editar arquivo no servidor | uma chamada de API; worker **sem root** com poda automática |
 | Tela de bloqueio | página remota, prefixo da sede fixo no código, `pkill` destravava | temas locais, dados do time em cache, relança sozinha, senha de emergência |
-| Configuração travada | dois diretórios de template mantidos em paralelo | um campo `locked` no esquema |
+| Configuração travada | dois diretórios de modelo mantidos em paralelo | um campo `locked` no esquema |
+| Modelos | diretório criado à mão no disco, sem rota para criar | criáveis pela tela, com "partir de" que herda camadas e formulário |
+| Quem administra | uma única chave, tudo ou nada | administração + sub-admins por convite, cada um com console próprio e cota |
 | Idiomas | só inglês | português, inglês e espanhol em todas as telas |
+| Entrar na administração | a chave colada a cada acesso | sessão de 30 dias em cookie; a chave não fica no navegador |
+| Erro no boot | uma linha cinza no meio do log do kernel, em português | tela cheia em inglês, com letras grandes, o que foi encontrado e o que fazer |
+| Telemetria embarcada | camada montada à mão, uma vez, em 2023 | um comando empacota, publica e registra `client/telemetry/` |
+| Logs da máquina | existiam no nb2 e sumiram | journal do boot + incremento a cada 5 min, com teto duplo |
+| Pendrive na prova | ninguém ficava sabendo | faixa vermelha no painel, com som, que só sai quando um fiscal dispensa |
 
 ## Começando
 
 ```bash
 cd nutellaboot3
 python3 -m venv .venv && .venv/bin/pip install -e .   # ou: pip install fastapi uvicorn[standard] python-multipart httpx
-tools/nb3-seed-testdata      # cria a chave de admin, um template e a imagem 'testes3'
+tools/nb3-init               # cria a chave de admin e a IMPRIME (uma vez só)
+tools/nb3-seed-testdata      # opcional: um modelo de exemplo e a imagem 'testes3'
 tools/nb3-dev                # sobe em http://127.0.0.1:8890
 ```
+
+Guarde a chave que o `nb3-init` imprime: em disco fica só o hash dela. Para uma
+instalação de verdade, esse é o único comando necessário — o
+`nb3-seed-testdata` existe para ter com o que brincar.
 
 Verificando:
 
 ```bash
 curl http://127.0.0.1:8890/api/v1/health
-curl -X POST --data "key=$(cat data/images/testes3/boot.key)" \
+curl -X POST --data "key=$(cat data/site-images/testes3/boot.key)" \
      http://127.0.0.1:8890/boot/v3/testes3/manifest
 ```
 
 Telas: `/` (página inicial que guia cada público e monta os links a partir do
 id + token), `/criar/` (criar a própria imagem com código de convite, ou pedir
-acesso), `/admin/` (imagens, credenciais, convites e pedidos),
+acesso), `/admin/` (console: modelos, site-images, credenciais, camadas e —
+para a administração — convites e pedidos),
 `/configureitor/?id=…&tk=…` (configuração da imagem), `/hotconfig/?id=…&tk=…`
 (painel do laboratório), `/lock/` (temas da tela de bloqueio), `/api/v1/docs`
 (API navegável).
 
 ## Quem cria imagens
 
-- **Administração** cria qualquer imagem (inclusive nomes reservados, que
-  começam com dígito — usados para eventos/contests como a Maratona) e gera
-  **códigos de convite**.
-- **Qualquer pessoa com um código** cria a própria imagem em `/criar/`, dentro
-  da cota do código, e pode até instalar pacotes extras (build de camada, com
-  quota por imagem). Sem código, deixa um **pedido** que a administração
-  aprova. Isso é contido por cota + rate limit + namespace reservado — ver
-  `docs/operations.md`.
+Dois conceitos, para o resto fazer sentido:
+
+- **modelo** — o que se configura uma vez: as camadas (sistema base,
+  telemetria, wifi, pacotes) e o formulário que cada sede preenche, com o
+  cadeado por campo;
+- **site-image** — a imagem derivada de um modelo, uma por sala ou sede, com
+  token, chaves e configuração próprias.
+
+E três papéis:
+
+- **Administração** cria modelos e qualquer site-image (inclusive nomes
+  reservados, que começam com dígito — usados para eventos como a Maratona),
+  publica modelos para outros usarem e gera **códigos de convite**.
+- **Sub-administração**: quem tem um código entra no **mesmo console**, em
+  `/admin/`, e vê só o que é dele. Cria modelos próprios (partindo dos
+  públicos), deriva site-images dentro da cota e monta camadas. Não cria nome
+  começando por dígito nem nome reservado, e não vê convites, pedidos nem
+  publicação. O código de convite é a credencial — não há cadastro separado.
+- **Coordenador de sede** recebe o link do configureitor e do painel; mexe na
+  configuração da imagem dele, respeitando os campos travados pelo modelo.
+
+Sem código, deixa um **pedido** que a administração aprova. O abuso é contido
+por cota + rate limit + namespace reservado + isolamento por dono — ver
+`docs/operations.md`.
 
 ## Mapa do repositório
 
@@ -89,7 +119,7 @@ client/
 web/                 telas em JavaScript puro, trilíngues
 tools/               tudo que se roda na mão (ver abaixo)
 docs/                documentação (comece por docs/operations.md)
-tests/               105 testes: pytest
+tests/               481 testes: pytest
 data/                o estado do servidor (não versionado)
 ```
 
@@ -97,12 +127,16 @@ data/                o estado do servidor (não versionado)
 
 | Comando | Para quê | Precisa de root? |
 |---|---|---|
+| `nb3-init` | prepara um servidor novo e emite a chave de administração | não |
 | `nb3-dev` | sobe o servidor de desenvolvimento | não |
 | `nb3-seed-testdata` | cria dados de teste | não |
 | `nb3-genusb` | gera a imagem do pendrive | **não** |
 | `nb3-run-test` | sobe uma VM que boota pelo servidor | não |
 | `nb3-qemu-shot` | tira screenshot do boot da VM | não |
 | `nb3-layer-worker` | constrói camadas extras (pacotes) | **não** |
+| `nb3-camada-telemetria` | empacota, publica e registra a telemetria | **não** |
+| `nb3-nova-temporada` | modelo do ano novo a partir do anterior, trocando a base | **não** |
+| `nb3-migrate-roles` | marca o papel das camadas já existentes | **não** |
 | `nb3-capture-upper` / `nb3-pack-upper` | camada pelo caminho da VM | não |
 | `nb3-bulk-create` | cria dezenas de imagens de um TSV | não |
 | `nb3-import-nb2` | importa as imagens do NutellaBoot 2 | não |
