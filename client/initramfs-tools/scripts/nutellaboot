@@ -75,8 +75,16 @@ nb_usb_livre() {
 
 nb_conf_value() {
     # Lê KEY=valor do nutellaboot.conf, sem aspas, primeira ocorrência.
+    #
+    # `sed -n 1p` e não `head -n1`: o initrd não tem `head`. Enquanto tinha, o
+    # pipe inteiro morria com "head: not found" e a função devolvia VAZIO para
+    # TUDO — IMAGEROOT, NB_BOOT_KEY, NB_SERVER. O pendrive genérico caía na
+    # tela "NO IMAGE" mesmo com o arquivo preenchido, o pendrive de sede
+    # ignorava o servidor configurado e ia para o padrão embutido, e a chave de
+    # boot nunca chegava ao servidor. Nada disso dava erro visível: só valores
+    # vazios, em silêncio.
     sed -n "s/^$1=//p" "$NB_RUN/nutellaboot.conf" 2> /dev/null |
-        tr -d "\"'" | head -n1
+        tr -d "\"'" | sed -n '1p'
 }
 
 nb_read_usbconfig() {
@@ -169,7 +177,8 @@ nb_write_wpaconf() {
 # tempo insuficiente para handshake WPA2 + DHCP, e o stuff servido ainda por
 # cima deixava de chamar esta função.
 configure_wifi() {
-    _iface=$(ip -o link | awk -F': ' '{print $2}' | grep -E '^w' | head -n1)
+    # sem `head` no initrd: o awk já resolve, e um pipe a menos
+    _iface=$(ip -o link | awk -F': ' '/: w/ {print $2; exit}')
     [ -z "$_iface" ] && return 1
     nb_write_wpaconf || [ -s /etc/wpa_supplicant.conf ] || return 1
 

@@ -7,6 +7,7 @@ Os caminhos são parametrizados no próprio script (NB_WPA_CONF, NB_HOSTS_FILE,
 NB_CFGMNT...), então exercitamos as funções DE VERDADE, não uma cópia delas.
 """
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -80,6 +81,71 @@ def test_bootstrap_is_valid_sh():
 def test_all_client_scripts_are_valid_sh():
     for path in CLIENT_SH:
         subprocess.run(["sh", "-n", str(path)], check=True)
+
+
+def test_le_o_pendrive_sem_head_no_caminho(tmp_path):
+    """O initrd não tem `head`, e a falta dele não aparece como erro: o pipe
+    morre com "head: not found" e a variável fica VAZIA.
+
+    Foi assim que todo valor do pendrive voltava em branco — o pendrive
+    genérico caía na tela "NO IMAGE" com o arquivo preenchido, e o de sede
+    ignorava o servidor configurado e ia para o padrão embutido. Visto num
+    boot de verdade em qemu, nunca por um teste.
+
+    Aqui o PATH tem só o mínimo, sem `head`: se alguém reintroduzir a
+    dependência, este teste cai.
+    """
+    magro = tmp_path / "bin"
+    magro.mkdir()
+    # o que o initrd de verdade tem (visto no boot em qemu): sed, tr, awk e
+    # grep rodaram; só `head` não estava lá
+    disponiveis = [
+        "sh", "sed", "tr", "awk", "grep", "cat", "cut", "sleep", "ip",
+        "mkdir", "rm", "cp", "mv", "sync",
+    ]
+    for nome in disponiveis:
+        alvo = shutil.which(nome)
+        if alvo:
+            (magro / nome).symlink_to(alvo)
+    assert not (magro / "head").exists()
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "nutellaboot.conf").write_text(
+        "# comentário\nIMAGEROOT=25brbr\nNB_BOOT_KEY=nb3b_abc\nNB_SERVER=https://exemplo.test/\n"
+    )
+    script = HARNESS + '\nnb_read_usbconfig; echo "I=$IMAGEROOT K=$NB_BOOT_KEY S=$NB_SERVER"'
+    r = subprocess.run(
+        ["sh", "-c", script],
+        capture_output=True,
+        text=True,
+        env={
+            "BOOTSTRAP": str(BOOTSTRAP),
+            "FAKEBIN": str(magro),
+            "PATH": str(magro),
+            "NB_RUN": str(run_dir),
+            "NB_HOSTS_FILE": str(tmp_path / "hosts"),
+            "NB_DEFAULTS_FILE": str(tmp_path / "defaults"),
+            "NB_CFG_TRIES": "1",
+            "NB_CFG_WAIT": "0",
+        },
+    )
+    assert "not found" not in r.stderr, r.stderr
+    assert "I=25brbr" in r.stdout, r.stdout
+    assert "K=nb3b_abc" in r.stdout, r.stdout
+    assert "S=https://exemplo.test" in r.stdout, r.stdout
+
+
+def test_nenhum_script_de_boot_depende_de_head():
+    """`head` volta a ser copiado pelo hook, mas nenhum script deve depender
+    dele: um initrd construído noutro ambiente pode não o ter, e a falha é
+    silenciosa."""
+    for path in CLIENT_SH:
+        # fora dos comentários: eles contam a história e citam o comando
+        codigo = "\n".join(
+            l for l in path.read_text().splitlines() if not l.lstrip().startswith("#")
+        )
+        assert "| head" not in codigo and "head -n" not in codigo, path.name
 
 
 def test_wpaconf_from_wifi_conf(sh):

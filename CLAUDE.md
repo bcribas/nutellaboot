@@ -204,6 +204,16 @@ O ambiente de teste tem um nginx externo que faz proxy de
 - No builder de camadas, a poda e o `mksquashfs` precisam rodar **dentro** do
   mesmo namespace de usuário: os arquivos do apt pertencem a subuids e não
   dão nem para apagar de fora.
+- **O initrd não tem `head`, e a falta dele não aparece.** `nb_conf_value`
+  terminava em `| head -n1`: o pipe morria com "head: not found" e a função
+  devolvia VAZIO para tudo que vem do pendrive — `IMAGEROOT`, `NB_BOOT_KEY`,
+  `NB_SERVER`. O pendrive genérico caía na tela "NO IMAGE" com o arquivo
+  preenchido, e o de sede ignorava o servidor configurado, indo para o padrão
+  embutido. Só apareceu num boot de verdade em qemu. Comando externo no
+  caminho de boot: confira se o hook o copia (`tests/test_bootstrap_shell.py`
+  roda com um PATH mínimo).
+- **`nb3-qemu-shot` com 2 GB não boota**: o kernel não descompacta um initrd de
+  185 MB e a tela fica parada em "Booting", sem erro. Use `--mem 4G`.
 
 ## Estilo
 

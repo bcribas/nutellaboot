@@ -30,6 +30,12 @@ copy_exec /usr/bin/wget /usr/bin/wget.good
 copy_exec /usr/bin/aria2c /usr/bin
 copy_exec /usr/bin/md5sum /usr/bin
 copy_exec /bin/bash /bin
+# `head` não vem no initramfs deste ambiente, e a falta dele não dá erro
+# visível: o pipe morre com "head: not found" e a variável fica vazia. Foi
+# assim que TODO valor lido do pendrive (IMAGEROOT, NB_BOOT_KEY, NB_SERVER)
+# voltava em branco. Os scripts deixaram de usá-lo; ele vem junto para que a
+# próxima linha que o use não repita a história.
+copy_exec /usr/bin/head /usr/bin
 
 # --- TLS DE VERDADE ---
 # O nb2 embutia um único certificado no stuff e depois desligava a verificação

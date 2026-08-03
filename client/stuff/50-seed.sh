@@ -11,7 +11,8 @@ NB_SEED_HEARTBEAT=${NB_SEED_HEARTBEAT:-60}
 
 seedimage() {
     log_begin_msg "Getting ready to seed"
-    MYIP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -n1)
+    # sem `head` no initrd (e o stuff roda dentro dele): o awk resolve sozinho
+    MYIP=$(ip -4 -o addr show scope global | awk '{split($4, a, "/"); print a[1]; exit}')
     [ -z "$MYIP" ] && {
         nb_warn "no IP address available for seeding"
         return 1
