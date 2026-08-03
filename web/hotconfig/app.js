@@ -11,13 +11,117 @@ let filter = "all";
 let source = null;
 let refreshTimer = null;
 
-const FILTERS = ["all", "locked", "alert", "unbound", "offline"];
+const FILTERS = ["all", "usb", "locked", "alert", "unbound", "offline"];
 const FILTER_LABEL = {
   all: "filter_all",
+  usb: "filter_usb",
   locked: "filter_locked",
   alert: "filter_alert",
   unbound: "filter_unbound",
   offline: "filter_offline",
+};
+
+// --- alertas de dispositivo -------------------------------------------------
+//
+// Som: nenhuma tela do projeto tocava áudio até aqui. O navegador só deixa
+// tocar depois de um gesto do usuário, então a barra tem um botão para armar,
+// e a escolha fica guardada. Um oscilador do WebAudio evita depender de
+// arquivo externo (a política de conteúdo das páginas publicadas bloquearia).
+let audioCtx = null;
+let alertaSoando = false;
+
+function somArmado() {
+  return localStorage.getItem("nb3-lab-som") === "1";
+}
+
+function armarSom() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    audioCtx.resume();
+    localStorage.setItem("nb3-lab-som", "1");
+    apitar();
+    atualizarBotaoSom();
+  } catch {
+    toast(t("sound_unavailable"), true);
+  }
+}
+
+function apitar() {
+  if (!audioCtx || !somArmado()) return;
+  const agora = audioCtx.currentTime;
+  for (const [i, freq] of [880, 660, 880].entries()) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.frequency.value = freq;
+    osc.type = "square";
+    gain.gain.value = 0.09;
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(agora + i * 0.18);
+    osc.stop(agora + i * 0.18 + 0.14);
+  }
+}
+
+function atualizarBotaoSom() {
+  const b = $("#soundbtn");
+  if (!b) return;
+  b.textContent = somArmado() ? t("sound_on") : t("sound_enable");
+  b.classList.toggle("primary", !somArmado());
+}
+
+function renderAlerts() {
+  const bar = $("#alertbar");
+  if (!bar) return;
+  const abertos = machines.flatMap((m) => usbAlerts(m).map((a) => ({ ...a, m })));
+  bar.classList.toggle("hidden", abertos.length === 0);
+  bar.innerHTML = "";
+  if (!abertos.length) {
+    alertaSoando = false;
+    return;
+  }
+
+  // apita ao aparecer alerta novo, não a cada redesenho
+  if (!alertaSoando) {
+    apitar();
+    alertaSoando = true;
+  }
+
+  for (const a of abertos.sort((x, y) => y.at - x.at)) {
+    const linha = document.createElement("div");
+    linha.className = "arow";
+    const quando = new Date(a.at * 1000).toLocaleTimeString();
+    const quem = teamLabel(a.m) ? `${teamLabel(a.m)} · ` : "";
+    linha.innerHTML = `<span class="awhat">${t(KIND_LABEL[a.kind] || "usb_other")}</span>
+      <span class="amac">${quem}${a.mac}</span>
+      <span>${[a.vendor, a.detail].filter(Boolean).join(" · ")}</span>
+      <span class="awhen">${quando}</span>`;
+    const btn = document.createElement("button");
+    btn.className = "small";
+    btn.textContent = t("dismiss");
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        await api.post(
+          `/api/v1/site-images/${api.imageId}/machines/${a.mac}/alerts/${a.id}/dismiss`,
+          {}
+        );
+        loadAll();
+      } catch (e) {
+        btn.disabled = false;
+        toast(`${t("error")}: ${e.message}`, true);
+      }
+    };
+    const espaco = document.createElement("span");
+    espaco.className = "spacer";
+    linha.append(espaco, btn);
+    bar.appendChild(linha);
+  }
+}
+
+const KIND_LABEL = {
+  "usb.storage": "usb_storage",
+  "usb.phone": "usb_phone",
+  "usb.network": "usb_network",
+  "usb.other": "usb_other",
 };
 
 function toast(msg, isError = false) {
@@ -31,6 +135,12 @@ function toast(msg, isError = false) {
 function isAlert(m) {
   const alerts = m.status?.sysresources?.alerts;
   return Array.isArray(alerts) && alerts.length > 0;
+}
+
+// Alerta aberto de dispositivo: veio do servidor e fica até alguém dispensar,
+// então sobrevive a reboot da máquina e a recarga da página.
+function usbAlerts(m) {
+  return Array.isArray(m.alerts) ? m.alerts : [];
 }
 
 function state(m) {
@@ -53,7 +163,8 @@ function matches(m) {
     if (!hay.includes(q)) return false;
   }
   if (filter === "locked") return m.lock?.locked;
-  if (filter === "alert") return isAlert(m);
+  if (filter === "usb") return usbAlerts(m).length > 0;
+  if (filter === "alert") return isAlert(m) || usbAlerts(m).length > 0;
   if (filter === "unbound") return !m.binding;
   if (filter === "offline") return !m.online;
   return true;
@@ -62,7 +173,11 @@ function matches(m) {
 function card(m) {
   const el = document.createElement("div");
   const st = state(m);
-  el.className = `mcard ${st}` + (m.lock?.locked ? " locked" : "") + (selected.has(m.mac) ? " sel" : "");
+  el.className =
+    `mcard ${st}` +
+    (m.lock?.locked ? " locked" : "") +
+    (usbAlerts(m).length ? " usb" : "") +
+    (selected.has(m.mac) ? " sel" : "");
   el.dataset.mac = m.mac;
 
   const team = teamLabel(m);
@@ -94,6 +209,7 @@ function card(m) {
 }
 
 function render() {
+  renderAlerts();
   const list = machines.filter(matches);
   const grid = $("#grid");
   grid.innerHTML = "";
@@ -113,8 +229,67 @@ function showDetail(m) {
   box.className = "detail";
   const inner = document.createElement("div");
   inner.innerHTML = `
-    <h2>${teamLabel(m) || t("no_team")} <span class="mono muted">${m.mac}</span></h2>
-    <pre>${JSON.stringify(m.status, null, 1)}</pre>`;
+    <h2>${teamLabel(m) || t("no_team")} <span class="mono muted">${m.mac}</span></h2>`;
+
+  // Duas abas: o estado de agora (a telemetria) e o histórico (o journal que a
+  // máquina manda a cada 5 minutos). O journal só é buscado quando alguém
+  // clica — são centenas de kB por máquina.
+  const abas = document.createElement("div");
+  abas.className = "tabs";
+  abas.style.cssText = "display:flex;gap:8px;margin:10px 0";
+  const painel = document.createElement("div");
+
+  const mostrarEstado = () => {
+    painel.innerHTML = `<pre>${JSON.stringify(m.status, null, 1)}</pre>`;
+  };
+  const mostrarLogs = async () => {
+    painel.innerHTML = `<p class="muted">${t("loading")}</p>`;
+    try {
+      const d = await api.get(
+        `/api/v1/site-images/${api.imageId}/machines/${m.mac}/logs?tail=800`
+      );
+      const pre = document.createElement("pre");
+      pre.textContent = d.journal || t("logs_none");
+      pre.style.cssText = "max-height:52vh;overflow:auto";
+      painel.innerHTML = "";
+      painel.appendChild(pre);
+      if (d.journal) {
+        const baixar = document.createElement("button");
+        baixar.className = "small";
+        baixar.textContent = t("logs_download");
+        baixar.onclick = () => {
+          const url = URL.createObjectURL(new Blob([d.journal], { type: "text/plain" }));
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${m.mac}-journal.txt`;
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+        painel.appendChild(baixar);
+      }
+    } catch (e) {
+      painel.innerHTML = `<p class="muted">${t("error")}: ${e.message}</p>`;
+    }
+  };
+
+  for (const [chave, acao] of [["tab_state", mostrarEstado], ["tab_logs", mostrarLogs]]) {
+    const b = document.createElement("button");
+    b.className = "small";
+    b.textContent =
+      chave === "tab_logs" && m.logs?.bytes
+        ? `${t(chave)} (${Math.round(m.logs.bytes / 1024)} kB)`
+        : t(chave);
+    b.onclick = () => {
+      abas.querySelectorAll("button").forEach((x) => x.classList.remove("on"));
+      b.classList.add("on");
+      acao();
+    };
+    abas.appendChild(b);
+  }
+  abas.firstChild.classList.add("on");
+  mostrarEstado();
+  inner.append(abas, painel);
+
   const close = document.createElement("button");
   close.textContent = t("close");
   close.onclick = () => box.remove();
@@ -178,6 +353,14 @@ function connectEvents() {
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(loadAll, 400);
   };
+  // O alerta não passa pelo debounce: 400 ms importa pouco para telemetria,
+  // mas aqui é o intervalo entre alguém espetar um pendrive e o fiscal ver.
+  source.addEventListener("alert.raised", () => {
+    clearTimeout(refreshTimer);
+    loadAll();
+  });
+  source.addEventListener("alert.dismissed", bump);
+
   for (const ev of [
     "machine.status",
     "machine.first_seen",
@@ -217,6 +400,20 @@ async function main() {
   $("#imginfo").textContent = api.imageId;
   renderFilters();
   $("#search").oninput = render;
+  $("#soundbtn").onclick = armarSom;
+  atualizarBotaoSom();
+  if (somArmado()) {
+    // o navegador só libera áudio depois de um gesto; o primeiro clique em
+    // qualquer lugar da página serve para reabrir o contexto
+    document.addEventListener("click", () => {
+      try {
+        audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        audioCtx.resume();
+      } catch {
+        /* navegador sem WebAudio: a faixa vermelha continua valendo */
+      }
+    }, { once: true });
+  }
   $("#selall").onclick = () => {
     machines.filter(matches).forEach((m) => selected.add(m.mac));
     render();
@@ -231,6 +428,7 @@ async function main() {
   document.addEventListener("nb3:langchange", () => {
     apply();
     renderFilters();
+    atualizarBotaoSom();
     render();
   });
 

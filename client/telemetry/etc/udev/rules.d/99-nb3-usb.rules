@@ -1,0 +1,27 @@
+# NutellaBoot 3 — avisa quando alguem conecta um dispositivo USB.
+#
+# Por que udev e nao varredura: o laco de telemetria roda a cada ~45 s. Um
+# pendrive espetado por dez segundos passaria batido, e e exatamente esse o
+# caso que interessa numa prova. A regra dispara no instante da conexao.
+#
+# O script apenas enfileira um arquivo em /home/.nb3/usb-events/ e sai; quem
+# fala com o servidor e o agente. Regra de udev que faz rede trava a fila de
+# eventos do sistema inteiro.
+
+# --- armazenamento (pendrive, HD externo, leitor de cartao) ---
+# O proprio pendrive de boot tem a label NB3CFG e NAO pode disparar o alarme:
+# em muitas salas ele fica espetado o dia todo.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_LABEL}!="NB3CFG", \
+    RUN+="/usr/share/mlog/usb-event.sh storage $env{ID_MODEL} $env{ID_VENDOR} $kernel"
+
+# --- celular em MTP (transferencia de arquivos) ou PTP (camera) ---
+ACTION=="add", SUBSYSTEM=="usb", ENV{ID_MTP_DEVICE}=="1", \
+    RUN+="/usr/share/mlog/usb-event.sh phone $env{ID_MODEL} $env{ID_VENDOR} mtp"
+ACTION=="add", SUBSYSTEM=="usb", ENV{ID_USB_INTERFACES}=="*:0601*:*", \
+    RUN+="/usr/share/mlog/usb-event.sh phone $env{ID_MODEL} $env{ID_VENDOR} ptp"
+
+# --- tethering: o celular vira placa de rede (RNDIS, CDC ether, NCM) ---
+# E a forma mais direta de contornar o firewall da sala, entao interessa tanto
+# quanto o pendrive.
+ACTION=="add", SUBSYSTEM=="net", ENV{ID_BUS}=="usb", \
+    RUN+="/usr/share/mlog/usb-event.sh network $env{ID_MODEL} $env{ID_VENDOR} $env{INTERFACE}"
