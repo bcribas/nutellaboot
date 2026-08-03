@@ -36,6 +36,8 @@ copy_exec /bin/bash /bin
 # voltava em branco. Os scripts deixaram de usá-lo; ele vem junto para que a
 # próxima linha que o use não repita a história.
 copy_exec /usr/bin/head /usr/bin
+# `stat` é o tamanho do arquivo para a barra de progresso do download
+copy_exec /usr/bin/stat /usr/bin
 
 # --- TLS DE VERDADE ---
 # O nb2 embutia um único certificado no stuff e depois desligava a verificação

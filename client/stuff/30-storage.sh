@@ -35,7 +35,10 @@ nutella_findblock() {
         fi
         rm -f "$BLOCKROOT/ml-test"
 
-        free=$(df "$BLOCKROOT" | tail -n1 | awk '{print $4}')
+        # `awk END` e não `| tail -n1 | awk`: `tail` tem a mesma chance de
+        # não existir no initrd que o `head` não tinha — e a falha seria a
+        # mesma, muda, com o espaço livre voltando vazio
+        free=$(df "$BLOCKROOT" | awk 'END {print $4}')
         if [ -d "$STORAGEDIR" ] && [ "$factoryreset" = y ]; then
             nb_warn "removing nutellaboot from $disk"
             rm -rf "$STORAGEDIR"

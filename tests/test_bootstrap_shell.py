@@ -7,6 +7,7 @@ Os caminhos são parametrizados no próprio script (NB_WPA_CONF, NB_HOSTS_FILE,
 NB_CFGMNT...), então exercitamos as funções DE VERDADE, não uma cópia delas.
 """
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -134,6 +135,109 @@ def test_le_o_pendrive_sem_head_no_caminho(tmp_path):
     assert "I=25brbr" in r.stdout, r.stdout
     assert "K=nb3b_abc" in r.stdout, r.stdout
     assert "S=https://exemplo.test" in r.stdout, r.stdout
+
+
+HOOK = REPO / "client" / "initramfs-tools" / "hooks" / "nutellaboot"
+
+# O que o initramfs-tools já põe no initrd (busybox/klibc) — visto rodando numa
+# máquina de verdade. `head` NÃO estava aqui, e foi o que apagou em silêncio
+# tudo que vinha do pendrive.
+DO_INITRD = {
+    "sh", "echo", "printf", "cat", "cp", "mv", "rm", "mkdir", "rmdir", "ln",
+    "ls", "sed", "awk", "grep", "tr", "cut", "sort", "uniq", "wc", "sleep",
+    "kill", "wait", "test", "true", "false", "sync", "chmod", "chown", "dd",
+    "mount", "umount", "mountpoint", "df", "free", "modprobe", "udevadm",
+    "ip", "hostname", "date", "readlink", "basename", "dirname", "mktemp",
+    "logger", "reboot", "poweroff", "run-parts", "find", "xargs", "id",
+    "sysctl", "swapoff", "mkswap", "touch", "seq", "env", "tee", "stty",
+}
+
+
+def _copiados_pelo_hook() -> set[str]:
+    nomes = set()
+    for m in re.finditer(r"copy_exec\s+(\S+)(?:\s+(\S+))?", HOOK.read_text()):
+        origem, destino = m.group(1), m.group(2) or ""
+        # `copy_exec /usr/bin/wget /usr/bin/wget.good` renomeia
+        nomes.add(Path(destino).name if destino and "." in Path(destino).name else Path(origem).name)
+    return nomes
+
+
+def _sem_heredoc(texto: str) -> str:
+    """Tira o corpo dos heredocs: aquilo é conteúdo escrito para dentro do
+    sistema montado (scripts de rc.local.d, arquivos de configuração), não
+    comando que roda no initrd."""
+    saida, pulando, fim = [], False, None
+    for linha in texto.splitlines():
+        if pulando:
+            if linha.strip() == fim:
+                pulando = False
+            continue
+        m = re.search(r"<<-?\s*'?([A-Za-z_][A-Za-z0-9_]*)'?", linha)
+        if m:
+            pulando, fim = True, m.group(1)
+        saida.append(linha)
+    return "\n".join(saida)
+
+
+def _comandos_usados(path: Path) -> set[str]:
+    """Comandos chamados DENTRO DE PIPE ou de substituição — que é onde a
+    ausência é muda.
+
+    Um comando inexistente no começo de uma linha ao menos imprime "not found"
+    e costuma derrubar o `if` que o cerca. Num pipe, não: o pedaço morre, a
+    saída vem vazia e o boot segue com a variável em branco. Foi assim com o
+    `| head -n1`, por 30 horas. Restringir a estes dois casos deixa o teste
+    quase sem falso positivo — e ele existe para essa classe de erro.
+    """
+    usados = set()
+    for linha in _sem_heredoc(path.read_text()).splitlines():
+        if linha.lstrip().startswith("#"):
+            continue
+        linha = re.sub(r"#.*$", "", linha)
+        # texto entre aspas não é comando: as mensagens do diskslog são cheias
+        # de `|` ("$disk|$fstype|mounted read-only")
+        linha = re.sub(r"'[^']*'", "''", linha)
+        linha = re.sub(r'"[^"]*"', '""', linha)
+        # padrão de `case`: `ext3 | ext4 | ntfs)` são rótulos, não pipes
+        if re.match(r"^\s*[\w*?.\[\]| -]+\)", linha):
+            continue
+        for m in re.finditer(r"(?:\|\s*|\$\(\s*)([a-z][a-z0-9._-]*)\s", linha):
+            usados.add(m.group(1))
+    return usados
+
+
+def test_todo_comando_do_caminho_de_boot_existe_no_initrd():
+    """A falha de um comando que não está lá é MUDA: o pipe morre, a variável
+    fica vazia e o boot segue com o valor errado. Foi assim com o `head`.
+
+    Se um comando novo aparecer, ou ele entra nesta lista (porque o initramfs
+    o traz) ou o hook passa a copiá-lo — as duas coisas são uma linha."""
+    conhecidos = DO_INITRD | _copiados_pelo_hook()
+    # funções do próprio projeto e palavras de shell não são comandos externos
+    definidas = set()
+    for path in CLIENT_SH:
+        definidas |= set(re.findall(r"^([a-z][a-z0-9_]*)\s*\(\)", path.read_text(), re.M))
+    definidas |= {
+        "log_begin_msg", "log_end_msg", "log_warning_msg", "log_failure_msg",
+        "panic", "configure_networking", "local_top", "local_premount",
+        "local_bottom", "wait_for_udev", "run_scripts",
+    }
+    palavras = {
+        "if", "then", "else", "elif", "fi", "for", "while", "until", "do",
+        "done", "case", "esac", "in", "function", "return", "exit", "shift",
+        "local", "set", "unset", "export", "read", "eval", "exec", "trap",
+        "break", "continue", "command", "type", "source", "cd", "pwd", "wait",
+        "kill", "jobs", "umask", "alias", "time", "let", "declare", "typeset",
+    }
+
+    faltando = {}
+    for path in CLIENT_SH:
+        for cmd in _comandos_usados(path) - conhecidos - definidas - palavras:
+            faltando.setdefault(cmd, []).append(path.name)
+    assert not faltando, (
+        "comandos sem garantia de existir no initrd: "
+        + "; ".join(f"{c} ({', '.join(sorted(set(f)))})" for c, f in sorted(faltando.items()))
+    )
 
 
 def test_nenhum_script_de_boot_depende_de_head():
