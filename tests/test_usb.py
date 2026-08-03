@@ -18,9 +18,12 @@ import os
 
 import pytest
 
+from pathlib import Path
+
 from server.app import fsdb
 from server.app.services import usb
 
+REPO = Path(__file__).resolve().parents[1]
 CONSOLE = {"X-NB-Console": "1"}
 
 # um "nb3-genusb" de mentira: gerar de verdade precisa de mtools, grub2 e de um
@@ -100,11 +103,11 @@ def sede(client, data_root, ha):
 
 
 def test_o_conf_tem_o_que_o_initrd_procura(data_root, sede):
-    """O initrd extrai com `sed -n "s/^CHAVE=//p"`. Um arquivo que ele não
-    entende é a tela "NO IMAGE" na sede, com a fila esperando."""
+    """O initrd extrai com `sed -n "s/^\\(set \\)\\{0,1\\}CHAVE=//p"`. Um arquivo
+    que ele não entende é a tela "NO IMAGE" na sede, com a fila esperando."""
     texto = usb.conf_text("sala1")
     linhas = {
-        l.split("=", 1)[0]: l.split("=", 1)[1]
+        l.split("=", 1)[0].removeprefix("set "): l.split("=", 1)[1].strip('"')
         for l in texto.splitlines()
         if l and not l.startswith("#") and "=" in l
     }
@@ -121,7 +124,9 @@ def test_o_conf_e_o_que_o_bootstrap_le_de_verdade(data_root, sede, tmp_path):
     arq.write_text(usb.conf_text("sala1"))
     for chave, esperado in (("IMAGEROOT", "sala1"), ("NB_BOOT_KEY", sede["boot_key"])):
         r = subprocess.run(
-            ["sed", "-n", f"s/^{chave}=//p", str(arq)], capture_output=True, text=True
+            ["sed", "-n", rf"s/^\(set \)\{{0,1\}}{chave}=//p", str(arq)],
+            capture_output=True,
+            text=True,
         )
         assert r.stdout.strip().strip("\"'") == esperado, chave
 
@@ -267,7 +272,7 @@ def test_baixar_o_conf_com_o_token_da_url(client, data_root, sede):
     tela de sede."""
     r = client.get(f"/api/v1/site-images/sala1/usb/conf?tk={sede['token']}")
     assert r.status_code == 200, r.text
-    assert "IMAGEROOT=sala1" in r.text
+    assert 'set IMAGEROOT="sala1"' in r.text
     assert sede["boot_key"] in r.text
     assert "attachment" in r.headers["content-disposition"]
 
@@ -386,3 +391,61 @@ def test_genusb_respeita_a_raiz_de_dados():
     texto = (Path(__file__).resolve().parents[1] / "tools" / "nb3-genusb").read_text()
     assert "DATA=${NB3_DATA_ROOT:-$REPO/data}" in texto
     assert "$REPO/data/usb" not in texto
+
+
+# --- o mesmo arquivo serve ao initrd E ao menu do GRUB ---
+
+
+def test_o_conf_e_script_valido_do_grub(data_root, sede, tmp_path):
+    """O GRUB não entende `IMAGEROOT=26spsp` — para ele isso é o nome de um
+    comando. Com `set` na frente o MESMO arquivo diz a sede ao sistema e ao
+    menu, sem um segundo arquivo para o operador copiar."""
+    import shutil
+    import subprocess
+
+    check = shutil.which("grub2-script-check") or shutil.which("grub-script-check")
+    if not check:
+        pytest.skip("sem grub-script-check para validar")
+    arq = tmp_path / "nutellaboot.conf"
+    arq.write_text(usb.conf_text("sala1"))
+    r = subprocess.run([check, str(arq)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+def test_o_parser_do_initrd_aceita_as_duas_formas(tmp_path):
+    """Pendrive já gravado tem o formato antigo e não pode parar de bootar.
+    (O caminho inverso — initrd antigo com arquivo novo — é o risco conhecido
+    e está avisado dentro do próprio arquivo.)"""
+    import re
+    import subprocess
+
+    bootstrap = (
+        REPO / "client" / "initramfs-tools" / "scripts" / "nutellaboot"
+    ).read_text()
+    sed = re.search(r'sed -n "(s/\^.*IMAGEROOT.*?)"', bootstrap.replace("$1", "IMAGEROOT"))
+    assert sed, "não achei o sed do nb_conf_value"
+
+    for texto, esperado in (("IMAGEROOT=antigo\n", "antigo"), ('set IMAGEROOT="novo"\n', "novo")):
+        arq = tmp_path / "c.conf"
+        arq.write_text(texto)
+        r = subprocess.run(
+            ["sh", "-c", f'sed -n "{sed.group(1)}" "{arq}" | tr -d "\\"\'" | sed -n 1p'],
+            capture_output=True,
+            text=True,
+        )
+        assert r.stdout.strip() == esperado, (texto, r.stdout)
+
+
+def test_o_grub_cfg_mostra_a_sede():
+    ferramenta = (REPO / "tools" / "nb3-genusb").read_text()
+    assert "source /nutellaboot.conf" in ferramenta
+    assert "nb3_sede" in ferramenta
+
+
+def test_o_bios_legado_tem_o_modulo_test():
+    """O grub-embed.cfg usa `[ -z "$root" ]`, e `test` não estava na lista de
+    módulos do core.img: em BIOS legado a busca reserva pela label morria com
+    "can't find command '['"."""
+    ferramenta = (REPO / "tools" / "nb3-genusb").read_text()
+    linha = [l for l in ferramenta.splitlines() if "biosdisk part_msdos" in l][0]
+    assert " test" in linha, linha

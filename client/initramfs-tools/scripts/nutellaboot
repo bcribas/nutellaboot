@@ -83,7 +83,12 @@ nb_conf_value() {
     # ignorava o servidor configurado e ia para o padrão embutido, e a chave de
     # boot nunca chegava ao servidor. Nada disso dava erro visível: só valores
     # vazios, em silêncio.
-    sed -n "s/^$1=//p" "$NB_RUN/nutellaboot.conf" 2> /dev/null |
+    # `\(set \)\{0,1\}`: o arquivo passou a usar `set CHAVE=valor`, que é o
+    # que o GRUB entende — assim o MESMO arquivo diz a sede ao sistema e ao
+    # menu de boot, sem um segundo arquivo para o operador copiar. O prefixo é
+    # OPCIONAL para que pendrive já gravado, no formato antigo, continue
+    # bootando.
+    sed -n "s/^\(set \)\{0,1\}$1=//p" "$NB_RUN/nutellaboot.conf" 2> /dev/null |
         tr -d "\"'" | sed -n '1p'
 }
 
@@ -125,7 +130,7 @@ nb_read_usbconfig() {
     # (usado no ambiente de teste em qemu, onde o host é 10.0.2.2, e em
     # espelhos locais durante a prova).
     if [ -f "$NB_RUN/nutellaboot.conf" ]; then
-        sed -n 's/^NB_HOSTS=//p' "$NB_RUN/nutellaboot.conf" | tr -d "\"'" |
+        sed -n 's/^\(set \)\{0,1\}NB_HOSTS=//p' "$NB_RUN/nutellaboot.conf" | tr -d "\"'" |
             while read -r _name _ip; do
                 [ -n "$_name" ] && [ -n "$_ip" ] && echo "$_ip $_name" >> "$NB_HOSTS_FILE"
             done

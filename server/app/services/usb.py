@@ -118,11 +118,17 @@ def _boot_fingerprint(image_id: str) -> str:
 
 
 def conf_text(image_id: str) -> str:
-    """As linhas que o initrd lê do pendrive (`nb_conf_value`, `^CHAVE=`).
+    """As linhas que o initrd lê do pendrive (`nb_conf_value`).
 
-    O formato é contrato de boot: `client/initramfs-tools/scripts/nutellaboot`
-    extrai com `sed -n "s/^CHAVE=//p"`. Um arquivo que ele não entende é a tela
-    "NO IMAGE" na sede, com a fila esperando.
+    O `set ` na frente não é enfeite: com ele o MESMO arquivo serve ao GRUB,
+    que só entende `set VAR=valor` (para ele, `IMAGEROOT=26spsp` é o nome de um
+    comando inexistente). É assim que o menu de boot passa a dizer a sede sem
+    pedir um segundo arquivo para o operador copiar.
+
+    O parser do initrd aceita o prefixo como OPCIONAL, então pendrive já
+    gravado continua bootando. O caminho inverso não vale: um initrd anterior a
+    esta mudança, com um arquivo novo, não acha a sede e para na tela "NO
+    IMAGE" — por isso o aviso está no próprio arquivo.
     """
     d = settings.data_root / "site-images" / image_id
     chave = (fsdb.read_text(d / "boot.key") or "").strip()
@@ -137,9 +143,13 @@ def conf_text(image_id: str) -> str:
             "# O initrd lê este arquivo, copia para a memória e desmonta a partição",
             "# logo no início: o pendrive pode ser retirado assim que a mensagem",
             "# aparecer na tela, e servir para a próxima máquina.",
-            f"IMAGEROOT={image_id}",
-            f"NB_BOOT_KEY={chave}",
-            f"NB_SERVER={settings.base_url}",
+            "#",
+            "# O `set` na frente faz este mesmo arquivo servir ao menu do GRUB.",
+            "# Precisa de um pendrive gerado a partir de agosto de 2026: num",
+            "# initrd mais antigo, use as linhas sem o `set`.",
+            f'set IMAGEROOT="{image_id}"',
+            f'set NB_BOOT_KEY="{chave}"',
+            f'set NB_SERVER="{settings.base_url}"',
             "",
         ]
     )

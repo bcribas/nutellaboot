@@ -111,15 +111,18 @@ trap 'rm -rf "$WORK"' EXIT
     echo "# O initrd lê este arquivo, copia para a memória e desmonta a"
     echo "# partição já no início do boot: o pendrive pode ser retirado assim"
     echo "# que a mensagem aparecer na tela."
-    [ -n "$IMAGEROOT" ] && echo "IMAGEROOT=$IMAGEROOT" || echo "#IMAGEROOT=25brbr"
+    echo "#"
+    echo "# O 'set' na frente faz este mesmo arquivo servir ao menu do GRUB,"
+    echo "# que so entende 'set VAR=valor'. O initrd aceita as duas formas."
+    [ -n "$IMAGEROOT" ] && echo "set IMAGEROOT=\"$IMAGEROOT\"" || echo "#set IMAGEROOT=\"25brbr\""
     if [ -n "$BOOT_KEY" ]; then
-        echo "NB_BOOT_KEY=$BOOT_KEY"
+        echo "set NB_BOOT_KEY=\"$BOOT_KEY\""
     else
-        echo "#NB_BOOT_KEY=  # chave de boot da imagem (/api/v1/site-images/<id>/boot-key)"
+        echo "#set NB_BOOT_KEY=\"\"  # chave de boot (/api/v1/site-images/<id>/boot-key)"
     fi
-    [ -n "$SERVER" ] && echo "NB_SERVER=$SERVER"
+    [ -n "$SERVER" ] && echo "set NB_SERVER=\"$SERVER\""
     for h in ${HOSTS+"${HOSTS[@]}"}; do
-        echo "NB_HOSTS=${h/=/ }"
+        echo "set NB_HOSTS=\"${h/=/ }\""
     done
 } > "$WORK/nutellaboot.conf"
 
@@ -142,15 +145,28 @@ cat > "$WORK/grub.cfg" << EOF
 set timeout=10
 set default=0
 
-menuentry "Maratona Linux (NutellaBoot 3)" {
+# A sede sai do MESMO arquivo que o sistema lê. O nutellaboot.conf usa
+# \`set CHAVE=valor\`, que é o que o GRUB entende — e o parser do initrd aceita
+# o \`set\` como opcional, então pendrive antigo continua bootando. Num arquivo
+# no formato antigo o \`source\` só não define nada, e o menu fica sem a sede.
+if [ -f /nutellaboot.conf ]; then
+	source /nutellaboot.conf
+fi
+if [ -n "\$IMAGEROOT" ]; then
+	set nb3_sede=" — \$IMAGEROOT"
+else
+	set nb3_sede=""
+fi
+
+menuentry "Maratona Linux\$nb3_sede" {
 	linux /vmlinuz $CMDLINE_BASE persistenthome=y
 	initrd /initrd.img
 }
-menuentry "Maratona Linux — limpar a home (clean home)" {
+menuentry "Maratona Linux\$nb3_sede — limpar a home (clean home)" {
 	linux /vmlinuz $CMDLINE_BASE persistenthome=y cleanhome=y
 	initrd /initrd.img
 }
-menuentry "Maratona Linux — modo live (sem home persistente)" {
+menuentry "Maratona Linux\$nb3_sede — modo live (sem home persistente)" {
 	linux /vmlinuz $CMDLINE_BASE persistenthome=n
 	initrd /initrd.img
 }
@@ -208,7 +224,7 @@ if [ "$BIOS" = 1 ]; then
         # A mesma config embutida do EFI: acha a partição pelo label e carrega
         # o grub.cfg editável de lá — nada depende de número de disco.
         grub2-mkimage -O i386-pc -p "()/" -c "$WORK/grub-embed.cfg" -o "$WORK/core.img" \
-            biosdisk part_msdos fat search search_label configfile normal linux echo
+            biosdisk part_msdos fat search search_label configfile normal linux echo test sleep
         # boot.img no setor 0 (preservando a tabela de partição) e core.img no
         # espaço livre entre a MBR e o início da partição (1 MiB).
         dd if="$BOOTIMG" of="$OUT" bs=446 count=1 conv=notrunc status=none
