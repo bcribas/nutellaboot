@@ -1,6 +1,6 @@
 """Esquema de configuração padrão das imagens da Maratona.
 
-O esquema é DADO, não código: fica em templates/<nome>/schema.json e pode ser
+O esquema é DADO, não código: fica em models/<nome>/schema.json e pode ser
 editado. Esta função só constrói o padrão inicial.
 
 Formato de cada campo:

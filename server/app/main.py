@@ -10,9 +10,12 @@ from .routers import (
     invites,
     layers,
     machines,
+    models,
     public,
     publish,
     roster,
+    session,
+    whoami,
     webhooks,
 )
 from .settings import REPO_ROOT, VERSION, settings
@@ -66,6 +69,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(boot.router)
+    app.include_router(models.router)
     app.include_router(images.router)
     app.include_router(config.router)
     app.include_router(machines.router)
@@ -75,6 +79,8 @@ def create_app() -> FastAPI:
     app.include_router(invites.router)
     app.include_router(public.router)
     app.include_router(publish.router)
+    app.include_router(session.router)
+    app.include_router(whoami.router)
 
     # squashfs construídos localmente (camadas extras) ficam disponíveis para
     # o boot baixar, com o md5 conferido pelo manifest.

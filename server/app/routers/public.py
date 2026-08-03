@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from ..services import invites, ratelimit, requests, store
+from ..services import invites, owners, ratelimit, requests, store
+from ..settings import settings
 
 router = APIRouter(prefix="/api/v1/public")
 
@@ -57,10 +58,13 @@ async def self_create_image(body: dict, request: Request) -> dict:
             # convite pode ter sido emitido como Oficial, e aí as travas do
             # model valem.
             unlocked=bool(inv.get("unlocked", True)),
+            # o dono é a identidade, NÃO o código: gravar o código aqui
+            # entregaria a credencial de console do sub-admin a quem tivesse
+            # só o token da imagem (que lê o image.json pelo configureitor)
+            owner=owners.owner_id(code),
             extra={
                 "self_service": True,
                 "build_quota": int(inv.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),
-                "invite": code,
                 "wallpaper_locked": bool(inv.get("wallpaper_locked", False)),
             },
         )
@@ -68,7 +72,10 @@ async def self_create_image(body: dict, request: Request) -> dict:
         raise HTTPException(400, str(e))
 
     invites.consume(code, image_id)
-    return created
+    owners.ensure(code)
+    # o mesmo código abre o console de sub-admin: quem criou volta para
+    # gerenciar o que é seu, sem cadastro separado
+    return {**created, "console_url": f"{settings.base_url}/admin/", "console_code": code}
 
 
 @router.post("/requests", status_code=201)

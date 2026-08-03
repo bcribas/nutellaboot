@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from .. import auth
-from ..services import invites, requests, store
+from ..services import invites, owners, requests, store
 
 router = APIRouter(prefix="/api/v1")
 
@@ -17,10 +17,12 @@ async def create_invite(body: dict, p=Depends(auth.require_admin)) -> dict:
         raise HTTPException(400, f"modelo '{model}' não existe")
     novos = invites.create(
         max_images=int(body.get("max_images", invites.DEFAULT_MAX_IMAGES)),
+        max_models=int(body.get("max_models", owners.DEFAULT_MAX_MODELS)),
         build_quota=int(body.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),
         model=model,
         expires_at=body.get("expires_at"),
         note=str(body.get("note", "")),
+        label=str(body.get("label", "")),
         count=int(body.get("count", 1)),
         unlocked=bool(body.get("unlocked", True)),
         wallpaper_locked=bool(body.get("wallpaper_locked", False)),
@@ -33,9 +35,23 @@ async def list_invites(p=Depends(auth.require_admin)) -> dict:
     return {"invites": invites.list_all()}
 
 
-@router.delete("/invites/{code}", status_code=204)
-async def delete_invite(code: str, p=Depends(auth.require_admin)) -> None:
+@router.delete("/invites/{code}")
+async def delete_invite(code: str, force: bool = False, p=Depends(auth.require_admin)) -> dict:
+    """Apagar o convite derruba o console do sub-admin — o código É a
+    credencial. Se já criou coisa, exige ?force=true e diz o que fica órfão,
+    para ninguém tirar o acesso sem perceber."""
+    oid = owners.owner_id(code)
+    modelos = store.list_models(owner=oid)
+    imagens = [i["id"] for i in store.list_site_images(owner=oid)]
+    if (modelos or imagens) and not force:
+        raise HTTPException(
+            409,
+            "este convite virou console de sub-admin; apagar tira o acesso a "
+            f"{len(modelos)} modelo(s) e {len(imagens)} site-image(s). "
+            "Prefira suspender (POST /owners/{id}/disable) ou repita com ?force=true",
+        )
     invites.delete(code)
+    return {"ok": True, "orphaned": {"models": modelos, "site_images": imagens}}
 
 
 # --- fila de pedidos (lado admin) ---
@@ -60,6 +76,7 @@ async def approve_request(rid: str, body: dict, p=Depends(auth.require_admin)) -
             build_quota=int(body.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),
             model=body.get("model"),
             note=f"pedido {rid}: {req.get('wanted_name', '')}",
+            label=str(req.get("wanted_name", "")),
             unlocked=bool(body.get("unlocked", True)),
         )[0]
         requests.set_status(rid, "approved", {"issued_code": code["code"]})

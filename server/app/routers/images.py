@@ -1,4 +1,5 @@
-"""CRUD de imagens (admin) + bulk + templates."""
+"""CRUD de site-images: criação (individual e em massa), credenciais e
+semeadores. Os modelos ficam em routers/models.py."""
 
 from __future__ import annotations
 
@@ -9,20 +10,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from .. import auth
-from ..models import BulkRequest, SiteImageCreate, SiteImagePatch, ModelLayers
-from ..services import seeders, store
+from ..models import BulkRequest, SiteImageCreate, SiteImagePatch
+from ..services import ownership, seeders, store
 
 router = APIRouter(prefix="/api/v1")
 
 
 @router.post("/site-images", status_code=201)
-async def create_image(body: SiteImageCreate, p=Depends(auth.require_admin)) -> dict:
+async def create_image(body: SiteImageCreate, p=Depends(auth.require_console)) -> dict:
+    erro = ownership.check_can_create(p, "site_images", body.id)
+    if erro:
+        raise HTTPException(403, erro)
+    if not ownership.can_use_model(p, body.model):
+        raise HTTPException(404, "modelo não existe")
     try:
         return store.create_site_image(
             body.id,
             body.fullname,
             body.model,
             unlocked=body.unlocked,
+            owner=p.owner,
             extra={"wallpaper_locked": bool(body.wallpaper_locked)} if body.wallpaper_locked else None,
         )
     except store.ImageError as e:
@@ -46,7 +53,7 @@ async def bulk_create(
     else:
         text = (await request.body()).decode()
         rows = []
-        default_template = store.list_models()[0] if store.list_models() else ""
+        modelo_padrao = store.list_models()[0] if store.list_models() else ""
         for ln, line in enumerate(text.splitlines(), 1):
             line = line.strip()
             if not line or line.startswith("#"):
@@ -58,7 +65,7 @@ async def bulk_create(
                 {
                     "id": parts[0].strip(),
                     "fullname": parts[1].strip(),
-                    "model": (parts[2].strip() if len(parts) > 2 else default_template),
+                    "model": (parts[2].strip() if len(parts) > 2 else modelo_padrao),
                     "unlocked": False,
                 }
             )
@@ -67,7 +74,11 @@ async def bulk_create(
     for row in rows:
         try:
             created = store.create_site_image(
-                row["id"], row["fullname"], row["model"], unlocked=row.get("unlocked", False)
+                row["id"],
+                row["fullname"],
+                row["model"],
+                unlocked=row.get("unlocked", False),
+                extra=({"wallpaper_locked": True} if row.get("wallpaper_locked") else None),
             )
             results.append({"ok": True, **created})
         except store.ImageError as e:
@@ -94,8 +105,8 @@ async def bulk_create(
 
 
 @router.get("/site-images")
-async def list_images(prefix: str = "", p=Depends(auth.require_admin)) -> dict:
-    return {"images": store.list_site_images(prefix)}
+async def list_images(prefix: str = "", p=Depends(auth.require_console)) -> dict:
+    return {"images": ownership.visible_site_images(p, prefix)}
 
 
 @router.get("/site-images/{image}")
@@ -104,53 +115,63 @@ async def get_site_image(image: str, p=Depends(auth.require_image_access())) -> 
 
 
 @router.patch("/site-images/{image}")
-async def patch_image(image: str, body: SiteImagePatch, p=Depends(auth.require_admin)) -> dict:
-    if not store.site_image_exists(image):
-        raise HTTPException(404, "imagem não existe")
+async def patch_image(image: str, body: SiteImagePatch, p=Depends(auth.require_console)) -> dict:
+    _minha(p, image)
+    campos = body.model_dump()
+
+    if campos.get("model") and not ownership.can_use_model(p, campos["model"]):
+        # sem esta checagem, um sub-admin apontaria a imagem dele para um
+        # modelo privado da administração e levaria as camadas dele junto
+        raise HTTPException(404, "modelo não existe")
+
+    if campos.get("unlocked") is not None and p.kind != "admin":
+        # o perfil (Oficial × Livre) vem do convite: deixar o dono virar a
+        # chave sozinho anularia todos os cadeados de uma imagem de prova
+        raise HTTPException(403, "só a administração muda o perfil da imagem")
+
+    if campos.get("build_quota") is not None and p.kind != "admin":
+        # cota que o próprio dono aumenta não é cota
+        raise HTTPException(403, "só a administração muda a cota de builds")
+
     try:
-        return store.patch_site_image(image, body.model_dump())
+        return store.patch_site_image(image, campos)
     except store.ImageError as e:
         raise HTTPException(400, str(e))
 
 
 @router.delete("/site-images/{image}", status_code=204)
-async def delete_image(image: str, p=Depends(auth.require_admin)) -> None:
-    if not store.site_image_exists(image):
-        raise HTTPException(404, "imagem não existe")
+async def delete_image(image: str, p=Depends(auth.require_console)) -> None:
+    _minha(p, image)
     store.delete_site_image(image)
 
 
 @router.post("/site-images/{image}/token/rotate")
-async def rotate_token(image: str, p=Depends(auth.require_admin)) -> dict:
-    if not store.site_image_exists(image):
-        raise HTTPException(404, "imagem não existe")
+async def rotate_token(image: str, p=Depends(auth.require_console)) -> dict:
+    _minha(p, image)
     return {"token": store.rotate_token(image)}
 
 
 @router.get("/site-images/{image}/credentials")
-async def get_credentials(image: str, p=Depends(auth.require_admin)) -> dict:
+async def get_credentials(image: str, p=Depends(auth.require_console)) -> dict:
     """Token, chaves e links prontos da imagem — para o admin entregar ao
     coordenador sem precisar rotacionar nada (o que invalidaria links já
     distribuídos)."""
-    if not store.site_image_exists(image):
-        raise HTTPException(404, "imagem não existe")
+    _minha(p, image)
     return store.credentials(image)
 
 
 @router.get("/site-images/{image}/boot-key")
-async def get_boot_key(image: str, p=Depends(auth.require_admin)) -> dict:
+async def get_boot_key(image: str, p=Depends(auth.require_console)) -> dict:
     """Chave que vai no nutellaboot.conf do pendrive desta imagem."""
-    if not store.site_image_exists(image):
-        raise HTTPException(404, "imagem não existe")
+    _minha(p, image)
     return {"boot_key": store.boot_key(image)}
 
 
 @router.post("/site-images/{image}/boot-key/rotate")
-async def rotate_boot_key(image: str, p=Depends(auth.require_admin)) -> dict:
+async def rotate_boot_key(image: str, p=Depends(auth.require_console)) -> dict:
     """Troca a chave de boot. Depois disso, os pendrives daquela imagem
     precisam ter o nutellaboot.conf atualizado — senão param de bootar."""
-    if not store.site_image_exists(image):
-        raise HTTPException(404, "imagem não existe")
+    _minha(p, image)
     return {"boot_key": store.rotate_boot_key(image)}
 
 
@@ -164,80 +185,8 @@ async def remove_seeder(image: str, ip: str, p=Depends(auth.require_image_access
     seeders.leave(image, ip)
 
 
-@router.get("/models")
-async def list_models(p=Depends(auth.require_admin)) -> dict:
-    return {
-        "templates": [
-            {"name": n, "public": store.model_is_public(n)} for n in store.list_models()
-        ]
-    }
-
-
-@router.get("/models/{name}/schema")
-async def get_template_schema(name: str, p=Depends(auth.require_admin)) -> dict:
-    """Campos do model com o estado do cadeado — alimenta a tela onde o
-    admin escolhe o que as sedes podem ou não mudar."""
-    if not store.model_exists(name):
-        raise HTTPException(404, "model não existe")
-    schema = store.get_schema(name)
-    return {
-        "name": name,
-        "fields": [
-            {
-                "key": f["key"],
-                "type": f.get("type"),
-                "label": f.get("label"),
-                "locked": bool(f.get("locked")),
-            }
-            for f in schema.get("fields", [])
-        ],
-    }
-
-
-@router.put("/models/{name}/schema/locks")
-async def put_schema_locks(name: str, body: dict, p=Depends(auth.require_admin)) -> dict:
-    """Liga/desliga o cadeado de campos. Vale para as imagens Oficiais deste
-    model (as Livres continuam editando tudo)."""
-    if not store.model_exists(name):
-        raise HTTPException(404, "model não existe")
-    locks = body.get("locks")
-    if not isinstance(locks, dict) or not locks:
-        raise HTTPException(400, "esperava {locks: {CAMPO: true|false}}")
-    try:
-        store.set_schema_locks(name, locks)
-    except store.ImageError as e:
-        raise HTTPException(400, str(e))
-    return await get_template_schema(name, p)
-
-
-@router.patch("/models/{name}")
-async def patch_template(name: str, body: dict, p=Depends(auth.require_admin)) -> dict:
-    """Marca um model como público (disponível para criação por convite) e
-    ajusta a descrição. Templates de prova bloqueados ficam privados."""
-    if not store.model_exists(name):
-        raise HTTPException(404, "model não existe")
-    store.set_model_meta(
-        name, public=body.get("public"), description=body.get("description")
-    )
-    return {"name": name, "public": store.model_is_public(name)}
-
-
-@router.get("/models/{name}")
-async def get_model(name: str, p=Depends(auth.require_admin)) -> dict:
-    tpl = store.get_model(name)
-    if tpl is None:
-        raise HTTPException(404, "model não existe")
-    return tpl
-
-
-@router.put("/models/{name}/layers")
-async def put_template_layers(
-    name: str, body: ModelLayers, p=Depends(auth.require_admin)
-) -> dict:
-    if not store.model_exists(name):
-        raise HTTPException(404, "model não existe")
-    for layer in body.layers:
-        if not {"md5", "file"} <= set(layer):
-            raise HTTPException(400, "cada camada precisa de md5 e file")
-    store.set_model_layers(name, body.layers)
-    return {"ok": True, "layers": len(body.layers)}
+def _minha(p, image: str) -> None:
+    """404 e não 403 quando a imagem é de outro dono: um 403 confirmaria que o
+    nome existe, e nomes são livres por ordem de chegada."""
+    if not ownership.can_manage_site_image(p, image):
+        raise HTTPException(404, "imagem não existe")

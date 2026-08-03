@@ -82,10 +82,22 @@ async function main() {
   $("#go_config").onclick = () => open("configureitor");
   $("#go_hot").onclick = () => open("hotconfig");
 
-  $("#go_admin").onclick = () => {
+  $("#go_admin").onclick = async () => {
     const key = $("#akey").value.trim();
-    if (key) api.setAdminKey(key);
-    location.href = "/admin/";
+    // sem chave: pode já haver sessão aberta, então o console decide
+    if (!key) {
+      location.href = "/admin/";
+      return;
+    }
+    $("#go_admin").disabled = true;
+    try {
+      await api.login(key);
+      $("#akey").value = "";
+      location.href = "/admin/";
+    } catch (e) {
+      $("#go_admin").disabled = false;
+      alert(`${t("error")}: ${e.message}`);
+    }
   };
   $("#akey").onkeydown = (e) => e.key === "Enter" && $("#go_admin").click();
 

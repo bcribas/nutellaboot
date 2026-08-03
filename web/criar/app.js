@@ -1,5 +1,6 @@
 // Criar imagem por auto-atendimento: com código de convite (cria na hora) ou
 // sem código (envia um pedido para a administração aprovar).
+import * as api from "/common/api.js";
 import { init, t, apply } from "/common/i18n.js";
 
 const $ = (s) => document.querySelector(s);
@@ -58,6 +59,16 @@ function showResult(info) {
   open.href = info.configureitor_url;
   open.textContent = t("home_coord_open_config");
   card.appendChild(open);
+
+  if (info.console_code) {
+    const console_ = document.createElement("button");
+    console_.className = "btn";
+    console_.style.marginTop = "12px";
+    console_.style.marginLeft = "8px";
+    console_.textContent = t("console_enter");
+    console_.onclick = () => entrarNoConsole(info.console_code);
+    card.appendChild(console_);
+  }
   box.appendChild(card);
   box.scrollIntoView({ behavior: "smooth" });
 }
@@ -132,6 +143,24 @@ async function sendRequest() {
   }
 }
 
+// O mesmo código que cria a imagem é a credencial do console de sub-admin —
+// quem já criou não precisa de outra senha para voltar.
+// O mesmo código que cria a imagem abre o console de sub-admin. Ele é trocado
+// por um cookie de sessão aqui, então não fica guardado no navegador.
+async function entrarNoConsole(code) {
+  code = (code || $("#code").value).trim().toUpperCase();
+  if (!code) {
+    toast(t("create_bad_code"), true);
+    return;
+  }
+  try {
+    await api.login(code);
+    location.href = "/admin/";
+  } catch (e) {
+    toast(`${t("error")}: ${e.message}`, true);
+  }
+}
+
 function tab(which) {
   $("#tab_code").classList.toggle("on", which === "code");
   $("#tab_req").classList.toggle("on", which === "req");
@@ -145,6 +174,7 @@ async function main() {
   $("#tab_code").onclick = () => tab("code");
   $("#tab_req").onclick = () => tab("req");
   $("#go").onclick = create;
+  $("#go_console").onclick = () => entrarNoConsole();
   $("#send").onclick = sendRequest;
   document.addEventListener("nb3:langchange", apply);
 }

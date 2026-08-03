@@ -1,4 +1,9 @@
-"""Acesso ao banco-filesystem de imagens e templates.
+"""Acesso ao banco-filesystem de modelos e site-images.
+
+Um **modelo** é o que se configura uma vez: as camadas (telemetria, wifi,
+pacotes) e o formulário (schema.json, com os cadeados por campo). Uma
+**site-image** é derivada de um modelo — uma por sala/sede, com token, chaves
+e configuração próprias.
 
 Todo o resto do servidor fala com o disco através deste módulo.
 """
@@ -7,12 +12,27 @@ from __future__ import annotations
 
 import re
 import shutil
+import time
 from pathlib import Path
 
 from .. import auth, fsdb
 from ..settings import settings
 
 IMAGE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
+# nome de modelo vira nome de diretório: validar antes de qualquer escrita
+MODEL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,48}$")
+
+
+def reserved_names() -> set[str]:
+    """Nomes exatos que ninguém além da administração pode tomar. Sem isto,
+    'livre por ordem de chegada' significa que o primeiro a chegar leva
+    'maratona' ou 'icpc'."""
+    padrao = ["admin", "api", "boot", "www", "root", "maratona", "icpc", "sbc", "nutellaboot"]
+    return {n.lower() for n in server_conf().get("reserved_names", padrao)}
+
+
+def name_is_reserved(name: str) -> bool:
+    return bool(reserved_re().match(name)) or name.lower() in reserved_names()
 
 
 def server_conf() -> dict:
@@ -34,16 +54,28 @@ def model_exists(name: str) -> bool:
     return (model_dir(name) / "model.json").is_file()
 
 
-def list_models() -> list[str]:
+def list_models(owner: str | None = None) -> list[str]:
+    """Nomes dos modelos. Com `owner`, só os daquele dono — é assim que o
+    console de um sub-admin enxerga apenas o que ele criou."""
     base = settings.data_root / "models"
     if not base.is_dir():
         return []
-    return sorted(p.name for p in base.iterdir() if (p / "model.json").is_file())
+    nomes = sorted(p.name for p in base.iterdir() if (p / "model.json").is_file())
+    if owner is None:
+        return nomes
+    return [n for n in nomes if model_owner(n) == owner]
+
+
+def model_owner(name: str) -> str:
+    """Dono do modelo. Modelos anteriores ao conceito de dono não têm o campo;
+    tratá-los como da administração é o certo — foram criados à mão no disco."""
+    tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
+    return str(tpl.get("owner") or "admin")
 
 
 def model_is_public(name: str) -> bool:
     """Templates marcados `public: true` são os únicos que a criação por
-    convite pode usar — protege os templates bloqueados de prova."""
+    convite pode usar — protege os modelos bloqueados de prova."""
     tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
     return bool(tpl.get("public"))
 
@@ -98,6 +130,32 @@ def set_schema_locks(name: str, locks: dict) -> dict:
     return schema
 
 
+def set_schema_field(name: str, key: str, patch: dict) -> dict:
+    """Ajusta um campo já existente do formulário: valor padrão, rótulo, ajuda
+    e cadeado. Não cria nem apaga campos — variável nova só teria efeito se
+    algum módulo do `stuff` a lesse, e isso é mudança de cliente, não de dados.
+    """
+    d = model_dir(name)
+    with fsdb.locked(d):
+        schema = fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []}
+        alvo = next((f for f in schema.get("fields", []) if f["key"] == key), None)
+        if alvo is None:
+            raise ImageError(f"campo '{key}' não existe neste modelo")
+        if "default" in patch:
+            alvo["default"] = patch["default"]
+        if "locked" in patch:
+            alvo["locked"] = bool(patch["locked"])
+        for texto in ("label", "help"):
+            valor = patch.get(texto)
+            if isinstance(valor, dict):
+                faltando = {"pt", "en", "es"} - set(valor)
+                if faltando:
+                    raise ImageError(f"{texto} precisa dos três idiomas (falta: {', '.join(sorted(faltando))})")
+                alvo[texto] = {k: str(valor[k]) for k in ("pt", "en", "es")}
+        fsdb.write_json(d / "schema.json", schema)
+    return schema
+
+
 def set_model_meta(name: str, *, public: bool | None = None, description: str | None = None) -> None:
     with fsdb.locked(model_dir(name)):
         tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
@@ -106,6 +164,125 @@ def set_model_meta(name: str, *, public: bool | None = None, description: str | 
         if description is not None:
             tpl["description"] = str(description)
         fsdb.write_json(model_dir(name) / "model.json", tpl)
+
+
+def models_using(name: str) -> list[str]:
+    """Site-images que derivam deste modelo — quem impede de apagá-lo."""
+    return [i["id"] for i in list_site_images() if i.get("model") == name]
+
+
+def create_model(
+    name: str,
+    *,
+    description: str = "",
+    public: bool = False,
+    owner: str = "admin",
+    from_model: str | None = None,
+) -> dict:
+    """Cria um modelo. Com `from_model`, copia camadas e formulário (inclusive
+    os cadeados) — é assim que se faz um modelo novo já com telemetria e wifi,
+    partindo de um que já os tem."""
+    from .default_schema import build_default_schema
+
+    if not MODEL_NAME_RE.match(name):
+        raise ImageError(
+            "nome inválido: use 2-49 caracteres [a-z0-9._-], começando por letra ou dígito"
+        )
+    if model_exists(name):
+        raise ImageError(f"modelo '{name}' já existe")
+
+    layers: list[dict] = []
+    schema = build_default_schema()
+    if from_model:
+        if not model_exists(from_model):
+            raise ImageError(f"modelo de origem '{from_model}' não existe")
+        base = fsdb.read_json(model_dir(from_model) / "model.json", {}) or {}
+        layers = list(base.get("layers", []))
+        schema = fsdb.read_json(model_dir(from_model) / "schema.json", schema) or schema
+
+    d = model_dir(name)
+    with fsdb.locked(d):
+        fsdb.write_json(
+            d / "model.json",
+            {
+                "name": name,
+                "description": description,
+                "owner": owner,
+                "public": bool(public),
+                "created_at": time.time(),
+                "derived_from": from_model,
+                "layers": layers,
+            },
+        )
+        fsdb.write_json(d / "schema.json", schema)
+    return get_model(name)
+
+
+def delete_model(name: str) -> None:
+    """Recusa se alguma site-image ainda deriva dele — apagar deixaria essas
+    máquinas com manifest sem base, ou seja, sem sistema para bootar."""
+    em_uso = models_using(name)
+    if em_uso:
+        raise ImageError("modelo em uso por: " + ", ".join(sorted(em_uso)))
+    d = model_dir(name)
+    if d.is_dir():
+        shutil.rmtree(d)
+
+
+def add_model_layer(
+    name: str, camada: dict, position: int = 0, replace_role: str | None = None
+) -> list[dict]:
+    """Insere uma camada. A ordem é a prioridade no overlay: posição 0 é a que
+    sobrepõe as demais.
+
+    Com `replace_role`, a camada que tiver aquele papel sai e a nova entra **no
+    lugar dela**, mantendo a posição. É assim que se troca a base de uma
+    temporada para outra: casar por nome de arquivo não funciona, porque o nome
+    da base muda todo ano (icpc-latam2025 → maratonalinux2026) e o resultado é
+    ficar com duas bases empilhadas — a máquina baixa 13 GB e monta duas raízes
+    sobrepostas, em silêncio.
+    """
+    with fsdb.locked(model_dir(name)):
+        tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
+        atuais = list(tpl.get("layers", []))
+
+        def sai(c: dict) -> bool:
+            if c.get("file") == camada["file"]:
+                return True
+            return bool(replace_role) and c.get("role") == replace_role
+
+        if replace_role:
+            # onde estava a camada substituída — a nova entra no mesmo lugar
+            alvo = next((i for i, c in enumerate(atuais) if sai(c)), None)
+            if alvo is not None:
+                position = alvo
+
+        layers = [c for c in atuais if not sai(c)]
+        layers.insert(max(0, min(position, len(layers))), camada)
+        tpl["layers"] = layers
+        fsdb.write_json(model_dir(name) / "model.json", tpl)
+    return layers
+
+
+def remove_model_layer(name: str, file: str) -> list[dict]:
+    with fsdb.locked(model_dir(name)):
+        tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
+        tpl["layers"] = [c for c in tpl.get("layers", []) if c.get("file") != file]
+        fsdb.write_json(model_dir(name) / "model.json", tpl)
+    return tpl["layers"]
+
+
+def reorder_model_layers(name: str, files: list[str]) -> list[dict]:
+    """Reordena pela lista de nomes de arquivo (a primeira ganha no overlay)."""
+    with fsdb.locked(model_dir(name)):
+        tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
+        por_arquivo = {c["file"]: c for c in tpl.get("layers", [])}
+        novas = [por_arquivo[f] for f in files if f in por_arquivo]
+        # o que não veio na lista fica no fim, para nada sumir por engano
+        novas += [c for c in tpl.get("layers", []) if c["file"] not in set(files)]
+        tpl["layers"] = novas
+        fsdb.write_json(model_dir(name) / "model.json", tpl)
+    return novas
 
 
 # --- site-images (as imagens derivadas de um modelo) ---
@@ -123,7 +300,7 @@ def get_site_image(image_id: str) -> dict | None:
     return fsdb.read_json(site_image_dir(image_id) / "image.json")
 
 
-def list_site_images(prefix: str = "") -> list[dict]:
+def list_site_images(prefix: str = "", owner: str | None = None) -> list[dict]:
     base = settings.data_root / "site-images"
     out = []
     if not base.is_dir():
@@ -132,9 +309,17 @@ def list_site_images(prefix: str = "") -> list[dict]:
         if prefix and not p.name.startswith(prefix):
             continue
         info = fsdb.read_json(p / "image.json")
-        if info:
-            out.append(info)
+        if not info:
+            continue
+        if owner is not None and str(info.get("owner") or "admin") != owner:
+            continue
+        out.append(info)
     return out
+
+
+def site_image_owner(image_id: str) -> str:
+    info = get_site_image(image_id) or {}
+    return str(info.get("owner") or "admin")
 
 
 class ImageError(ValueError):
@@ -147,6 +332,7 @@ def create_site_image(
     model: str,
     *,
     unlocked: bool = False,
+    owner: str = "admin",
     extra: dict | None = None,
 ) -> dict:
     """Cria a imagem e devolve dict com credenciais em claro (única vez).
@@ -176,6 +362,8 @@ def create_site_image(
                 "model": model,
                 "namespace": namespace,
                 "unlocked": bool(unlocked),
+                "owner": owner,
+                "created_at": time.time(),
                 **(extra or {}),
             },
         )
@@ -191,6 +379,7 @@ def create_site_image(
         "model": model,
         "namespace": namespace,
         "unlocked": bool(unlocked),
+        "owner": owner,
         "token": token,
         "machine_key": machine_key,
         "boot_key": boot_key,

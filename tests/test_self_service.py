@@ -212,6 +212,48 @@ def test_admin_nao_tem_cota_de_build(client, base, ha, data_root):
     assert r.status_code == 201
 
 
+def test_so_o_admin_ajusta_a_cota_de_build_da_imagem(client, base, ha):
+    """O campo existia no armazenamento e não no modelo do PATCH: o Pydantic
+    descartava em silêncio, e não havia caminho nenhum de API para aumentar a
+    cota de uma imagem já criada. Ajustar a própria cota, obviamente, não pode
+    ser do dono — cota que o interessado aumenta não é cota."""
+    code = client.post(
+        "/api/v1/invites", json={"model": "generico", "build_quota": 0}, headers=ha
+    ).json()["invites"][0]["code"]
+    img = client.post("/api/v1/public/site-images", json={"code": code, "id": "labcota"}).json()
+    hdono = {"Authorization": f"Bearer {img['token']}"}
+
+    assert client.patch(
+        "/api/v1/site-images/labcota", json={"build_quota": 9}, headers=hdono
+    ).status_code == 401  # token de imagem nem entra no console
+
+    r = client.patch("/api/v1/site-images/labcota", json={"build_quota": 2}, headers=ha)
+    assert r.status_code == 200, r.text
+    assert r.json()["build_quota"] == 2
+
+    # e a cota nova vale de verdade
+    r = client.post(
+        "/api/v1/site-images/labcota/layerbuilds",
+        json={"name": "cc", "packages": ["htop"]},
+        headers=hdono,
+    )
+    assert r.status_code == 201, r.text
+
+
+def test_subadmin_dono_nao_aumenta_a_propria_cota(client, base, ha):
+    code = client.post(
+        "/api/v1/invites", json={"model": "generico", "build_quota": 0}, headers=ha
+    ).json()["invites"][0]["code"]
+    client.post("/api/v1/public/site-images", json={"code": code, "id": "labsub"})
+    r = client.patch(
+        "/api/v1/site-images/labsub",
+        json={"build_quota": 99},
+        headers={"Authorization": f"Bearer {code}"},
+    )
+    assert r.status_code == 403
+    assert "cota" in r.json()["detail"]
+
+
 def test_pacote_invalido_no_build_por_imagem(client, base, ha):
     code = client.post("/api/v1/invites", json={"model": "generico"}, headers=ha).json()[
         "invites"
