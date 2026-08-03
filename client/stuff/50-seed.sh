@@ -10,10 +10,10 @@
 NB_SEED_HEARTBEAT=${NB_SEED_HEARTBEAT:-60}
 
 seedimage() {
-    log_begin_msg "Preparando para semear"
+    log_begin_msg "Getting ready to seed"
     MYIP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -n1)
     [ -z "$MYIP" ] && {
-        nb_warn "sem IP para semear"
+        nb_warn "no IP address available for seeding"
         return 1
     }
     printf ' ip=%s' "$MYIP"
@@ -25,11 +25,11 @@ seedimage() {
 
     _url="$NB_SERVER/boot/v3/$IMAGEROOT/seeders"
     if ! nb_get "$_url/join?ip=$MYIP&pw=$NB_MACHINE_KEY" | grep -q ok; then
-        nb_warn "não foi possível entrar no pool de seeders"
+        nb_warn "could not join the seeder pool"
         killall -9 webfsd 2>/dev/null
         return 1
     fi
-    nb_log "no pool de seeders como $MYIP"
+    nb_log "joined the seeder pool as $MYIP"
 
     # Heartbeat em background: mantém a entrada viva enquanto a máquina estiver de pé.
     (
@@ -39,6 +39,6 @@ seedimage() {
         done
     ) &
 
-    nb_warn "Esta máquina está semeando a imagem para as outras — deixe-a ligada"
+    nb_warn "This machine is seeding the image to the others - please leave it on"
     return 0
 }

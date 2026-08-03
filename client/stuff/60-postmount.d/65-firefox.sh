@@ -1,7 +1,7 @@
 # shellcheck shell=sh
 nb3_post_firefox() {
     [ -e "${rootmnt?}/opt/firefox/firefox" ] || return 0
-    log_begin_msg "Configurando o Firefox"
+    log_begin_msg "Configuring Firefox"
     cat > "${rootmnt?}/etc/firefox/policies/policies.json" << EOF
 {
   "policies": {

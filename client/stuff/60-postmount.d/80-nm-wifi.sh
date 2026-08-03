@@ -40,7 +40,7 @@ nb3_post_nm_wifi() {
         } > "$_file"
         chmod 600 "$_file"
     done < /run/nutellaboot/wifi.conf
-    nb_log "perfis de wifi gerados para o NetworkManager"
+    nb_log "wifi profiles generated for NetworkManager"
 }
 
 # UUID determinístico por SSID (md5 formatado) — evita duplicar perfis a cada boot.

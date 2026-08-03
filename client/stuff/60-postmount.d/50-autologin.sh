@@ -5,5 +5,5 @@ nb3_post_autologin() {
     [ -e "$_cfg" ] || return 0
     sed -e 's,^#  Automatic,Automatic,g' -e 's,user1,icpc,' "$_cfg" > /tmp/gdm.conf
     cat /tmp/gdm.conf > "$_cfg"
-    nb_log "autologin habilitado"
+    nb_log "automatic login enabled"
 }

@@ -2,7 +2,7 @@
 nb3_post_timezone() {
     [ -z "$TIMEZONE" ] && return 0
     [ -e "${rootmnt?}/usr/share/zoneinfo/$TIMEZONE" ] || {
-        nb_warn "fuso horário inválido: $TIMEZONE"
+        nb_warn "invalid time zone: $TIMEZONE"
         return 0
     }
     rm -f "${rootmnt?}/etc/localtime"

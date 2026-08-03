@@ -66,6 +66,11 @@ rm -rf "$MNT/etc/initramfs-tools/scripts/nutellaboot" \
 rsync -a "$REPO/client/initramfs-tools/" "$MNT/etc/initramfs-tools/"
 chmod +x "$MNT/etc/initramfs-tools/hooks/nutellaboot"
 
+# O kit de tela vive em client/stuff/ (é servido junto com o stuff); o hook o
+# procura aqui para embutir no initrd. Copiar em vez de duplicar mantém uma
+# fonte só para as mensagens dos dois lados do boot.
+cp "$REPO/client/stuff/05-ui.sh" "$MNT/etc/initramfs-tools/nb3-ui"
+
 if [ -z "$KVER" ]; then
     KVER=$(ls "$MNT/lib/modules" | sort -V | tail -n1)
 fi

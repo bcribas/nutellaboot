@@ -9,11 +9,11 @@ mount_layers() {
 
     PATH="$PATH:/usr/bin"
     nutella_findblock
-    [ -z "$possibledisks" ] && nb_fatal "Nenhum disco utilizável. Se a máquina só tem NTFS, faça um desligamento completo do Windows"
+    [ -z "$possibledisks" ] && nb_no_disk_screen
 
     _ok=0
     for disk in $possibledisks; do
-        nb_warn "usando $disk"
+        nb_warn "using $disk"
         FSTYPE=ext4
         if ! mount "$disk" "$BLOCKROOT" 2>/dev/null; then
             FSTYPE=ntfs
@@ -26,7 +26,22 @@ mount_layers() {
         fi
         umount "$BLOCKROOT" 2>/dev/null
     done
-    [ "$_ok" = 1 ] || nb_fatal "Não foi possível baixar as camadas do sistema"
+    [ "$_ok" = 1 ] || nb_fatal_screen "NO SYSTEM" \
+        "!The system could not be downloaded." \
+        "" \
+        "A disk was found, but the system layers did not arrive from the" \
+        "server, or arrived corrupted (the checksum did not match)." \
+        "" \
+        "Server: $NB_SERVER" \
+        "Image:  $IMAGEROOT" \
+        "" \
+        "!What to check, in this order:" \
+        "  1. Is the network cable connected on this machine?" \
+        "  2. Are the other machines in the room booting?" \
+        "     If they are, this one probably has a bad cable or port." \
+        "  3. Is the room's internet link up?" \
+        "  4. Ask the site coordinator to open the lab panel and look" \
+        "     for this machine."
 
     _lower=/dev/newroot/lower
     _upper=/dev/newroot/upper
@@ -36,17 +51,17 @@ mount_layers() {
 
     while read -r MD5 FILE URLS; do
         [ -z "$FILE" ] && continue
-        log_begin_msg "Preparando $FILE"
+        log_begin_msg "Preparing $FILE"
         mkdir -p "$_lower/$FILE"
-        mount -o suid "$STORAGEDIR/$FILE" "$_lower/$FILE" || nb_fatal "não foi possível montar $FILE"
+        mount -o suid "$STORAGEDIR/$FILE" "$_lower/$FILE" || nb_fatal "could not mount $FILE"
         _schema="$_schema:$_lower/$FILE"
         log_end_msg
     done < "$STORAGEDIR/fstab.nutella"
 
-    log_begin_msg "Montando o sistema de arquivos raiz"
+    log_begin_msg "Mounting the root filesystem"
     mount -t overlay overlay -o suid \
         -olowerdir="${_schema#:}",upperdir="$_upper",workdir="$_work" "${rootmnt?}" ||
-        nb_fatal "não foi possível montar o overlay"
+        nb_fatal "could not mount the overlay"
     log_end_msg
 }
 
@@ -55,7 +70,7 @@ mount_persistenthome() {
     [ "$cleanhome" = y ] && rm -rf "$STORAGEDIR"/home-"$IMAGEROOT"*
 
     if [ -e "$_home" ] && mount "$_home" "${rootmnt?}/home/"; then
-        nb_log "home persistente montada"
+        nb_log "persistent home mounted"
         return 0
     fi
     [ -e "$_home" ] && mv "$_home" "$_home.old"
@@ -64,10 +79,10 @@ mount_persistenthome() {
         # NTFS não suporta o arquivo de imagem com segurança: usa diretório.
         mkdir -p "$STORAGEDIR/home-$IMAGEROOT.insecure"
         mount --bind "$STORAGEDIR/home-$IMAGEROOT.insecure" "${rootmnt?}/home" &&
-            nb_log "home em diretório (NTFS)" && return 0
+            nb_log "home stored as a directory (NTFS)" && return 0
     fi
 
-    log_begin_msg "Criando home persistente (20G)"
+    log_begin_msg "Creating persistent home (20G)"
     if fallocate -x -l 20g "$_home" &&
         mke2fs.good -t ext4 -q "$_home" &&
         mount "$_home" "${rootmnt?}/home/"; then
@@ -75,16 +90,16 @@ mount_persistenthome() {
         log_end_msg
         return 0
     fi
-    nb_warn "seguindo SEM home persistente (dados serão perdidos no reboot)"
+    nb_warn "continuing WITHOUT a persistent home - files will be lost on reboot"
     return 1
 }
 
 createandactivateswap() {
     _swap=$STORAGEDIR/swapfile
-    log_begin_msg "Preparando swap em disco"
+    log_begin_msg "Preparing swap on disk"
     if [ ! -e "$_swap" ]; then
         fallocate -x -l 2g "$_swap" || {
-            nb_warn "não foi possível criar swap"
+            nb_warn "could not create the swap file"
             return 1
         }
         chmod 600 "$_swap"

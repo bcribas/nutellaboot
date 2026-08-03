@@ -1,7 +1,7 @@
 # shellcheck shell=sh
 nb3_post_home() {
     if [ ! -d "${rootmnt?}/home/icpc" ]; then
-        nb_log "preparando home nova do usuário icpc"
+        nb_log "preparing a fresh home for the icpc user"
         mkdir -p "${rootmnt?}/home/icpc"
         touch "${rootmnt?}/home/icpc/.clean-home"
     fi

@@ -6,7 +6,7 @@ nb3_post_clionkey() {
     _dir=${rootmnt?}/etc/skel/.config/JetBrains/${NB_CLION_VERSION:-CLion2024.3}
     mkdir -p "$_dir"
     if ! nb_download /clion.key 1 "$NB_SERVER/secret/clion.key"; then
-        nb_warn "licença do CLion indisponível — seguindo sem ela"
+        nb_warn "CLion licence not available - continuing without it"
         return 0
     fi
     mv /clion.key "$_dir/clion.key"

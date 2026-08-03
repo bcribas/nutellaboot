@@ -42,7 +42,7 @@ def modules() -> list[Path]:
 
 def render(image_id: str) -> str:
     # effective_values aplica o esquema: campos bloqueados voltam ao padrão do
-    # template mesmo que a imagem tenha salvo outro valor antes do bloqueio.
+    # modelo mesmo que a imagem tenha salvo outro valor antes do bloqueio.
     values = dict(config.effective_values(image_id))
     raw = store.config_values(image_id)
     wallpaper = fsdb.read_json(store.site_image_dir(image_id) / "wallpaper.json")

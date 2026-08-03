@@ -1,7 +1,7 @@
 # shellcheck shell=sh
 # Firewall da maratona + desligamento de serviços que atrapalham a prova.
 nb3_post_firewall() {
-    log_begin_msg "Configurando firewall"
+    log_begin_msg "Configuring the firewall"
     if [ -n "$FIREWALL_ALLOWLIST" ]; then
         # formato: "HOSTNAME IP" separados por vírgula
         _old_ifs=$IFS

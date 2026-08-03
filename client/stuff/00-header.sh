@@ -4,6 +4,10 @@
 # REGRA DE OURO: nenhuma função deste script pode chamar `read`. Máquina de
 # prova boota sozinha; erro que espera humano é erro que trava a sala.
 # Use nb_fatal (mostra, espera, reinicia) ou nb_warn (segue em frente).
+#
+# O visual (cor, etapas, letras grandes) vem do 05-ui.sh, carregado logo
+# depois deste arquivo. As mensagens de tela são todas em inglês — ver o
+# cabeçalho daquele arquivo para o porquê.
 
 NB_CA_BUNDLE=${NB_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}
 NB_FATAL_WAIT=${NB_FATAL_WAIT:-30}
@@ -12,9 +16,11 @@ nb_log() { log_begin_msg "$*"; log_end_msg; }
 nb_warn() { log_warning_msg "$*"; }
 
 # nb_fatal "mensagem" — informa, aguarda leitura humana e reinicia.
+# Para os casos em que dá para explicar o que fazer, prefira nb_fatal_screen
+# (05-ui.sh): tela cheia, letras grandes e instrução.
 nb_fatal() {
     log_failure_msg "$*"
-    log_failure_msg "Reiniciando em ${NB_FATAL_WAIT}s / rebooting in ${NB_FATAL_WAIT}s"
+    log_failure_msg "Restarting in ${NB_FATAL_WAIT}s"
     sleep "$NB_FATAL_WAIT"
     reboot -f
     panic=60 panic "$*"

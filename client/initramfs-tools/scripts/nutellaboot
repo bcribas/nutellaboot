@@ -21,13 +21,33 @@ NB_HOSTS_FILE=${NB_HOSTS_FILE:-/etc/hosts}
 NB_RESOLV_FILE=${NB_RESOLV_FILE:-/etc/resolv.conf}
 NB_DEFAULTS_FILE=${NB_DEFAULTS_FILE:-/etc/nutellaboot.defaults}
 
+# Kit de interface (cor, etapas, telas de erro). É o MESMO arquivo que o
+# servidor concatena no stuff — o hook o copia para cá na hora de gerar o
+# initrd. O teste é condicional de propósito: um initrd antigo, gerado antes
+# do kit existir, continua bootando com as funções originais do
+# initramfs-tools; perde o visual, não quebra.
+# shellcheck disable=SC1091
+[ -r /scripts/nb3-ui ] && . /scripts/nb3-ui
+
+# Sem o kit, estas viram anúncios simples — o boot segue igual, só sem visual.
+command -v nb_phase > /dev/null 2>&1 || nb_phase() { log_begin_msg "$*"; log_end_msg; }
+command -v nb_screen > /dev/null 2>&1 || nb_screen() { for _l; do log_failure_msg "${_l#!}"; done; }
+command -v nb_fatal_screen > /dev/null 2>&1 || nb_fatal_screen() {
+    _t=$1
+    shift
+    nb_screen "$@"
+    sleep "$([ "${NB_FATAL_WAIT:-30}" = 0 ] && echo 0 || echo "${NB_SCREEN_WAIT:-60}")"
+    reboot -f
+    panic=60 panic "$_t"
+}
+
 nb_log() { log_begin_msg "$*"; log_end_msg; }
 nb_warn() { log_warning_msg "$*"; }
 
 nb_fatal() {
     _wait=${NB_FATAL_WAIT:-30}
     log_failure_msg "$*"
-    log_failure_msg "Reiniciando em ${_wait}s / rebooting in ${_wait}s"
+    log_failure_msg "Restarting in ${_wait}s"
     sleep "$_wait"
     reboot -f
     panic=60 panic "$*"
@@ -74,10 +94,10 @@ nb_read_usbconfig() {
         [ -f "$NB_CFGMNT/wifi.conf" ] && cp "$NB_CFGMNT/wifi.conf" "$NB_RUN/"
         sync
         umount "$NB_CFGMNT"
-        nb_log "configuração lida do pendrive ($_dev)"
+        nb_log "configuration read from the USB drive ($_dev)"
         nb_usb_livre
     else
-        nb_warn "partição NB3CFG não encontrada — usando padrões embutidos"
+        nb_warn "NB3CFG partition not found - using built-in defaults"
     fi
 
     # shellcheck disable=SC1090
@@ -102,8 +122,22 @@ nb_read_usbconfig() {
                 [ -n "$_name" ] && [ -n "$_ip" ] && echo "$_ip $_name" >> "$NB_HOSTS_FILE"
             done
     fi
-    [ -z "$IMAGEROOT" ] && nb_fatal "IMAGEROOT não definido (nem no pendrive, nem na linha de comando)"
-    nb_log "imagem=$IMAGEROOT servidor=$NB_SERVER"
+    [ -z "$IMAGEROOT" ] && nb_fatal_screen "NO IMAGE" \
+        "!This USB drive does not say which image to boot." \
+        "" \
+        "The file nutellaboot.conf on the USB drive must contain a line" \
+        "with the name of the image for this site, for example:" \
+        "" \
+        "    IMAGEROOT=26spsp" \
+        "" \
+        "!What to do:" \
+        "  1. Plug the USB drive into any computer (it is a normal FAT" \
+        "     partition, readable on Windows, macOS and Linux)" \
+        "  2. Open nutellaboot.conf in a text editor" \
+        "  3. Set IMAGEROOT to the name your site was given" \
+        "" \
+        "The same USB drive works for every site - only this file changes."
+    nb_log "image=$IMAGEROOT server=$NB_SERVER"
 }
 
 # --- 2. rede ----------------------------------------------------------------
@@ -139,7 +173,7 @@ configure_wifi() {
     [ -z "$_iface" ] && return 1
     nb_write_wpaconf || [ -s /etc/wpa_supplicant.conf ] || return 1
 
-    log_begin_msg "Conectando ao wifi em $_iface"
+    log_begin_msg "Connecting to wifi on $_iface"
     rfkill unblock all 2>/dev/null
     ip link set "$_iface" up
     mkdir -p /run/wpa_supplicant
@@ -151,7 +185,7 @@ configure_wifi() {
         if /sbin/wpa_cli -p/run/wpa_supplicant -i"$_iface" status 2>/dev/null |
             grep -q '^wpa_state=COMPLETED'; then
             log_end_msg
-            nb_log "wifi associado em $_iface"
+            nb_log "wifi associated on $_iface"
             DEVICE=$_iface
             export DEVICE
             return 0
@@ -159,7 +193,7 @@ configure_wifi() {
         sleep 1
         _n=$((_n + 1))
     done
-    log_failure_msg "wifi não associou em ${NB_WIFI_TIMEOUT:-30}s"
+    log_failure_msg "wifi did not associate within ${NB_WIFI_TIMEOUT:-30}s"
     return 1
 }
 
@@ -194,13 +228,13 @@ nb_post() {
 configure_localnetwork() {
     _n=1
     while [ "$_n" -le "${NB_NET_TRIES:-10}" ]; do
-        log_begin_msg "Configurando a rede (tentativa $_n)"
+        log_begin_msg "Configuring the network (attempt $_n)"
         configure_networking
         nb_resolvconf
         log_end_msg
         nb_online && return 0
 
-        nb_warn "sem conexão pela rede cabeada; tentando wifi"
+        nb_warn "no connection over the wired network; trying wifi"
         if configure_wifi; then
             configure_networking
             nb_resolvconf
@@ -209,7 +243,24 @@ configure_localnetwork() {
         sleep 5
         _n=$((_n + 1))
     done
-    nb_fatal "Não foi possível conectar ao servidor $NB_SERVER"
+    nb_fatal_screen "NO NETWORK" \
+        "!This machine could not reach the network." \
+        "" \
+        "Server: $NB_SERVER" \
+        "" \
+        "The system is downloaded over the network at every boot, so the" \
+        "machine cannot continue without it." \
+        "" \
+        "!What to check, in this order:" \
+        "  1. Is the network cable plugged in at both ends?" \
+        "     Look for the link light on the network port." \
+        "  2. Are the other machines in this room booting normally?" \
+        "     If they are, the problem is this machine's cable or port." \
+        "     If none of them boot, the problem is the room's switch" \
+        "     or the internet link." \
+        "  3. Using wifi? Check that wifi.conf on the USB drive has the" \
+        "     right network name and password (case matters)." \
+        "  4. Is DHCP working in this room?"
 }
 
 # --- 3. relógio -------------------------------------------------------------
@@ -226,7 +277,7 @@ nb_synctime() {
     [ "$_diff" -lt 0 ] && _diff=$((-_diff))
     if [ "$_diff" -gt 60 ]; then
         date -s "@$_epoch" > /dev/null 2>&1
-        nb_log "relógio ajustado (desvio de ${_diff}s)"
+        nb_log "clock corrected (was off by ${_diff}s)"
     fi
 }
 
@@ -238,21 +289,45 @@ nb_fetch_stuff() {
         if nb_post "$IMAGEROOT/stuff" /stuff.sh && [ -s /stuff.sh ]; then
             return 0
         fi
-        nb_warn "não foi possível baixar o stuff (tentativa $_n/10)"
+        nb_warn "could not download the boot script (attempt $_n/10)"
         sleep 5
         _n=$((_n + 1))
     done
     return 1
 }
 
+# A rede subiu mas o servidor nao respondeu: e um problema diferente de "sem
+# rede", e a acao de quem esta na sala tambem e diferente.
+nb_no_server_screen() {
+    nb_fatal_screen "NO SERVER" \
+        "!The network works, but the NutellaBoot server did not answer." \
+        "" \
+        "Server: $NB_SERVER" \
+        "Image:  $IMAGEROOT" \
+        "Reason: $1" \
+        "" \
+        "!What to check:" \
+        "  1. Is the server name above the right one for this site?" \
+        "     It is set by NB_SERVER in nutellaboot.conf on the USB drive." \
+        "  2. Can this room reach the internet at all?" \
+        "     A captive portal (hotel/campus login page) also causes this." \
+        "  3. If the clock of this machine is very wrong, the secure" \
+        "     connection is refused. Check the date in the BIOS setup;" \
+        "     a dead CMOS battery gives exactly this symptom." \
+        "  4. Ask whoever runs the server whether it is up."
+}
+
 mountroot() {
+    nb_phase "NUTELLABOOT - reading the configuration from the USB drive"
     nb_read_usbconfig
+
+    nb_phase "NETWORK - connecting to the network"
     configure_localnetwork
     nb_synctime
-    nb_online || nb_fatal "servidor inacessível após ajuste de relógio"
+    nb_online || nb_no_server_screen "the server answered before, but not after the clock was corrected"
 
-    nb_fetch_stuff || nb_fatal "Não foi possível obter o script de boot do servidor"
-    log_begin_msg "Executando o script de boot do servidor"
+    nb_fetch_stuff || nb_no_server_screen "the boot script could not be downloaded"
+    log_begin_msg "Running the boot script from the server"
     export NB_SERVER NB_CA_BUNDLE IMAGEROOT
     # shellcheck disable=SC1091
     . /stuff.sh

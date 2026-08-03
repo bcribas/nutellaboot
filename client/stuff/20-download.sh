@@ -23,7 +23,7 @@ nb_download() {
     mkdir -p "$_dir"
     rm -f "$_dest"
 
-    log_begin_msg "Baixando $_base"
+    log_begin_msg "Downloading $_base"
     _try=1
     _max=${NB_DOWNLOAD_TRIES:-5}
     while [ "$_try" -le "$_max" ]; do
@@ -43,7 +43,7 @@ nb_download() {
             log_end_msg
             return 0
         fi
-        log_failure_msg "falha ($_rc) na tentativa $_try/$_max de $_base"
+        log_failure_msg "attempt $_try/$_max failed ($_rc) for $_base"
         rm -f "$_dest"
         [ "$_try" -lt "$_max" ] && sleep $((_try * 5))
         _try=$((_try + 1))
@@ -62,13 +62,13 @@ nb_get() {
 nutella_md5sum() {
     _want=$1
     _file=$2
-    log_begin_msg "MD5 $(basename "$_file")"
+    log_begin_msg "Checking MD5 of $(basename "$_file")"
     _got=$(md5sum "$_file" | awk '{print $1}')
     if [ "$_got" = "$_want" ]; then
         log_end_msg
         return 0
     fi
-    log_failure_msg "md5 divergente: esperado $_want, obtido $_got"
+    log_failure_msg "MD5 mismatch: expected $_want, got $_got"
     return 1
 }
 
@@ -79,25 +79,25 @@ download_boot_files() {
     _fstab=$_storage/fstab.nutella
 
     if ! nb_get "$NB_SERVER/boot/v3/$IMAGEROOT/manifest" > "$_fstab" || [ ! -s "$_fstab" ]; then
-        nb_warn "não foi possível baixar o manifest"
+        nb_warn "could not download the layer manifest"
         return 1
     fi
-    echo "===== camadas ====="
+    printf "  ----- layers -----\n"
     cat "$_fstab"
-    echo "==================="
+    printf "  ------------------\n"
 
     while read -r MD5 FILE URLS; do
         [ -z "$FILE" ] && continue
         if [ -e "$_storage/$FILE" ]; then
             if nutella_md5sum "$MD5" "$_storage/$FILE"; then
-                nb_warn "cache válido de $FILE"
+                nb_warn "using the cached copy of $FILE"
                 continue
             fi
             rm -f "$_storage/$FILE"
         fi
         # shellcheck disable=SC2086
         if ! nb_download "$_storage/$FILE" 10 $URLS; then
-            nb_warn "não foi possível baixar $FILE"
+            nb_warn "could not download $FILE"
             return 1
         fi
         if ! nutella_md5sum "$MD5" "$_storage/$FILE"; then

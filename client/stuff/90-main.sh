@@ -27,25 +27,29 @@ runpostmountconfigs() {
 }
 
 nb3_mountroot() {
-    [ -z "$IMAGEROOT" ] && nb_fatal "IMAGEROOT não definido"
+    [ -z "$IMAGEROOT" ] && nb_fatal "IMAGEROOT is not set"
     BLOCKROOT=/secretdev
     STORAGEDIR=$BLOCKROOT/nutellaboot
     mkdir -p "$BLOCKROOT"
 
+    nb_phase "STORAGE - looking for a disk to store the system"
     runpremountconfigs
+
+    nb_phase "SYSTEM - downloading and mounting the system layers"
     mount_layers
 
     [ "$SEEDIMAGE" = t ] && seedimage
     [ -z "$noswap" ] && createandactivateswap
     [ "$persistenthome" = y ] && mount_persistenthome
 
+    nb_phase "SETUP - applying this site's configuration"
     runpostmountconfigs
     umount -l "$BLOCKROOT" 2>/dev/null
 }
 
 # Devolve a rede ao NetworkManager do sistema instalado.
 fixnetworktoreconnect() {
-    log_begin_msg "Devolvendo a rede ao NetworkManager"
+    log_begin_msg "Handing the network back to NetworkManager"
     rm -f "${rootmnt?}"/usr/lib/NetworkManager/conf.d/10-glo*
     ln -s /dev/null "${rootmnt?}/etc/systemd/system/systemd-networkd.service"
     for _i in /sys/class/net/e* /sys/class/net/w*; do

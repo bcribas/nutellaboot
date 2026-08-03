@@ -18,12 +18,12 @@ nb3_post_wallpaper() {
     rm -f "$_target"
 
     if ! nb_download "$_target" 1 "$NB_SERVER/boot/v3/$IMAGEROOT/wallpaper"; then
-        nb_warn "wallpaper não pôde ser baixado — seguindo com o padrão"
+        nb_warn "wallpaper could not be downloaded - keeping the default one"
         rm -f "$_link"
         return 0
     fi
     if ! nutella_md5sum "$NB_WALLPAPER_MD5" "$_target"; then
-        nb_warn "wallpaper com md5 divergente — seguindo com o padrão"
+        nb_warn "wallpaper MD5 mismatch - keeping the default one"
         rm -f "$_target" "$_link"
     fi
     return 0

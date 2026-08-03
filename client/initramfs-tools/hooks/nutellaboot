@@ -62,4 +62,16 @@ copy_exec /sbin/blkid /sbin
 # --- seeding ---
 copy_exec /usr/bin/webfsd /usr/bin
 
+# --- interface de tela ---
+# O mesmo 05-ui.sh que o servidor concatena no stuff. Copiar (em vez de
+# duplicar o código aqui) é o que garante que as telas do initrd e as do stuff
+# sejam idênticas: uma fonte só. O bootstrap carrega este arquivo se ele
+# existir, então um initrd antigo continua bootando sem ele.
+for _ui in /etc/initramfs-tools/nb3-ui /usr/share/nutellaboot3/05-ui.sh; do
+    if [ -f "$_ui" ]; then
+        copy_file script "$_ui" /scripts/nb3-ui
+        break
+    fi
+done
+
 exit 0
