@@ -194,6 +194,25 @@ def principal(request: Request | None, authorization: str | None, image_id: str 
     return sessions.resolve(request.cookies.get(sessions.COOKIE, ""))
 
 
+def principal_de_link(request: Request, tk: str = "", image_id: str | None = None):
+    """Credencial de um GET que o próprio navegador carrega.
+
+    `<img src>`, `<a download>` e `EventSource` não mandam cabeçalho nenhum:
+    aqui vale `?tk=` (o token que já está na URL da tela de sede) ou o cookie de
+    sessão **sem** `X-NB-Console`. É a única exceção à invariante 14, e vale só
+    para leitura — é GET, não muda estado, e sem CORS uma página de outro site
+    não lê a resposta.
+    """
+    p = principal(request, request.headers.get("authorization"), image_id=image_id)
+    if p is None and tk:
+        p = identify(tk, image_id=image_id)
+    if p is None:
+        from .services import sessions
+
+        p = sessions.resolve(request.cookies.get(sessions.COOKIE, ""))
+    return p
+
+
 async def require_admin(
     request: Request = None, authorization: str | None = Header(None)
 ) -> Principal:

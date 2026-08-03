@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse
 
 from .. import auth
 from ..models import BulkRequest, SiteImageCreate, SiteImagePatch
-from ..services import ownership, seeders, store
+from ..services import ownership, seeders, store, usb
 
 router = APIRouter(prefix="/api/v1")
 
@@ -24,7 +24,7 @@ async def create_image(body: SiteImageCreate, p=Depends(auth.require_console)) -
     if not ownership.can_use_model(p, body.model):
         raise HTTPException(404, "modelo não existe")
     try:
-        return store.create_site_image(
+        criada = store.create_site_image(
             body.id,
             body.fullname,
             body.model,
@@ -34,6 +34,10 @@ async def create_image(body: SiteImageCreate, p=Depends(auth.require_console)) -
         )
     except store.ImageError as e:
         raise HTTPException(400, str(e))
+    # o pendrive é o único jeito de a máquina ligar: começa a ser gerado junto
+    # com a imagem, para o cartão de credenciais já mostrar o link
+    usb.agendar(criada["id"])
+    return criada
 
 
 @router.post("/site-images/bulk")
@@ -80,6 +84,7 @@ async def bulk_create(
                 unlocked=row.get("unlocked", False),
                 extra=({"wallpaper_locked": True} if row.get("wallpaper_locked") else None),
             )
+            usb.agendar(created["id"])
             results.append({"ok": True, **created})
         except store.ImageError as e:
             results.append({"ok": False, "id": row.get("id", "?"), "error": str(e)})

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from ..services import invites, owners, ratelimit, requests, store
+from ..services import invites, owners, ratelimit, requests, store, usb
 from ..settings import settings
 
 router = APIRouter(prefix="/api/v1/public")
@@ -73,6 +73,7 @@ async def self_create_image(body: dict, request: Request) -> dict:
 
     invites.consume(code, image_id)
     owners.ensure(code)
+    usb.agendar(image_id)
     # o mesmo código abre o console de sub-admin: quem criou volta para
     # gerenciar o que é seu, sem cadastro separado
     return {**created, "console_url": f"{settings.base_url}/admin/", "console_code": code}

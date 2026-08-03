@@ -1,6 +1,7 @@
 // Administração: imagens, criação em massa e credenciais.
 import * as api from "/common/api.js";
 import { init, t, apply, currentLang } from "/common/i18n.js";
+import { usbBlock } from "/common/usb.js";
 
 const $ = (s) => document.querySelector(s);
 const A = { kind: "admin" };
@@ -65,6 +66,9 @@ function credentialsCard(info, title) {
     table.appendChild(tr);
   }
   card.appendChild(table);
+  // o pendrive é o único jeito de a máquina ligar: sai junto das credenciais,
+  // e não escondido numa tela que ninguém sabe que existe
+  if (info.token && info.machine_key) card.appendChild(usbBlock(info.id));
   const fechar = document.createElement("button");
   fechar.className = "small";
   fechar.style.marginTop = "10px";
@@ -183,7 +187,10 @@ async function load() {
     loadRequests();
   }
   loadLayerBuilds();
-  if (ehAdmin()) loadPublish();
+  if (ehAdmin()) {
+    loadUsb();
+    loadPublish();
+  }
 }
 
 function ehAdmin() {
@@ -760,6 +767,138 @@ async function showImageLayers(image) {
   document.body.appendChild(box);
 }
 
+// ---------- pendrive ----------
+
+let usbTimer = null;
+
+function usbEstadoTexto(e) {
+  // chaves explícitas: montar o nome em tempo de execução esconde a tradução
+  // do verificador de i18n
+  if (e.status === "building") return t("usb_building");
+  if (e.status === "failed") return t("usb_failed");
+  if (e.status === "done") return t("usb_published");
+  return t("usb_not_generated");
+}
+
+async function loadUsb() {
+  const box = $("#usbstate");
+  if (!box) return;
+  let d;
+  try {
+    d = await api.get("/api/v1/usb", A);
+  } catch {
+    return;
+  }
+  box.className = "";
+  box.innerHTML = "";
+
+  // 1. o par kernel+initrd, que é compartilhado por todas as sedes e é o único
+  // passo do sistema que precisa de root
+  const kernel = document.createElement("p");
+  if (d.kernel.ok) {
+    const v = d.kernel.files["vmlinuz"];
+    const i = d.kernel.files["initrd.img"];
+    const data = new Date(i.mtime * 1000).toLocaleString();
+    kernel.className = "muted";
+    kernel.textContent = `${t("usb_kernel")}: vmlinuz ${Math.round(v.size / 1048576)} MB · initrd.img ${Math.round(i.size / 1048576)} MB · ${data}`;
+  } else {
+    kernel.className = "warn";
+    kernel.innerHTML = `${t("usb_no_kernel")}<br><code>${d.kernel.hint}</code>`;
+  }
+  box.appendChild(kernel);
+
+  // 2. a imagem genérica: uma só, para todas as sedes
+  const g = document.createElement("p");
+  g.innerHTML =
+    `<strong>${t("usb_generic_image")}</strong>: ` +
+    (d.generic.status === "done"
+      ? `<span class="mono">${d.generic.file}</span> · ${Math.round((d.generic.size || 0) / 1048576)} MB · ` +
+        (d.generic.published
+          ? `<span class="pill ok">${t("usb_published")}</span> <span class="muted mono">${d.generic.public_url}</span>`
+          : `<span class="muted">${t("usb_local")}</span>`)
+      : `<span class="muted">${usbEstadoTexto(d.generic)}</span>`);
+  box.appendChild(g);
+  if (d.generic.error) {
+    const e = document.createElement("p");
+    e.className = "muted small";
+    e.textContent = d.generic.error.slice(0, 200);
+    box.appendChild(e);
+  }
+
+  if (!d.auto_generate) {
+    const aviso = document.createElement("p");
+    aviso.className = "muted small";
+    aviso.textContent = t("usb_auto_off");
+    box.appendChild(aviso);
+  }
+
+  // 3. o que cada sede tem
+  const titulo = document.createElement("p");
+  titulo.className = "muted";
+  titulo.textContent = t("usb_per_site");
+  box.appendChild(titulo);
+
+  if (!d.images.length) {
+    const vazio = document.createElement("p");
+    vazio.className = "muted";
+    vazio.textContent = t("usb_none");
+    box.appendChild(vazio);
+  } else {
+    const table = document.createElement("table");
+    for (const img of d.images) {
+      const cor = { done: "ok", failed: "bad", building: "warn" }[img.status] || "";
+      const tr = document.createElement("tr");
+      const aviso = img.stale
+        ? `<br><span class="warn small">${t("usb_stale_boot_key")}</span>`
+        : "";
+      tr.innerHTML = `<td class="mono">${img.id}</td>
+        <td><span class="pill ${cor}">${usbEstadoTexto(img)}</span>${aviso}</td>`;
+      const td = document.createElement("td");
+      if (img.status === "done") {
+        const a = document.createElement("a");
+        a.className = "btn small";
+        a.href = img.public_url || api.usbImageUrl(img.id);
+        a.setAttribute("download", "");
+        a.textContent = t("usb_download");
+        td.appendChild(a);
+      }
+      const gerar = document.createElement("button");
+      gerar.className = "small";
+      gerar.textContent = img.status === "done" ? t("usb_regenerate") : t("usb_generate");
+      gerar.onclick = async () => {
+        gerar.disabled = true;
+        try {
+          await api.post(`/api/v1/site-images/${img.id}/usb`, {}, A);
+        } finally {
+          loadUsb();
+        }
+      };
+      td.append(" ", gerar);
+      tr.appendChild(td);
+      table.appendChild(tr);
+    }
+    box.appendChild(table);
+  }
+
+  // enquanto algo está sendo gerado, volta a perguntar; parado, não bate no
+  // servidor (mesmo padrão dos builds de camada)
+  clearTimeout(usbTimer);
+  const ativo =
+    d.generic.status === "building" || d.images.some((i) => i.status === "building");
+  if (ativo) usbTimer = setTimeout(loadUsb, 4000);
+}
+
+async function buildGenericUsb() {
+  $("#usb_info").textContent = t("usb_building");
+  try {
+    await api.post("/api/v1/usb/generic", {}, A);
+  } catch (e) {
+    toast(`${t("error")}: ${e.message}`, true);
+  }
+  $("#usb_info").textContent = "";
+  loadUsb();
+}
+
 // ---------- publicação ----------
 
 async function loadPublish() {
@@ -993,6 +1132,7 @@ async function main() {
   $("#inv_gen").onclick = generateInvite;
   $("#lay_build").onclick = buildLayerFromTemplate;
   $("#layi_build").onclick = buildLayerForImage;
+  $("#usb_build").onclick = buildGenericUsb;
   $("#pub_retry").onclick = async () => {
     const r = await api.post("/api/v1/publish/retry", {}, A);
     toast(`${r.ok}/${r.retried}`);

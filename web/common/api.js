@@ -51,10 +51,14 @@ async function parse(resp) {
   return body;
 }
 
-export async function request(method, path, { body, kind = "image", raw, contentType } = {}) {
+export async function request(method, path, { body, kind = "image", raw, contentType, token } = {}) {
   const headers = { ...CONSOLE_HEADER };
-  // no console a credencial é o cookie; nas telas de sede, o token da URL
-  if (kind !== "admin" && imageToken()) {
+  // no console a credencial é o cookie; nas telas de sede, o token da URL.
+  // `token` é para quem tem o token em mãos mas não na URL — a tela de
+  // auto-atendimento, logo depois de criar a imagem.
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  } else if (kind !== "admin" && imageToken()) {
     headers.Authorization = `Bearer ${imageToken()}`;
   }
   const opts = { method, headers, credentials: "same-origin" };
@@ -94,6 +98,41 @@ export function wallpaperUrl(image, versao) {
   if (tk) q.set("tk", tk);
   const s = q.toString();
   return `/api/v1/site-images/${encodeURIComponent(image)}/wallpaper${s ? `?${s}` : ""}`;
+}
+
+// --- pendrive de boot ---
+//
+// São três downloads, e nenhum deles pode mandar cabeçalho: `<a download>` não
+// tem como. Vale o token na URL (as telas de sede já o têm) ou o cookie de
+// sessão, do mesmo jeito que a prévia do wallpaper e o SSE.
+
+function _tk(token) {
+  return token || imageToken();
+}
+
+export function usbConfUrl(image, token) {
+  const tk = _tk(token);
+  const q = tk ? `?tk=${encodeURIComponent(tk)}` : "";
+  return `/api/v1/site-images/${encodeURIComponent(image)}/usb/conf${q}`;
+}
+
+export function usbImageUrl(image, token) {
+  const tk = _tk(token);
+  const q = tk ? `?tk=${encodeURIComponent(tk)}` : "";
+  return `/api/v1/site-images/${encodeURIComponent(image)}/usb/image${q}`;
+}
+
+export function usbGenericUrl(image, token) {
+  // a genérica não é de imagem nenhuma, mas ainda pede credencial: são 400 MB
+  // saindo da máquina que responde à API durante a prova
+  const tk = _tk(token);
+  const q = new URLSearchParams();
+  if (image && tk) {
+    q.set("id", image);
+    q.set("tk", tk);
+  }
+  const s = q.toString();
+  return `/api/v1/usb/generic/image${s ? `?${s}` : ""}`;
 }
 
 export function eventsUrl(image) {

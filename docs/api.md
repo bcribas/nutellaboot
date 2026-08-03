@@ -393,6 +393,45 @@ Nomes de pacote são validados contra `^[a-z0-9][a-z0-9+._-]*$`, então não há
 como injetar opções ou comandos. Camadas anexadas entram **no começo** da
 lista, que é o que lhes dá prioridade no overlayfs.
 
+### Pendrive de boot
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| GET | `/api/v1/usb` | A | — | `{kernel, generic, auto_generate, images:[…]}` |
+| POST | `/api/v1/usb/generic` | A | — | `202` + estado (gera em segundo plano) |
+| GET | `/api/v1/site-images/{img}/usb` | C, I | — | `{kernel, generic, image}` |
+| POST | `/api/v1/site-images/{img}/usb` | C, I | — | `202` + estado |
+| GET | `/api/v1/site-images/{img}/usb/conf` | C, I, `?tk=` | — | `nutellaboot.conf` (texto) |
+| GET | `/api/v1/site-images/{img}/usb/image` | C, I, `?tk=` | — | a `.img` da sala |
+| GET | `/api/v1/usb/generic/image` | C, `?id=&tk=` | — | a `.img` genérica |
+
+Os três downloads aceitam a credencial na **query** porque um `<a download>` não
+manda cabeçalho — a mesma exceção, e pelo mesmo motivo, da prévia do wallpaper e
+do SSE. Nenhum deles passa pelo `/blobs`, que é servido sem autenticação: a
+imagem de uma sala carrega a chave de boot dentro.
+
+O estado de cada imagem é `missing`, `building`, `done`, `failed` ou
+`unavailable` (falta o par kernel+initrd, que só se produz com root). Quando
+`done`, vem também `stale` e `stale_reason` (`boot_key`, `kernel`, `server`),
+calculados na leitura: rotacionar a chave de boot torna a imagem obsoleta sem
+que ninguém precise avisar o serviço.
+
+Quando a publicação está ligada, a resposta traz `public_url` no servidor de
+arquivos e as telas usam essa URL — a máquina de gestão não serve 400 MB por
+sede. A imagem genérica não leva segredo nenhum e pode ficar pública; a da sala
+ganha um sufixo aleatório no nome por causa da chave que carrega.
+
+### Publicação no servidor de arquivos
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| GET | `/api/v1/publish` | A | — | `{enabled, host, paths, base_urls, files:[…]}` |
+| POST | `/api/v1/publish/retry` | A | — | `{retried, ok, files}` — reenvia o que não está `done` |
+| POST | `/api/v1/publish/file` | A | `{file, kind}` | estado do envio (`kind`: `layers` ou `usb`) |
+
+`file` é só o nome do arquivo (nunca um caminho): ele é resolvido dentro de
+`data/blobs/` ou `data/usb/` conforme o `kind`.
+
 ### Webhooks e chaves de serviço
 
 | Método | Caminho | Cred. | Corpo | Resposta |

@@ -1,0 +1,388 @@
+"""O pendrive pela interface.
+
+Criar uma sede entregava token, chaves e links — e nada sobre o pendrive, que é
+o único jeito de a máquina ligar. O gerador só existia na linha de comando da
+máquina de gestão, então quem coordena uma sede não tinha acesso nenhum a ele.
+
+São três coisas, e a ordem importa: a imagem genérica (uma só, igual para todas
+as sedes, sem segredo dentro), o `nutellaboot.conf` da sala (quatro linhas, com
+a chave de boot) e a imagem já configurada, para quem prefere não copiar nada.
+
+O que estes testes protegem, além de "funciona": que o `conf` gerado é o que o
+initrd sabe ler, que a imagem genérica não carrega segredo (ela vai para um
+diretório público), e que a da sala nunca sai sem credencial.
+"""
+
+import asyncio
+import os
+
+import pytest
+
+from server.app import fsdb
+from server.app.services import usb
+
+CONSOLE = {"X-NB-Console": "1"}
+
+# um "nb3-genusb" de mentira: gerar de verdade precisa de mtools, grub2 e de um
+# initrd que só sai com root. O que interessa aqui é o contrato — quais
+# argumentos a ferramenta recebe e o que o serviço faz com o resultado.
+FALSO = """#!/bin/bash
+set -e
+saida=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --output) saida=$2; shift 2 ;;
+        *) echo "arg: $1" >> "${NB3_GENUSB_LOG:-/dev/null}"; shift ;;
+    esac
+done
+mkdir -p "$(dirname "$saida")"
+printf 'imagem de mentira' > "$saida"
+echo "pronto: $saida"
+"""
+
+
+@pytest.fixture
+def build(tmp_path, monkeypatch):
+    """Um client/build com kernel e initrd de mentira."""
+    d = tmp_path / "build"
+    d.mkdir()
+    (d / "vmlinuz").write_bytes(b"kernel")
+    (d / "initrd.img").write_bytes(b"initrd")
+    monkeypatch.setenv("NB3_BUILD_DIR", str(d))
+    return d
+
+
+@pytest.fixture
+def genusb(tmp_path, monkeypatch):
+    p = tmp_path / "genusb-falso"
+    p.write_text(FALSO)
+    p.chmod(0o755)
+    log = tmp_path / "args.log"
+    monkeypatch.setenv("NB3_GENUSB_CMD", str(p))
+    monkeypatch.setenv("NB3_GENUSB_LOG", str(log))
+    return log
+
+
+@pytest.fixture
+def client(data_root):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    return TestClient(create_app(), base_url="https://testserver")
+
+
+@pytest.fixture(autouse=True)
+def sem_limite():
+    from server.app.services import ratelimit
+
+    ratelimit.reset()
+    yield
+    ratelimit.reset()
+
+
+@pytest.fixture
+def ha(admin_key):
+    return {"Authorization": f"Bearer {admin_key}"}
+
+
+@pytest.fixture
+def sede(client, data_root, ha):
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
+    r = client.post(
+        "/api/v1/site-images", json={"id": "sala1", "fullname": "Sala 1", "model": "t"}, headers=ha
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+# --- o nutellaboot.conf: contrato com o initrd ---
+
+
+def test_o_conf_tem_o_que_o_initrd_procura(data_root, sede):
+    """O initrd extrai com `sed -n "s/^CHAVE=//p"`. Um arquivo que ele não
+    entende é a tela "NO IMAGE" na sede, com a fila esperando."""
+    texto = usb.conf_text("sala1")
+    linhas = {
+        l.split("=", 1)[0]: l.split("=", 1)[1]
+        for l in texto.splitlines()
+        if l and not l.startswith("#") and "=" in l
+    }
+    assert linhas["IMAGEROOT"] == "sala1"
+    assert linhas["NB_BOOT_KEY"] == sede["boot_key"]
+    assert linhas["NB_SERVER"].startswith("http")
+
+
+def test_o_conf_e_o_que_o_bootstrap_le_de_verdade(data_root, sede, tmp_path):
+    """Roda o mesmo `sed` do `nb_conf_value` sobre o arquivo gerado."""
+    import subprocess
+
+    arq = tmp_path / "nutellaboot.conf"
+    arq.write_text(usb.conf_text("sala1"))
+    for chave, esperado in (("IMAGEROOT", "sala1"), ("NB_BOOT_KEY", sede["boot_key"])):
+        r = subprocess.run(
+            ["sed", "-n", f"s/^{chave}=//p", str(arq)], capture_output=True, text=True
+        )
+        assert r.stdout.strip().strip("\"'") == esperado, chave
+
+
+# --- kernel e initrd ---
+
+
+def test_sem_kernel_a_mensagem_traz_o_comando(data_root, tmp_path, monkeypatch):
+    """É o único passo do sistema que precisa de root: dizer "veja a
+    documentação" não ajuda quem está com a sala parada."""
+    monkeypatch.setenv("NB3_BUILD_DIR", str(tmp_path / "nao-existe"))
+    k = usb.kernel_state()
+    assert k["ok"] is False
+    assert "nb3-build-initrd" in k["hint"]
+
+
+def test_com_kernel_o_estado_fica_ok(build, data_root):
+    k = usb.kernel_state()
+    assert k["ok"] is True
+    assert k["files"]["vmlinuz"]["size"] == 6
+    assert k["hint"] == ""
+
+
+# --- geração ---
+
+
+def test_gera_a_imagem_da_sala(build, genusb, data_root, sede):
+    estado = asyncio.run(usb.gerar_da_sala("sala1"))
+    assert estado["status"] == "done", estado
+    assert estado["file"].startswith("sala1-")
+    assert estado["file"].endswith(".img")
+    assert (data_root / "usb" / estado["file"]).is_file()
+    # o nome não é adivinhável: o arquivo carrega a chave de boot dentro
+    assert estado["file"] != "sala1.img"
+    assert len(estado["suffix"]) == 8
+
+
+def test_a_ferramenta_recebe_a_sede_e_a_chave(build, genusb, data_root, sede):
+    asyncio.run(usb.gerar_da_sala("sala1"))
+    args = genusb.read_text()
+    assert "arg: --imageroot" in args and "arg: sala1" in args
+    assert f"arg: {sede['boot_key']}" in args
+
+
+def test_a_generica_nao_leva_sede_nem_chave(build, genusb, data_root, sede):
+    """É o ponto do pendrive genérico: uma imagem serve todas as sedes. E é ela
+    que pode ir para um diretório público do servidor de arquivos."""
+    asyncio.run(usb.gerar_generica())
+    # sem argumento nenhum além do --output, o log nem chega a ser criado
+    args = genusb.read_text() if genusb.exists() else ""
+    assert "--imageroot" not in args
+    assert "--boot-key" not in args
+    assert sede["boot_key"] not in args
+    assert usb.generic_state()["file"] == "nutellaboot3.img"
+
+
+def test_regerar_mantem_o_nome(build, genusb, data_root, sede):
+    """Se o nome mudasse a cada geração, ficariam cópias antigas no servidor de
+    arquivos para sempre — o rsync não apaga o que ficou para trás."""
+    primeiro = asyncio.run(usb.gerar_da_sala("sala1"))["file"]
+    segundo = asyncio.run(usb.gerar_da_sala("sala1"))["file"]
+    assert primeiro == segundo
+
+
+def test_falha_da_ferramenta_vira_estado_e_nao_excecao(build, data_root, sede, tmp_path, monkeypatch):
+    ruim = tmp_path / "ruim"
+    ruim.write_text("#!/bin/bash\necho 'faltando: mformat' >&2\nexit 1\n")
+    ruim.chmod(0o755)
+    monkeypatch.setenv("NB3_GENUSB_CMD", str(ruim))
+    estado = asyncio.run(usb.gerar_da_sala("sala1"))
+    assert estado["status"] == "failed"
+    assert "mformat" in estado["error"]
+
+
+def test_sem_kernel_nao_tenta_gerar(data_root, sede, tmp_path, monkeypatch):
+    monkeypatch.setenv("NB3_BUILD_DIR", str(tmp_path / "vazio"))
+    monkeypatch.setenv("NB3_GENUSB_CMD", "/bin/false")
+    estado = asyncio.run(usb.gerar_da_sala("sala1"))
+    assert estado["status"] == "unavailable"
+    assert "nb3-build-initrd" in estado["hint"]
+
+
+# --- desatualização ---
+
+
+def test_rotacionar_a_chave_marca_desatualizada(build, genusb, client, data_root, sede, ha):
+    asyncio.run(usb.gerar_da_sala("sala1"))
+    assert usb.image_state("sala1")["stale"] is False
+
+    r = client.post("/api/v1/site-images/sala1/boot-key/rotate", headers=ha)
+    assert r.status_code == 200, r.text
+
+    estado = usb.image_state("sala1")
+    assert estado["stale"] is True
+    assert "boot_key" in estado["stale_reason"]
+
+
+def test_initrd_novo_marca_desatualizada(build, genusb, data_root, sede):
+    asyncio.run(usb.gerar_da_sala("sala1"))
+    assert usb.image_state("sala1")["stale"] is False
+
+    (build / "initrd.img").write_bytes(b"initrd novo e maior")
+    estado = usb.image_state("sala1")
+    assert estado["stale"] is True
+    assert "kernel" in estado["stale_reason"]
+
+
+def test_regerar_limpa_o_aviso(build, genusb, client, data_root, sede, ha):
+    asyncio.run(usb.gerar_da_sala("sala1"))
+    client.post("/api/v1/site-images/sala1/boot-key/rotate", headers=ha)
+    assert usb.image_state("sala1")["stale"] is True
+
+    asyncio.run(usb.gerar_da_sala("sala1"))
+    assert usb.image_state("sala1")["stale"] is False
+
+
+# --- as rotas ---
+
+
+def test_o_console_ve_o_estado_geral(build, client, data_root, sede, ha):
+    r = client.get("/api/v1/usb", headers=ha)
+    assert r.status_code == 200, r.text
+    corpo = r.json()
+    assert corpo["kernel"]["ok"] is True
+    assert [i["id"] for i in corpo["images"]] == ["sala1"]
+
+
+def test_estado_geral_e_so_do_admin(client, data_root, sede):
+    assert client.get("/api/v1/usb").status_code == 401
+
+
+def test_a_sede_ve_o_estado_com_o_proprio_token(build, genusb, client, data_root, sede):
+    asyncio.run(usb.gerar_da_sala("sala1"))
+    r = client.get(
+        "/api/v1/site-images/sala1/usb", headers={"Authorization": f"Bearer {sede['token']}"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["image"]["status"] == "done"
+
+
+def test_baixar_o_conf_com_o_token_da_url(client, data_root, sede):
+    """`<a download>` não manda cabeçalho: vale o `tk` que já está na URL da
+    tela de sede."""
+    r = client.get(f"/api/v1/site-images/sala1/usb/conf?tk={sede['token']}")
+    assert r.status_code == 200, r.text
+    assert "IMAGEROOT=sala1" in r.text
+    assert sede["boot_key"] in r.text
+    assert "attachment" in r.headers["content-disposition"]
+
+
+def test_baixar_o_conf_com_a_sessao_do_console(client, data_root, sede, admin_key):
+    client.post("/api/v1/session", json={"key": admin_key}, headers=CONSOLE)
+    r = client.get("/api/v1/site-images/sala1/usb/conf")
+    assert r.status_code == 200, r.text
+
+
+def test_o_conf_nao_sai_sem_credencial(client, data_root, sede):
+    assert client.get("/api/v1/site-images/sala1/usb/conf").status_code == 401
+    assert client.get("/api/v1/site-images/sala1/usb/conf?tk=nb3i_errado").status_code == 401
+
+
+def test_baixar_a_imagem_da_sala(build, genusb, client, data_root, sede):
+    asyncio.run(usb.gerar_da_sala("sala1"))
+    r = client.get(f"/api/v1/site-images/sala1/usb/image?tk={sede['token']}")
+    assert r.status_code == 200, r.text
+    assert r.content == b"imagem de mentira"
+
+
+def test_a_imagem_da_sala_nao_sai_sem_credencial(build, genusb, client, data_root, sede):
+    asyncio.run(usb.gerar_da_sala("sala1"))
+    assert client.get("/api/v1/site-images/sala1/usb/image").status_code == 401
+
+
+def test_token_de_outra_sede_nao_baixa(build, genusb, client, data_root, sede, ha):
+    outra = client.post(
+        "/api/v1/site-images", json={"id": "sala2", "fullname": "S2", "model": "t"}, headers=ha
+    ).json()
+    asyncio.run(usb.gerar_da_sala("sala1"))
+    r = client.get(f"/api/v1/site-images/sala1/usb/image?tk={outra['token']}")
+    assert r.status_code == 401
+
+
+def test_sede_de_outro_dono_responde_404(build, client, data_root, sede, ha):
+    code = client.post("/api/v1/invites", json={"count": 1}, headers=ha).json()["invites"][0]["code"]
+    r = client.get("/api/v1/site-images/sala1/usb", headers={"Authorization": f"Bearer {code}"})
+    assert r.status_code == 404
+
+
+def test_gerar_pela_rota_devolve_na_hora(build, genusb, client, data_root, sede, ha):
+    """A rota não pode esperar a geração: o servidor tem um worker só, e
+    segurar a requisição congela o SSE e o long-poll da sala inteira."""
+    r = client.post("/api/v1/site-images/sala1/usb", headers=ha)
+    assert r.status_code == 202, r.text
+    assert r.json()["status"] in ("building", "done")
+
+
+def test_baixar_a_generica_pela_tela_de_sede(build, genusb, client, data_root, sede):
+    asyncio.run(usb.gerar_generica())
+    r = client.get(f"/api/v1/usb/generic/image?id=sala1&tk={sede['token']}")
+    assert r.status_code == 200, r.text
+    assert client.get("/api/v1/usb/generic/image").status_code == 401
+
+
+def test_a_generica_ainda_nao_gerada_responde_404(build, client, data_root, sede, admin_key):
+    client.post("/api/v1/session", json={"key": admin_key}, headers=CONSOLE)
+    assert client.get("/api/v1/usb/generic/image").status_code == 404
+
+
+# --- geração automática na criação ---
+
+
+def test_criar_a_sede_agenda_o_pendrive(build, genusb, client, data_root, ha):
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
+    client.post(
+        "/api/v1/site-images", json={"id": "nova", "fullname": "N", "model": "t"}, headers=ha
+    )
+    # o TestClient roda o laço até o fim da requisição; a tarefa em segundo
+    # plano pode ficar em "building" ou já ter terminado
+    assert usb.image_state("nova")["status"] in ("building", "done", "unavailable")
+
+
+def test_o_interruptor_desliga_o_automatico(build, genusb, client, data_root, ha):
+    fsdb.write_json(data_root / "server.json", {"usb": {"auto_generate": False}})
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
+    client.post(
+        "/api/v1/site-images", json={"id": "nova", "fullname": "N", "model": "t"}, headers=ha
+    )
+    assert usb.image_state("nova")["status"] == "missing"
+    # mas o botão continua funcionando
+    r = client.post("/api/v1/site-images/nova/usb", headers=ha)
+    assert r.status_code == 202
+
+
+# --- a ferramenta ---
+
+
+def test_genusb_nao_embarca_senha_de_exemplo():
+    """Sem --wifi, ele copiava o wifi.conf.example inteiro — com
+    `ICPC-BR<TAB>senha-da-rede-da-maratona` dentro. A imagem genérica vai para
+    um diretório público do servidor de arquivos."""
+    from pathlib import Path
+
+    texto = (Path(__file__).resolve().parents[1] / "tools" / "nb3-genusb").read_text()
+    assert 'cp "$REPO/client/usb/wifi.conf.example"' not in texto
+    assert "grep -E '^[[:space:]]*(#|$)'" in texto
+
+
+def test_genusb_confere_o_que_usa():
+    from pathlib import Path
+
+    texto = (Path(__file__).resolve().parents[1] / "tools" / "nb3-genusb").read_text()
+    linha = [l for l in texto.splitlines() if l.startswith("for t in ")][0]
+    for ferramenta in ("mdir", "truncate", "dd"):
+        assert ferramenta in linha, ferramenta
+
+
+def test_genusb_respeita_a_raiz_de_dados():
+    """Ele copiava para `$REPO/data/usb` na mão; com NB3_DATA_ROOT apontando
+    para outro lugar, o servidor não achava o arquivo para reenviar."""
+    from pathlib import Path
+
+    texto = (Path(__file__).resolve().parents[1] / "tools" / "nb3-genusb").read_text()
+    assert "DATA=${NB3_DATA_ROOT:-$REPO/data}" in texto
+    assert "$REPO/data/usb" not in texto

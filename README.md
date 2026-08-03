@@ -130,7 +130,7 @@ data/                o estado do servidor (não versionado)
 | `nb3-init` | prepara um servidor novo e emite a chave de administração | não |
 | `nb3-dev` | sobe o servidor de desenvolvimento | não |
 | `nb3-seed-testdata` | cria dados de teste | não |
-| `nb3-genusb` | gera a imagem do pendrive | **não** |
+| `nb3-genusb` | gera a imagem do pendrive (a tela faz isso sozinha) | **não** |
 | `nb3-run-test` | sobe uma VM que boota pelo servidor | não |
 | `nb3-qemu-shot` | tira screenshot do boot da VM | não |
 | `nb3-layer-worker` | constrói camadas extras (pacotes) | **não** |

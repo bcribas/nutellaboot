@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 
 from .. import auth, fsdb
 from ..services import config as cfg
-from ..services import sessions, store, webhook_push
+from ..services import store, webhook_push
 from ..services.notify import notify
 
 router = APIRouter(prefix="/api/v1")
@@ -80,11 +80,7 @@ async def get_wallpaper(image: str, request: Request, tk: str = Query("")):
     credencial que a sede não tem e que um `<img>` não conseguiria mandar. A
     prévia nunca carregou em imagem nenhuma.
     """
-    p = auth.principal(request, request.headers.get("authorization"), image_id=image)
-    if p is None and tk:
-        p = auth.identify(tk, image_id=image)
-    if p is None:
-        p = sessions.resolve(request.cookies.get(sessions.COOKIE, ""))
+    p = auth.principal_de_link(request, tk, image)
     if p is None or not p.can_see_image(image):
         raise HTTPException(401, "credencial ausente ou inválida")
 

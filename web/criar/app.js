@@ -2,6 +2,7 @@
 // sem código (envia um pedido para a administração aprovar).
 import * as api from "/common/api.js";
 import { init, t, apply } from "/common/i18n.js";
+import { usbBlock } from "/common/usb.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -53,6 +54,11 @@ function showResult(info) {
   ];
   for (const [k, v] of rows) if (v) table.appendChild(copyRow(k, v));
   card.appendChild(table);
+  // aqui a pessoa acabou de criar a própria sala e nunca viu o sistema: o
+  // pendrive tem que estar nesta tela, não numa que ela ainda não sabe abrir.
+  // O token vai explícito porque, ao contrário do configureitor, ele não está
+  // na URL desta página.
+  card.appendChild(usbBlock(info.id, info.token));
   const open = document.createElement("a");
   open.className = "btn primary";
   open.style.marginTop = "12px";

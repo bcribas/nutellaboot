@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from .. import auth
-from ..services import invites, owners, requests, store
+from ..services import invites, owners, requests, store, usb
 
 router = APIRouter(prefix="/api/v1")
 
@@ -97,6 +97,7 @@ async def approve_request(rid: str, body: dict, p=Depends(auth.require_admin)) -
         )
     except store.ImageError as e:
         raise HTTPException(400, str(e))
+    usb.agendar(image_id)
     requests.set_status(rid, "approved", {"created_image": image_id})
     return {"created": created}
 

@@ -1,6 +1,7 @@
 // Configureitor — ajustes offline da imagem (valem no próximo boot).
 import * as api from "/common/api.js";
 import { init, t, tr, apply } from "/common/i18n.js";
+import { usbBlock } from "/common/usb.js";
 
 const $ = (sel) => document.querySelector(sel);
 let schema = null;
@@ -222,6 +223,15 @@ function renderWallpaper(meta) {
   box.append(img, info);
 }
 
+function renderUsb() {
+  // o pendrive é o que a sede precisa antes de qualquer outra coisa desta
+  // tela: sem ele nenhuma máquina liga
+  const box = $("#usbbox");
+  box.className = "";
+  box.innerHTML = "";
+  box.appendChild(usbBlock(api.imageId));
+}
+
 async function loadSeeders() {
   try {
     const data = await api.get(`/api/v1/site-images/${api.imageId}/seeders`);
@@ -299,6 +309,7 @@ async function main() {
     $("#imginfo").textContent = `${data.image.fullname || data.image.id} · ${data.image.id}`;
     renderForm();
     renderWallpaper(data.wallpaper);
+    renderUsb();
     loadSeeders();
   } catch (e) {
     $("#form").innerHTML = `<p class="muted">${e.status === 401 ? t("no_token") : e.message}</p>`;
@@ -316,6 +327,7 @@ async function main() {
   document.addEventListener("nb3:langchange", () => {
     apply();
     if (schema) renderForm();
+    renderUsb();
     loadSeeders();
   });
 }

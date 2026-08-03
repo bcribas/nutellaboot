@@ -177,6 +177,36 @@ máquina virtual: suba a imagem-mestre, copie `client/initramfs-tools/` para
 
 ### 1.5 Gravar o pendrive
 
+**Pela tela, que é o caminho normal.** Criar uma sede já dispara a geração, e o
+cartão de credenciais mostra o link assim que fica pronto (uns 40 segundos). O
+mesmo aparece no `/admin/`, na seção **Pendrive de boot**, e no configureitor —
+que é a tela que a sede recebe.
+
+São três downloads, e a ordem é de propósito:
+
+| O quê | Tamanho | Para quê |
+|---|---|---|
+| imagem do pendrive | ~400 MB | **a mesma para todas as sedes** |
+| `nutellaboot.conf` | ~500 B | a sala, a chave de boot e o servidor |
+| imagem já configurada | ~400 MB | alternativa: nada para editar, só serve nesta sala |
+
+O caminho recomendado é o primeiro: grave a imagem uma vez, copie o
+`nutellaboot.conf` para dentro do pendrive (é uma partição FAT comum, abre em
+qualquer computador) e pronto. Foi para isso que o pendrive genérico existe —
+no NutellaBoot 2 eram ~45 imagens de 400 MB que só diferiam nesse arquivo.
+
+A imagem já configurada existe para quem prefere não abrir arquivo nenhum. Ela
+leva a chave de boot dentro, então o nome tem um sufixo aleatório
+(`26brbr-7f3a9c21.img`) — sem isso, quem adivinhasse `26brbr.img` no servidor
+de arquivos levaria a chave da sala junto.
+
+**Quando a chave de boot é rotacionada** (ou o initrd é reconstruído), as três
+telas passam a mostrar *desatualizada*, com o motivo e um botão de regerar.
+Nada é regerado sozinho: todo pendrive já gravado vai ter que ser regravado de
+qualquer jeito, e quem rotacionou decide quando.
+
+**Por linha de comando**, o mesmo gerador:
+
 ```bash
 # pendrive genérico: a sede é escolhida editando o arquivo na partição
 tools/nb3-genusb --output maratona2026.img
@@ -189,6 +219,15 @@ NB3_ADMIN_KEY=nb3a_... tools/nb3-genusb \
     --server https://nutellaboot.naquadah.com.br \
     --wifi minhas-redes.conf
 ```
+
+Sem `--wifi`, o `wifi.conf` embarcado vem só com os comentários explicando o
+formato — as redes de exemplo **não** vão junto, porque a imagem genérica é
+publicada num diretório público.
+
+> **Atenção ao `--imageroot`:** ele fixa a sede também na linha de comando do
+> GRUB, que vence o `nutellaboot.conf`. Num pendrive gravado assim, editar o
+> arquivo não troca a sala — é preciso editar o `grub.cfg`, que também está na
+> partição.
 
 **Não precisa de sudo**: a imagem é montada manipulando o arquivo
 (`sfdisk` + `mtools` + `grub2-mkstandalone`), sem `losetup` nem `mount`.

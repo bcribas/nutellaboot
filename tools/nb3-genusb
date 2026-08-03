@@ -16,6 +16,7 @@
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
+DATA=${NB3_DATA_ROOT:-$REPO/data}
 OUT=""
 IMAGEROOT=""
 SERVER=""
@@ -92,7 +93,9 @@ if [ "$FETCH_KEY" = 1 ]; then
     [ -n "$BOOT_KEY" ] || { echo "não consegui obter a chave de boot de $IMAGEROOT" >&2; exit 1; }
 fi
 
-for t in sfdisk mformat mcopy mmd grub2-mkstandalone; do
+# mdir/truncate/dd tambem sao usados: sem conferir, o mdir so falha na ULTIMA
+# linha do script, depois de a imagem inteira estar pronta
+for t in sfdisk mformat mcopy mmd mdir truncate dd grub2-mkstandalone; do
     command -v "$t" > /dev/null || { echo "faltando: $t" >&2; exit 1; }
 done
 [ "$BIOS" = 1 ] && { command -v grub2-mkimage > /dev/null || { echo "faltando: grub2-mkimage (ou use --no-bios)" >&2; exit 1; }; }
@@ -123,7 +126,12 @@ trap 'rm -rf "$WORK"' EXIT
 if [ -n "$WIFI" ]; then
     cp "$WIFI" "$WORK/wifi.conf"
 else
-    cp "$REPO/client/usb/wifi.conf.example" "$WORK/wifi.conf"
+    # Só os COMENTÁRIOS do exemplo. As três redes de exemplo têm senha de
+    # aparência real (ICPC-BR/senha-da-rede-da-maratona), e esta imagem pode
+    # acabar num diretório público do servidor de arquivos — embarcá-las por
+    # padrão é publicar senha de exemplo com cara de senha de verdade.
+    grep -E '^[[:space:]]*(#|$)' "$REPO/client/usb/wifi.conf.example" > "$WORK/wifi.conf" || true
+    echo "# (sem redes: use --wifi ARQUIVO, ou edite este arquivo no pendrive)" >> "$WORK/wifi.conf"
 fi
 
 # --- grub.cfg (na partição, editável) ---
@@ -220,16 +228,16 @@ mcopy -i "$OUT@@$OFFSET" "$WORK/wifi.conf" ::/wifi.conf
 if [ "$PUBLISH" = 1 ]; then
     echo ">> publicando no servidor de arquivos"
     # o arquivo precisa estar em data/usb para a API saber reenviar depois
-    mkdir -p "$REPO/data/usb"
-    [ "$(readlink -f "$OUT")" = "$(readlink -f "$REPO/data/usb/$(basename "$OUT")")" ] ||
-        cp -f "$OUT" "$REPO/data/usb/"
+    mkdir -p "$DATA/usb"
+    [ "$(readlink -f "$OUT")" = "$(readlink -f "$DATA/usb/$(basename "$OUT")")" ] ||
+        cp -f "$OUT" "$DATA/usb/"
     # publish_file() nunca levanta excecao (falha vira status: failed), entao
     # sem o sys.exit o SSH fora do ar imprimia "failed" no meio da saida e o
     # script terminava com "pronto:", como se tivesse publicado
     "$REPO/.venv/bin/python" -c "
 import sys; sys.path.insert(0, '$REPO')
 from server.app.services import publish
-e = publish.publish_file('$REPO/data/usb/$(basename "$OUT")', 'usb')
+e = publish.publish_file('$DATA/usb/$(basename "$OUT")', 'usb')
 print('   ', e['status'], e.get('url', e.get('error', '')))
 if e.get('status') != 'done':
     sys.exit('publicacao falhou: ' + str(e.get('error', e)))
