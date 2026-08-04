@@ -9,7 +9,7 @@ conta de 1890 máquinas, que está em `services/labs.py`.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from .. import auth
@@ -23,9 +23,9 @@ router = APIRouter(prefix="/api/v1")
 
 @router.get("/labs")
 async def visao_geral(
+    request: Request,
     dias: float = Query(labs.DIAS_PADRAO, ge=0, le=3650),
     format: str = Query("json", pattern="^(json|csv)$"),
-    p=Depends(auth.require_console),
 ):
     """Uma linha por sede: quantas máquinas, quantas ativas na janela, quantas
     apareceram nela, e o estado de agora.
@@ -36,7 +36,17 @@ async def visao_geral(
 
     `first_seen` é quando ESTE servidor viu aquele MAC pela primeira vez, não o
     primeiro boot da máquina na vida — recriar o `data/` reinicia a conta.
+
+    **Credencial de link**: o cookie vale aqui SEM `X-NB-Console`, porque o
+    botão de baixar o CSV é um `<a download>` e um `<a>` não manda cabeçalho —
+    era 401 na cara de quem clicava. É a mesma exceção da prévia do wallpaper,
+    do SSE e do relatório por sede: GET, não muda estado, e sem CORS uma página
+    de outro site não lê a resposta. O `POST /commands` continua exigindo o
+    cabeçalho, e é o que importa: lá se desliga a frota.
     """
+    p = auth.principal_de_link(request)
+    if p is None or p.kind not in ("admin", "subadmin"):
+        raise HTTPException(401, "credencial ausente ou inválida")
     linhas = labs.resumo(p, dias=dias)
     if format == "csv":
         return PlainTextResponse(

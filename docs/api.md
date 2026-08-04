@@ -452,6 +452,12 @@ máquina que apareceu há 40 dias e reportou ontem é ativa e não é nova.
 > `first_seen` é quando ESTE servidor viu aquele MAC pela primeira vez, não o
 > primeiro boot da máquina na vida: recriar o `data/` reinicia a conta.
 
+`GET /labs` aceita o **cookie sem `X-NB-Console`** — é a exceção da invariante
+14, a mesma da prévia do wallpaper e do SSE: o botão de baixar o CSV é um
+`<a download>`, e um `<a>` não manda cabeçalho. `POST /commands` **continua
+exigindo** o cabeçalho, e a assimetria é o ponto: ler a frota por link é inócuo,
+desligá-la não.
+
 O resumo **não devolve o `status` das máquinas**. Ele é livre e pode ter 256 kB;
 numa frota de 1890 máquinas seriam ~0,9 MB por atualização, contra dezenas de kB
 assim. Para o detalhe de uma sede, use `GET /site-images/{img}/machines`.

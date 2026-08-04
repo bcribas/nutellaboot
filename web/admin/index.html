@@ -12,7 +12,7 @@
   <h1 data-i18n="admin_title"></h1>
   <span class="spacer"></span>
   <!-- só aparece depois de entrar: sem sessão a tela da frota responde 401 -->
-  <a id="gofrota" class="btn small hidden" href="/laboratorios/" data-i18n="fleet_title"></a>
+  <a id="gofrota" class="btn small primary hidden" href="/laboratorios/" data-i18n="fleet_title"></a>
   <button type="button" id="logout" class="small hidden" data-i18n="admin_logout"></button>
   <span id="lang"></span>
 </header>
@@ -32,6 +32,16 @@
       <h2><span id="who_label"></span> <span id="who_kind" class="pill"></span></h2>
       <p class="help muted" id="who_help"></p>
       <div id="who_quotas" class="muted mono"></div>
+    </div>
+
+    <!-- A porta para a frota. Era um botão do tamanho do "sair" na barra de
+         cima, e ninguém achava. -->
+    <div class="card" id="frotacard" style="border-color:var(--ok)">
+      <h2 data-i18n="fleet_card_title"></h2>
+      <p class="help muted" data-i18n="fleet_card_help"></p>
+      <div class="actions">
+        <a class="btn primary" href="/laboratorios/" data-i18n="fleet_card_go"></a>
+      </div>
     </div>
 
     <div class="card">

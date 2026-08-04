@@ -237,3 +237,54 @@ def test_o_dono_do_convite_nao_comanda_sede_alheia(client, frota, data_root):
 def test_comando_desconhecido_e_recusado(client, frota, ha):
     assert _manda(client, ha, command="rm -rf", targets={"sala1": "all"}).status_code == 400
     assert _manda(client, ha, command="mlreboot", targets={}).status_code == 400
+
+
+# --- a credencial de um LINK -------------------------------------------------
+#
+# O botão de baixar o CSV é um `<a download>`, e um `<a>` não manda cabeçalho.
+# Como o cookie de sessão só vale com `X-NB-Console` (a barreira anti-CSRF), o
+# clique dava 401 na cara de quem usava. É a mesma exceção da prévia do
+# wallpaper, do SSE e do relatório por sede — e ela vale SÓ para leitura.
+
+
+@pytest.fixture
+def navegador(data_root, admin_key):
+    """Cliente em HTTPS com sessão aberta — o cookie é `Secure`, e sobre http o
+    próprio httpx não o guarda (como o navegador não guardaria)."""
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    c = TestClient(create_app(), base_url="https://testserver")
+    r = c.post("/api/v1/session", json={"key": admin_key}, headers={"X-NB-Console": "1"})
+    assert r.status_code == 200, r.text
+    return c
+
+
+def test_o_csv_abre_com_o_cookie_sem_o_cabecalho(navegador, frota):
+    """Exatamente o que o navegador faz ao clicar no `<a download>`."""
+    r = navegador.get("/api/v1/labs?dias=7&format=csv")
+    assert r.status_code == 200, r.text
+    assert r.text.startswith("id,fullname,")
+
+
+def test_o_resumo_tambem(navegador, frota):
+    assert navegador.get("/api/v1/labs?dias=7").status_code == 200
+
+
+def test_mas_comandar_continua_exigindo_o_cabecalho(navegador, frota):
+    """A assimetria é o ponto: ler a frota por link é inócuo; DESLIGÁ-LA não.
+    "Relaxei o GET, relaxo o POST também" é o passo seguinte natural e errado —
+    um `<form>` de outro site manda o cookie, e sem esta linha desligaria 1900
+    máquinas."""
+    corpo = {"command": "mlpoweroff", "targets": {"sala1": "all"}}
+    assert navegador.post("/api/v1/commands", json=corpo).status_code == 401
+    assert (
+        navegador.post("/api/v1/commands", json=corpo, headers={"X-NB-Console": "1"}).status_code
+        == 200
+    )
+
+
+def test_sem_sessao_nenhuma_das_duas_abre(client, frota):
+    assert client.get("/api/v1/labs?format=csv").status_code == 401
+    assert client.post("/api/v1/commands", json={"command": "mlreboot", "targets": {}}).status_code == 401
