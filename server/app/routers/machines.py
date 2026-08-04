@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -22,6 +23,19 @@ router = APIRouter(prefix="/api/v1")
 # máquina a cada ~25 s (o nb2 fazia polling a cada 5-30 s e ainda somava o
 # atraso configurado, passando de 30 s até a tela travar).
 MAX_WAIT = 30.0
+
+# De quanto em quanto tempo o long-poll reconfere a fila NO DISCO.
+#
+# É rede de segurança, não o caminho normal: quem acorda a espera é o `notify`,
+# no instante em que o comando é enfileirado, e a latência disso é de
+# milissegundos. Este número só decide quanto tempo um sinal PERDIDO demora a
+# se recuperar sozinho.
+#
+# Ele importa por causa da escala: com 1600 máquinas seguradas ao mesmo tempo,
+# 5 s viram 320 leituras de disco por segundo dentro do único event loop que
+# atende todo o resto — para sempre, mesmo com a sala parada. Em 25 s são 64/s.
+# Por isso é parâmetro: em desenvolvimento 5 s é cômodo, em produção não.
+BACKSTOP = float(os.environ.get("NB3_LONGPOLL_BACKSTOP", "5"))
 
 
 def _machine(image: str, x_nb_machine_key: str | None, mac: str) -> str:
@@ -196,7 +210,7 @@ async def poll_commands(
         if await request.is_disconnected():
             return {"commands": [], "lock": m.get_lock(image, mac)}
         # acorda na hora em que alguém enfileira algo para esta máquina
-        await notify.wait_machine(image, mac, min(restante, 5.0))
+        await notify.wait_machine(image, mac, min(restante, BACKSTOP))
 
 
 @router.post("/site-images/{image}/machines/{mac}/commands/{cid}/ack")

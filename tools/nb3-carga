@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""nb3-carga — simula uma sala de verdade contra um servidor NutellaBoot 3.
+
+Existe porque "aguenta 1600 máquinas?" só tem uma resposta honesta: medindo.
+O que ele simula é o que a máquina real faz, na mesma proporção:
+
+  * **boot** — busca `stuff`, `manifest` e a checagem de pendrive, tudo de uma
+    vez no começo (é assim que uma sala liga: no mesmo minuto);
+  * **telemetria** — um POST de status a cada ~45 s por máquina;
+  * **long-poll** — uma conexão presa por máquina, o tempo todo, esperando
+    comando. É este que dimensiona o servidor: são milhares de conexões
+    OCIOSAS, e conexão ociosa também custa descritor e memória.
+
+O que ele mede: requisições por segundo, latência (mediana, p95, p99, máximo),
+erros por tipo, e a latência de um comando de verdade — o tempo entre enfileirar
+e a máquina receber, que é o número que a sala sente.
+
+    tools/nb3-carga --server https://... --key nb3a_... --maquinas 1600
+
+Cuidado óbvio: isto CRIA uma sede de teste e milhares de registros de máquina.
+Use `--limpar` no fim (o padrão) ou apague a sede depois.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import statistics
+import sys
+import time
+
+try:
+    import httpx
+except ImportError:
+    sys.exit("precisa do httpx: use o .venv do repositório (.venv/bin/python tools/nb3-carga)")
+
+
+def mac_de(i: int) -> str:
+    return "52-54-%02x-%02x-%02x-%02x" % (i >> 24 & 255, i >> 16 & 255, i >> 8 & 255, i & 255)
+
+
+STATUS = {
+    "sysresources": {"mem_pct": 41, "loadavg": [0.7, 0.5, 0.4], "swap_used_mb": 0},
+    "operations": {"editors": ["vim"], "firewall": True},
+    "hwinfo": {"mem_total_mb": 8192, "cpu": "Intel(R) Core(TM) i5-9500"},
+}
+
+
+class Medida:
+    def __init__(self) -> None:
+        self.lat: list[float] = []
+        self.erros: dict[str, int] = {}
+
+    def ok(self, dt: float) -> None:
+        self.lat.append(dt)
+
+    def erro(self, motivo: str) -> None:
+        self.erros[motivo] = self.erros.get(motivo, 0) + 1
+
+    def resumo(self) -> dict:
+        if not self.lat:
+            return {"n": 0, "erros": self.erros}
+        ordenada = sorted(self.lat)
+        def pct(p): return ordenada[min(len(ordenada) - 1, int(len(ordenada) * p))]
+        return {
+            "n": len(ordenada),
+            "mediana_ms": round(statistics.median(ordenada) * 1000, 1),
+            "p95_ms": round(pct(0.95) * 1000, 1),
+            "p99_ms": round(pct(0.99) * 1000, 1),
+            "max_ms": round(max(ordenada) * 1000, 1),
+            "erros": self.erros,
+        }
+
+
+async def uma_maquina(cli, base, image, mac, chave, medidas, ate, boot_atraso):
+    """O ciclo de vida de uma máquina: boot, telemetria e long-poll."""
+    h = {"X-NB-Machine-Key": chave}
+    await asyncio.sleep(boot_atraso)
+
+    # --- boot: o que o initrd busca antes de subir o sistema ---
+    for nome, caminho in (("stuff", f"/boot/v3/{image}/stuff"),
+                          ("manifest", f"/boot/v3/{image}/manifest"),
+                          ("usbcheck", f"/boot/v3/{image}/usb")):
+        t0 = time.monotonic()
+        try:
+            r = await cli.get(f"{base}{caminho}", headers={"X-NB-Boot-Key": os.environ["NB3_BOOTKEY"]})
+            medidas[nome].ok(time.monotonic() - t0) if r.status_code == 200 else medidas[nome].erro(str(r.status_code))
+        except Exception as e:  # noqa: BLE001 — qualquer falha é resultado de medida
+            medidas[nome].erro(type(e).__name__)
+
+    async def telemetria():
+        while time.monotonic() < ate:
+            t0 = time.monotonic()
+            try:
+                r = await cli.post(
+                    f"{base}/api/v1/site-images/{image}/machines/{mac}/status", json=STATUS, headers=h
+                )
+                medidas["status"].ok(time.monotonic() - t0) if r.status_code == 200 else medidas["status"].erro(str(r.status_code))
+            except Exception as e:  # noqa: BLE001
+                medidas["status"].erro(type(e).__name__)
+            await asyncio.sleep(45)
+
+    async def longpoll():
+        while time.monotonic() < ate:
+            t0 = time.monotonic()
+            try:
+                r = await cli.get(
+                    f"{base}/api/v1/site-images/{image}/machines/{mac}/commands",
+                    params={"wait": 25}, headers=h, timeout=60,
+                )
+                if r.status_code != 200:
+                    medidas["longpoll"].erro(str(r.status_code))
+                    await asyncio.sleep(5)
+                    continue
+                medidas["longpoll"].ok(time.monotonic() - t0)
+                for c in r.json().get("commands", []):
+                    # o que interessa é quando a máquina VIU o comando
+                    medidas["comando"].ok(time.monotonic() - float(os.environ.get("NB3_CMD_T0", t0)))
+                    cid = c["id"]
+                    await cli.post(
+                        f"{base}/api/v1/site-images/{image}/machines/{mac}/commands/{cid}/ack",
+                        json={"status": "done"}, headers=h,
+                    )
+            except Exception as e:  # noqa: BLE001
+                medidas["longpoll"].erro(type(e).__name__)
+                await asyncio.sleep(2)
+
+    await asyncio.gather(telemetria(), longpoll())
+
+
+async def principal(a) -> int:
+    base = a.server.rstrip("/")
+    adm = {"Authorization": f"Bearer {a.key}", "Content-Type": "application/json"}
+    limites = httpx.Limits(max_connections=a.maquinas + 64, max_keepalive_connections=a.maquinas + 64)
+
+    async with httpx.AsyncClient(limits=limites, timeout=30, verify=not a.inseguro) as cli:
+        r = await cli.get(f"{base}/api/v1/whoami", headers=adm)
+        if r.status_code != 200:
+            print(f"credencial recusada: {r.status_code} {r.text}", file=sys.stderr)
+            return 1
+
+        r = await cli.post(
+            f"{base}/api/v1/site-images",
+            json={"id": a.sede, "fullname": "Carga", "model": a.modelo},
+            headers=adm,
+        )
+        if r.status_code == 201:
+            criada = r.json()
+        elif r.status_code == 400 and "existe" in r.text:
+            criada = (await cli.get(f"{base}/api/v1/site-images/{a.sede}/credentials", headers=adm)).json()
+        else:
+            print(f"não consegui criar a sede: {r.status_code} {r.text}", file=sys.stderr)
+            return 1
+        os.environ["NB3_BOOTKEY"] = criada["boot_key"]
+        chave = criada["machine_key"]
+
+        medidas = {k: Medida() for k in ("stuff", "manifest", "usbcheck", "status", "longpoll", "comando")}
+        ate = time.monotonic() + a.segundos
+        print(f">> {a.maquinas} máquinas contra {base} por {a.segundos}s (sede {a.sede})")
+
+        tarefas = [
+            asyncio.create_task(
+                uma_maquina(cli, base, a.sede, mac_de(a.offset + i), chave, medidas, ate,
+                            # a rajada de boot espalhada na janela pedida
+                            (i / max(1, a.maquinas)) * a.rampa)
+            )
+            for i in range(a.maquinas)
+        ]
+
+        # no meio do teste, um comando para a sala inteira: é o número que a
+        # sala sente quando alguém clica "bloquear"
+        await asyncio.sleep(min(a.segundos * 0.6, a.rampa + 30))
+        if not a.comando_so_leitor:
+            os.environ["NB3_CMD_T0"] = str(time.monotonic())
+            t0 = time.monotonic()
+            r = await cli.post(f"{base}/api/v1/site-images/{a.sede}/commands",
+                               json={"command": "cleanhomenow"}, headers=adm)
+            print(f">> comando enfileirado em {(time.monotonic()-t0)*1000:.0f} ms ({r.status_code})")
+
+        await asyncio.gather(*tarefas, return_exceptions=True)
+
+        saida = {k: v.resumo() for k, v in medidas.items()}
+        print(json.dumps(saida, indent=2, ensure_ascii=False))
+
+        if a.comando_so_leitor:
+            # processo auxiliar: não cria nem apaga nada, só gera carga
+            pass
+        if a.limpar:
+            await cli.delete(f"{base}/api/v1/site-images/{a.sede}", headers=adm)
+            print(f">> sede {a.sede} apagada")
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description="Simula uma sala inteira contra o NutellaBoot 3.")
+    p.add_argument("--server", default=os.environ.get("NB3_BASE_URL", ""))
+    p.add_argument("--key", default=os.environ.get("NB3_API_KEY", os.environ.get("NB3_ADMIN_KEY", "")))
+    p.add_argument("--maquinas", type=int, default=1600)
+    # UM processo Python não dirige 1600 conexões: o gerador vira o gargalo e
+    # a medida passa a ser dele, não do servidor. Com `--offset` dá para rodar
+    # vários processos contra a mesma sede sem repetir MAC.
+    p.add_argument("--offset", type=int, default=0)
+    p.add_argument("--segundos", type=int, default=180, help="duração do teste")
+    p.add_argument("--rampa", type=int, default=120, help="em quantos segundos a sala liga")
+    p.add_argument("--sede", default="cargateste")
+    p.add_argument("--modelo", default="")
+    p.add_argument("--limpar", action="store_true", default=True)
+    p.add_argument("--comando-so-leitor", action="store_true",
+                   help="não enfileira o comando (para os processos auxiliares)")
+    p.add_argument("--manter", dest="limpar", action="store_false")
+    p.add_argument("--inseguro", action="store_true", help="só para servidor local sem TLS")
+    a = p.parse_args()
+    if not a.server or not a.key:
+        return p.error("informe --server e --key (ou NB3_BASE_URL / NB3_API_KEY)")
+    if not a.modelo:
+        return p.error("informe --modelo")
+    return asyncio.run(principal(a))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

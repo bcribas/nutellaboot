@@ -11,12 +11,27 @@ from ..settings import settings
 
 router = APIRouter(prefix="/api/v1/public")
 
-# rajada curta permitida, depois ~1 a cada poucos segundos
+# Rajada curta permitida, depois ~1 a cada poucos segundos.
+#
+# Configurável no `data/server.json` porque o limite é POR IP e uma
+# instituição inteira sai por um NAT só: cinco pessoas da mesma sede criando a
+# imagem delas ao mesmo tempo é uso normal, não abuso. O padrão é apertado de
+# propósito — quem precisa de mais, afrouxa sabendo o que está fazendo.
 _CREATE = {"rate": 0.2, "burst": 5}
 _REQUEST = {"rate": 0.1, "burst": 3}
 
 
-def _limit(request: Request, escopo: str, cfg: dict) -> None:
+def _cfg(escopo: str, padrao: dict) -> dict:
+    from .. import fsdb
+
+    server = fsdb.read_json(settings.data_root / "server.json", {}) or {}
+    return {**padrao, **((server.get("ratelimit") or {}).get(escopo) or {})}
+
+
+def _limit(request: Request, escopo: str, padrao: dict) -> None:
+    cfg = _cfg(escopo, padrao)
+    if not cfg.get("rate"):  # rate 0 = desligado
+        return
     ip = ratelimit.client_ip(request)
     if not ratelimit.allow(f"{escopo}:{ip}", rate=cfg["rate"], burst=cfg["burst"]):
         raise HTTPException(429, "muitas tentativas; tente de novo em instantes")

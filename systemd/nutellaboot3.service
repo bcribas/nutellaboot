@@ -1,0 +1,58 @@
+[Unit]
+Description=NutellaBoot 3 — sistema de boot em rede da Maratona SBC de Programação
+Documentation=https://github.com/bcribas/nutellaboot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=nutellaboot
+Group=nutellaboot
+WorkingDirectory=/opt/nutellaboot3
+
+Environment=NB3_DATA_ROOT=/var/lib/nutellaboot3
+# O HOME é o diretório de dados, e não /home/…, por causa do ProtectHome=yes
+# abaixo: é ali que fica o ~/.ssh com a chave que publica no files.mdp. Com o
+# home em /home, o serviço não enxergaria a própria chave e a publicação
+# falharia com "permission denied", que é um erro que não parece de caminho.
+Environment=HOME=/var/lib/nutellaboot3
+# Vai para dentro do stuff, do manifest e do nutellaboot.conf de TODO pendrive
+# gravado. Errar aqui é errar em cada pendrive que sair daqui.
+Environment=NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br
+# Rede de segurança do long-poll (ver routers/machines.py). Com ~1600 máquinas
+# seguradas, 5 s são 320 leituras de disco por segundo no único event loop;
+# 25 s são 64/s. O caminho normal continua sendo o sinal, em milissegundos.
+Environment=NB3_LONGPOLL_BACKSTOP=25
+
+# UM WORKER SÓ. Não é ajuste de desempenho, é correção: services/notify.py
+# guarda os sinais de long-poll e SSE na memória DO PROCESSO. Com dois
+# workers, metade dos comandos espera o mecanismo de segurança em vez de
+# chegar na hora, e metade dos painéis nunca recebe evento — em silêncio.
+# Para escalar além de um worker seria preciso tirar os sinais da memória
+# (Redis ou barramento), e isso é mudança de arquitetura.
+ExecStart=/opt/nutellaboot3/.venv/bin/uvicorn server.app.main:app \
+    --host 127.0.0.1 --port 8890 \
+    --backlog 4096 \
+    --timeout-keep-alive 65 \
+    --proxy-headers --forwarded-allow-ips 127.0.0.1 \
+    --log-level warning \
+    --no-access-log
+
+Restart=always
+RestartSec=2
+
+# 1600 máquinas seguram uma conexão cada, esperando comando. O padrão de 1024
+# descritores derruba a sala inteira e o sintoma é "não conecta mais ninguém".
+LimitNOFILE=65535
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/nutellaboot3
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
