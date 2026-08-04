@@ -112,6 +112,12 @@ export function usbBlock(imageId, token = "") {
         botaoBaixar(api.usbConfUrl(imageId, token), t("usb_download"))
       )
     );
+    // o wifi.conf mora na mesma partição e é editado à mão. Desde que a camada
+    // wifis.squash saiu, ele é a ÚNICA fonte de rede sem fio — inclusive para o
+    // sistema já rodando, não só para o boot.
+    tabela.appendChild(
+      linha(`3. <span class="mono">wifi.conf</span>`, t("usb_wifi_help"), null)
+    );
     caixa.appendChild(tabela);
 
     const como = document.createElement("p");

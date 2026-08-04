@@ -307,6 +307,7 @@
   "usb_stale_server": "Desactualizada: la dirección del servidor cambió después de esta imagen.",
   "usb_storage": "MEMORIA USB CONECTADA",
   "usb_title": "Memoria USB de arranque de esta sala",
+  "usb_wifi_help": "las redes wifi de la sede — el mismo archivo sirve al arranque y al sistema",
   "view_credentials": "Ver credenciales y enlace",
   "wallpaper": "Fondo de pantalla",
   "wallpaper_at_creation": "Fondo de pantalla (opcional)",

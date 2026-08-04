@@ -307,6 +307,7 @@
   "usb_stale_server": "Desatualizada: o endereço do servidor mudou depois desta imagem.",
   "usb_storage": "PENDRIVE CONECTADO",
   "usb_title": "Pendrive de boot desta sala",
+  "usb_wifi_help": "as redes sem fio da sede — o mesmo arquivo serve ao boot e ao sistema",
   "view_credentials": "Ver credenciais e link",
   "wallpaper": "Papel de parede",
   "wallpaper_at_creation": "Papel de parede (opcional)",

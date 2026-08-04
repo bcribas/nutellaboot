@@ -170,6 +170,19 @@ No NutellaBoot 2 eram duas bases de credenciais mantidas à mão: o
 perfis do NetworkManager. Trocar a senha da rede exigia lembrar das duas — e
 regravar o initrd.
 
+**A camada `wifis.squash` saiu dos modelos em agosto de 2026.** Ela tinha 4 kB
+e três redes fixas (`ICPC-BR`, `ICPC-BR-EMG`, `inverno`) que não têm relação
+com a rede de cada sede — nenhum firmware, nenhum driver, só três perfis.
+
+A consequência, que é preciso dizer em voz alta: **wifi agora existe apenas se
+a sede preencher o `wifi.conf` do pendrive**, e isso vale também para o sistema
+já rodando, não só para o boot. Quem conectava em `ICPC-BR` porque a camada
+trazia o perfil deixa de conectar até pôr a rede no arquivo.
+
+O papel `wifi` continua existindo em `layer_roles.PAPEIS`: quem quiser mesmo
+despachar perfis numa camada pode. O que saiu foi a camada deste modelo, não a
+possibilidade.
+
 ### A espera de associação
 
 `configure_wifi()` não dá um `sleep` e torce. Ele sobe o `wpa_supplicant` e

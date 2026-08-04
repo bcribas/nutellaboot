@@ -6,12 +6,26 @@
 # .nmconnection. Trocar a rede exigia mexer nas duas. Agora a fonte é única:
 # o wifi.conf da partição do pendrive.
 nb3_post_nm_wifi() {
-    [ -s /run/nutellaboot/wifi.conf ] || return 0
+    # o MESMO caminho que o initrd usa (`NB_RUN`), e não um literal repetido:
+    # duas verdades sobre o mesmo lugar é como uma delas fica para trás — e era
+    # o que impedia este módulo de ser exercitado em teste
+    _conf=${NB_RUN:-/run/nutellaboot}/wifi.conf
+    [ -s "$_conf" ] || return 0
     _dir=${rootmnt?}/etc/NetworkManager/system-connections
     mkdir -p "$_dir"
 
     while IFS="$(printf '\t')" read -r _ssid _psk _flags; do
         case "$_ssid" in '' | '#'*) continue ;; esac
+        # O SSID vira NOME DE ARQUIVO. Um SSID com barra escreveria fora de
+        # system-connections/, como root, dentro do sistema que a sala monta —
+        # a mesma armadilha do host do firewall. Este arquivo é editado à mão
+        # pela sede, então errar aqui é mais fácil que ser atacado.
+        case "$_ssid" in
+            */* | .*)
+                nb_warn "ignoring wifi network with invalid SSID: $_ssid"
+                continue
+                ;;
+        esac
         _file=$_dir/$_ssid.nmconnection
         {
             echo "[connection]"
@@ -39,7 +53,7 @@ nb3_post_nm_wifi() {
             echo "method=auto"
         } > "$_file"
         chmod 600 "$_file"
-    done < /run/nutellaboot/wifi.conf
+    done < "$_conf"
     nb_log "wifi profiles generated for NetworkManager"
 }
 

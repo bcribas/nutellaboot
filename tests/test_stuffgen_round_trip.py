@@ -359,3 +359,98 @@ def test_sem_senha_o_shadow_nao_e_tocado(imagem, raiz):
     r = roda_consumidor(imagem, "nb3_post_polkit", raiz)
     assert r.returncode == 0, r.stderr
     assert (raiz / "etc/shadow").read_text() == original
+
+
+# --- o wifi do pendrive vira perfil do NetworkManager ------------------------
+#
+# O mesmo `wifi.conf` alimenta o wpa_supplicant do initrd (para o boot) e os
+# perfis do NetworkManager (para o sistema rodando). É o que substitui a camada
+# `wifis.squash`, que tinha 4 kB e três redes fixas sem relação com a sede.
+#
+# O módulo existia, era chamado, e NENHUM teste jamais o executou.
+
+WIFI = "\t".join(["ICPC-BR", "senha-da-sede"]) + "\n" \
+    + "ICPC-ABERTA\t\n" \
+    + "\t".join(["oculta", "s3nh4", "hidden"]) + "\n" \
+    + "# comentário\n"
+
+
+def com_wifi(tmp_path, conteudo=WIFI):
+    """O wifi.conf onde o initrd o deixa: copiado do pendrive para a RAM."""
+    run = tmp_path / "run"
+    run.mkdir(exist_ok=True)
+    (run / "wifi.conf").write_text(conteudo, encoding="utf-8")
+    return f'NB_RUN="{run}"'
+
+
+def perfis(raiz):
+    d = raiz / "etc/NetworkManager/system-connections"
+    return {p.stem: p.read_text(encoding="utf-8") for p in d.iterdir()} if d.is_dir() else {}
+
+
+def test_a_rede_com_senha_vira_perfil_do_networkmanager(imagem, raiz, tmp_path):
+    r = roda_consumidor(imagem, "nb3_post_nm_wifi", raiz, extra=com_wifi(tmp_path))
+    assert r.returncode == 0, r.stderr
+    p = perfis(raiz)
+    assert set(p) == {"ICPC-BR", "ICPC-ABERTA", "oculta"}, sorted(p)
+
+    texto = p["ICPC-BR"]
+    assert "id=ICPC-BR" in texto and "type=wifi" in texto
+    assert "key-mgmt=wpa-psk" in texto
+    assert "psk=senha-da-sede" in texto
+    assert "method=auto" in texto
+
+
+def test_a_rede_aberta_nao_ganha_seguranca(imagem, raiz, tmp_path):
+    """Com `[wifi-security]` sem senha o NetworkManager recusa o perfil, e a
+    rede aberta simplesmente não conecta."""
+    roda_consumidor(imagem, "nb3_post_nm_wifi", raiz, extra=com_wifi(tmp_path))
+    texto = perfis(raiz)["ICPC-ABERTA"]
+    assert "[wifi-security]" not in texto
+    assert "psk=" not in texto
+
+
+def test_a_rede_oculta_e_marcada(imagem, raiz, tmp_path):
+    """Sem `hidden=true` a rede não é encontrada — o mesmo motivo do
+    `scan_ssid=1` no wpa_supplicant."""
+    roda_consumidor(imagem, "nb3_post_nm_wifi", raiz, extra=com_wifi(tmp_path))
+    assert "hidden=true" in perfis(raiz)["oculta"]
+
+
+def test_o_perfil_nao_e_legivel_por_qualquer_um(imagem, raiz, tmp_path):
+    """A senha da rede da sede está lá dentro, em claro — é assim que o
+    NetworkManager guarda, e por isso o modo importa."""
+    roda_consumidor(imagem, "nb3_post_nm_wifi", raiz, extra=com_wifi(tmp_path))
+    arq = raiz / "etc/NetworkManager/system-connections/ICPC-BR.nmconnection"
+    assert oct(arq.stat().st_mode)[-3:] == "600"
+
+
+def test_o_uuid_e_o_mesmo_em_dois_boots(imagem, raiz, tmp_path):
+    """UUID novo a cada boot faz o NetworkManager acumular um perfil duplicado
+    por boot, e a home é persistente."""
+    extra = com_wifi(tmp_path)
+    roda_consumidor(imagem, "nb3_post_nm_wifi", raiz, extra=extra)
+    primeiro = perfis(raiz)["ICPC-BR"]
+    roda_consumidor(imagem, "nb3_post_nm_wifi", raiz, extra=extra)
+    assert perfis(raiz)["ICPC-BR"] == primeiro
+    assert len(perfis(raiz)) == 3
+
+
+def test_ssid_com_barra_nao_escreve_fora_do_diretorio(imagem, raiz, tmp_path):
+    """O SSID vira nome de arquivo, escrito como root dentro do sistema que a
+    sala monta. O arquivo é editado à mão pela sede: errar aqui é mais fácil
+    que ser atacado."""
+    ruim = "../../../etc/cron.d/pwn\tsenha\nboa\tsenha2\n"
+    r = roda_consumidor(imagem, "nb3_post_nm_wifi", raiz, extra=com_wifi(tmp_path, ruim))
+    assert r.returncode == 0, r.stderr
+    assert not (raiz / "etc/cron.d/pwn").exists()
+    assert set(perfis(raiz)) == {"boa"}
+    assert "invalid SSID" in r.stdout + r.stderr
+
+
+def test_sem_wifi_conf_nao_escreve_nada(imagem, raiz, tmp_path):
+    """Pendrive sem redes é o padrão de fábrica: o `nb3-genusb` só embarca os
+    comentários do exemplo."""
+    r = roda_consumidor(imagem, "nb3_post_nm_wifi", raiz, extra=com_wifi(tmp_path, "# só comentário\n"))
+    assert r.returncode == 0, r.stderr
+    assert perfis(raiz) == {}

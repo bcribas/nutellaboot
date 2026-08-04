@@ -307,6 +307,7 @@
   "usb_stale_server": "Out of date: the server address changed after this image.",
   "usb_storage": "USB DRIVE CONNECTED",
   "usb_title": "Boot USB drive for this room",
+  "usb_wifi_help": "the site's wifi networks — the same file serves the boot and the system",
   "view_credentials": "View credentials and link",
   "wallpaper": "Wallpaper",
   "wallpaper_at_creation": "Wallpaper (optional)",
