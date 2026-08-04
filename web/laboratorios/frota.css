@@ -1,0 +1,94 @@
+/* Uma linha por sede, não um cartão por máquina: são 54 sedes contra ~1900
+   máquinas, e a tela existe para dar conta do conjunto. O cartão do painel por
+   sede continua sendo o certo lá, onde são ~35. */
+
+table.frota {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+table.frota th {
+  text-align: right;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+table.frota th:first-child,
+table.frota th:nth-child(2) { text-align: left; }
+
+table.frota td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+table.frota td.nome,
+table.frota td.marca { text-align: left; }
+
+table.frota tr.sede:hover { background: var(--panel2); }
+table.frota tr.sede.sel { background: rgba(244, 121, 31, 0.1); }
+
+.sedeid { font-weight: 600; }
+.sedenome { color: var(--muted); font-size: 12px; }
+
+/* zero não é notícia: só destaca o que pede ação */
+.n0 { color: var(--muted); opacity: 0.45; }
+.nalerta { color: var(--bad); font-weight: 600; }
+.ntrava { color: var(--warn); }
+
+td.expandir button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0 4px;
+}
+
+/* as máquinas de uma sede expandida: linha estreita, para caber muita */
+tr.maquinas > td { padding: 0 0 10px 34px; background: var(--panel); }
+
+.mlist { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.mchip {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.mchip.sel { border-color: var(--accent); background: rgba(244, 121, 31, 0.14); }
+.mchip.off { opacity: 0.5; }
+.mchip.alerta { border-color: var(--bad); }
+.mchip .mac { font-family: ui-monospace, monospace; }
+.mchip .time { color: var(--muted); }
+
+/* a confirmação de dedo pesado: digitar o número de máquinas */
+.confirma {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.confirma .cbox {
+  background: var(--panel);
+  border: 1px solid var(--bad);
+  border-radius: 10px;
+  padding: 20px;
+  max-width: 460px;
+}
+
+.confirma input { width: 8ch; font-size: 18px; text-align: center; }

@@ -8,6 +8,7 @@ from .routers import (
     health,
     images,
     invites,
+    labs,
     layers,
     machines,
     models,
@@ -77,6 +78,7 @@ def create_app() -> FastAPI:
     app.include_router(machines.router)
     app.include_router(roster.router)
     app.include_router(webhooks.router)
+    app.include_router(labs.router)
     app.include_router(layers.router)
     app.include_router(invites.router)
     app.include_router(public.router)

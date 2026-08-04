@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NutellaBoot 3 — Frota</title>
+<link rel="icon" href="/common/favicon.png">
+<link rel="stylesheet" href="/common/style.css">
+<link rel="stylesheet" href="../hotconfig/lab.css">
+<link rel="stylesheet" href="./frota.css">
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="fleet_title"></h1>
+  <span class="sub" id="resumo"></span>
+  <span class="spacer"></span>
+  <a class="btn small" href="/admin/" data-i18n="fleet_back"></a>
+  <span id="lang"></span>
+</header>
+
+<div class="toolbar">
+  <div class="filters" id="filters"></div>
+  <span class="spacer"></span>
+  <label class="sub" for="dias" data-i18n="fleet_window"></label>
+  <select id="dias">
+    <option value="1">1</option>
+    <option value="7" selected>7</option>
+    <option value="30">30</option>
+    <option value="90">90</option>
+  </select>
+  <a id="csv" class="btn small" data-i18n="fleet_csv"></a>
+  <input type="text" id="search" data-i18n-placeholder="search">
+</div>
+
+<!-- A seleção mistura os dois níveis: sede inteira e máquina solta. -->
+<div class="actionbar" id="actionbar">
+  <span id="selcount"></span>
+  <span class="spacer"></span>
+  <button type="button" class="primary" data-cmd="lock" data-i18n="lock_screen"></button>
+  <button type="button" data-cmd="unlock" data-i18n="unlock_screen"></button>
+  <button type="button" data-cmd="cleanhomenow" data-i18n="clean_home"></button>
+  <button type="button" data-cmd="enablefirewall" data-i18n="enable_firewall"></button>
+  <button type="button" data-cmd="disablefirewall" data-i18n="disable_firewall"></button>
+  <button type="button" data-cmd="resetcontaeditores" data-i18n="reset_editors"></button>
+  <button type="button" class="danger" data-cmd="mlreboot" data-i18n="reboot"></button>
+  <button type="button" class="danger" data-cmd="mlpoweroff" data-i18n="poweroff"></button>
+</div>
+
+<main>
+  <table class="frota" id="sites"></table>
+  <p id="empty" class="muted"></p>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

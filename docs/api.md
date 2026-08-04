@@ -430,6 +430,38 @@ Sobrevive a reboot da máquina, a recarga da página e a reinício do servidor
 A máquina **não** dispensa o próprio alerta: adulterar o agente não apaga o
 rastro. O evento `alert.raised` também vai por webhook, para o MOJ.
 
+### Frota: todas as sedes de uma vez
+
+O painel por sede responde "como está a minha sala"; estas duas respondem "o
+que está acontecendo no conjunto, e como ajo num recorte dele".
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| GET | `/api/v1/labs` | C | `?dias=7` e `?format=csv` | `{sites:[{id, fullname, machines, active, new, online, locked, alerts, unbound}], days}` |
+| POST | `/api/v1/commands` | C | `{command, targets, args?, delay?}` | `{results, machines, failed}` |
+
+`targets` é `{sede: "all"}` ou `{sede: [macs]}`, misturando os dois à vontade.
+Cada sede vira uma entrada em `results` — com `command_id` e `machines`, ou com
+`error` e `status`.
+
+`dias` responde **quantas máquinas de cada sede rodaram nos últimos X dias**, e
+são dois números porque a pergunta tem duas leituras: `active` é quem teve
+contato dentro da janela e `new` é quem foi visto pela PRIMEIRA vez nela. Uma
+máquina que apareceu há 40 dias e reportou ontem é ativa e não é nova.
+
+> `first_seen` é quando ESTE servidor viu aquele MAC pela primeira vez, não o
+> primeiro boot da máquina na vida: recriar o `data/` reinicia a conta.
+
+O resumo **não devolve o `status` das máquinas**. Ele é livre e pode ter 256 kB;
+numa frota de 1890 máquinas seriam ~0,9 MB por atualização, contra dezenas de kB
+assim. Para o detalhe de uma sede, use `GET /site-images/{img}/machines`.
+
+`POST /commands` age em várias sedes numa requisição só, em vez de uma por sede
+com metade falhando em silêncio. Cada sede entra no relatório com o que
+aconteceu, e uma recusada não impede as outras: sede de outro dono responde
+`404` ali dentro (não 403 — um 403 confirmaria que o nome existe), e o cadeado
+do modelo vale igual, com `403` e o nome do campo.
+
 ### Comandos e bloqueio de tela
 
 | Método | Caminho | Cred. | Corpo | Resposta |

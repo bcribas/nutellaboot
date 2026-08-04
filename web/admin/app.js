@@ -1225,11 +1225,13 @@ function abrirPainel() {
   $("#login").classList.add("hidden");
   $("#panel").classList.remove("hidden");
   $("#logout").classList.remove("hidden");
+  $("#gofrota").classList.remove("hidden");
 }
 
 function pedirChave() {
   $("#panel").classList.add("hidden");
   $("#logout").classList.add("hidden");
+  $("#gofrota").classList.add("hidden");
   $("#login").classList.remove("hidden");
 }
 

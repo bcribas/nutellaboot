@@ -50,7 +50,7 @@ def _machine(image: str, x_nb_machine_key: str | None, mac: str) -> str:
     return mac
 
 
-def _publish(image: str, event: str, data: dict) -> None:
+def publicar_evento(image: str, event: str, data: dict) -> None:
     """Avisa o painel (SSE) e os sistemas externos inscritos (webhooks)."""
     notify.publish(image, {"event": event, "data": data, "at": time.time()})
     webhook_push.emit(image, event, data)
@@ -78,9 +78,9 @@ async def post_status(
     if not isinstance(body, dict):
         raise HTTPException(400, "telemetria precisa ser um objeto JSON")
     res = m.record_status(image, mac, body)
-    _publish(image, "machine.status", {"mac": mac})
+    publicar_evento(image, "machine.status", {"mac": mac})
     if res["first_seen"]:
-        _publish(image, "machine.first_seen", {"mac": mac})
+        publicar_evento(image, "machine.first_seen", {"mac": mac})
     return {
         "pending_commands": len(m.ready_commands(image, mac)),
         "lock": m.get_lock(image, mac),
@@ -142,7 +142,7 @@ async def post_event(
         str(body.get("detail", "")),
         {"vendor": str(body.get("vendor", ""))[:120]} if body.get("vendor") else None,
     )
-    _publish(image, "alert.raised", {"mac": mac, **alerta})
+    publicar_evento(image, "alert.raised", {"mac": mac, **alerta})
     return {"ok": True, "id": alerta["id"]}
 
 
@@ -165,7 +165,7 @@ async def dismiss_alert(
     if alerta is None:
         # dois fiscais clicando ao mesmo tempo é o caso normal, não um erro
         return {"ok": True, "already": True}
-    _publish(image, "alert.dismissed", {"mac": mac, **alerta})
+    publicar_evento(image, "alert.dismissed", {"mac": mac, **alerta})
     return {"ok": True, "alert": alerta}
 
 
@@ -176,7 +176,7 @@ async def dismiss_all_alerts(
     mac = m.normalize_mac(mac)
     limpos = alerts.dismiss_all(image, mac, p.name or "console")
     for a in limpos:
-        _publish(image, "alert.dismissed", {"mac": mac, **a})
+        publicar_evento(image, "alert.dismissed", {"mac": mac, **a})
     return {"ok": True, "dismissed": len(limpos)}
 
 
@@ -219,7 +219,7 @@ async def ack_command(
 ) -> dict:
     mac = _machine(image, x_nb_machine_key, mac)
     found = m.ack(image, mac, cid, {"status": body.get("status", "done"), "output": body.get("output", "")})
-    _publish(image, "command.acked", {"mac": mac, "id": cid, "status": body.get("status")})
+    publicar_evento(image, "command.acked", {"mac": mac, "id": cid, "status": body.get("status")})
     return {"ok": True, "found": found}
 
 
@@ -245,7 +245,7 @@ async def get_machine(
     return m.get_machine(image, m.normalize_mac(mac))
 
 
-def _comandos_bloqueados(image: str, *, is_admin: bool) -> dict[str, str]:
+def comandos_bloqueados(image: str, *, is_admin: bool) -> dict[str, str]:
     """Comandos que esta credencial NÃO pode mandar nesta imagem, e por causa
     de qual campo.
 
@@ -273,7 +273,7 @@ async def comandos_permitidos(
 ) -> dict:
     """O que esta credencial pode mandar. A tela usa para não oferecer botão
     que o servidor vai recusar, e quem integra para não descobrir apanhando."""
-    bloqueados = _comandos_bloqueados(image, is_admin=(p.kind == "admin"))
+    bloqueados = comandos_bloqueados(image, is_admin=(p.kind == "admin"))
     return {
         "allowed": sorted(m.ALLOWED_COMMANDS - set(bloqueados)),
         "blocked": bloqueados,
@@ -287,7 +287,7 @@ async def create_command(
     command = body.get("command", "")
     if command not in m.ALLOWED_COMMANDS:
         raise HTTPException(400, f"comando não permitido: {command}")
-    bloqueados = _comandos_bloqueados(image, is_admin=(p.kind == "admin"))
+    bloqueados = comandos_bloqueados(image, is_admin=(p.kind == "admin"))
     if command in bloqueados:
         raise HTTPException(
             403,
@@ -302,7 +302,7 @@ async def create_command(
     cid = m.enqueue(image, macs, command, body.get("args", ""), int(body.get("delay", 0)))
     for mac in macs:
         notify.wake_machine(image, mac)
-    _publish(image, "command.sent", {"id": cid, "command": command, "machines": len(macs)})
+    publicar_evento(image, "command.sent", {"id": cid, "command": command, "machines": len(macs)})
     return {"command_id": cid, "machines": len(macs)}
 
 
@@ -315,7 +315,7 @@ async def _lock(image: str, macs: list[str], locked: bool, by: str) -> dict:
     cid = m.enqueue(image, macs, "donottouch" if locked else "cantouch")
     for mac in macs:
         notify.wake_machine(image, mac)
-    _publish(image, "machine.locked" if locked else "machine.unlocked", {"machines": macs})
+    publicar_evento(image, "machine.locked" if locked else "machine.unlocked", {"machines": macs})
     return {"command_id": cid, "machines": len(macs), "locked": locked}
 
 
