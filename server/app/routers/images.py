@@ -92,19 +92,23 @@ async def bulk_create(
     if format == "csv":
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["id", "ok", "token", "machine_key", "boot_key", "configureitor_url", "error"])
+        # as DUAS telas da sede: são os dois links que se entregam ao
+        # coordenador, e o CSV é o que se distribui depois de criar 50 sedes.
+        # Só o configureitor saía daqui, então metade do que a criação em massa
+        # produziu ficava só no JSON.
+        colunas = [
+            "id",
+            "ok",
+            "token",
+            "machine_key",
+            "boot_key",
+            "configureitor_url",
+            "hotconfig_url",
+            "error",
+        ]
+        w.writerow(colunas)
         for r in results:
-            w.writerow(
-                [
-                    r.get("id", ""),
-                    r["ok"],
-                    r.get("token", ""),
-                    r.get("machine_key", ""),
-                    r.get("boot_key", ""),
-                    r.get("configureitor_url", ""),
-                    r.get("error", ""),
-                ]
-            )
+            w.writerow([r.get("ok", "") if c == "ok" else r.get(c, "") for c in colunas])
         return PlainTextResponse(buf.getvalue(), media_type="text/csv")
     return {"results": results}
 

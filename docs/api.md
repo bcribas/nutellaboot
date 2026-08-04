@@ -90,6 +90,15 @@ mandar a chave no corpo; `aria2c` e `curl` usam o cabeçalho.
 | GET/POST | `/boot/v3/{img}/lockinfo/{mac}` | B | tela de bloqueio | JSON com time, organização, país e lugar |
 | GET/POST | `/boot/v3/{img}/machines/{mac}/lockstate` | B | tela de bloqueio (a cada 4 s) | `locked` ou `unlocked` |
 | GET/POST | `/boot/v3/{img}/roster/logos/{org}` | B | tela de bloqueio | SVG ou PNG do logotipo |
+| GET/POST | `/boot/v3/{img}/usb` | B | `stuff` | `BUILD <id>` e, nas linhas seguintes, `MD5 ARQUIVO URL` (mesmo formato do manifest) |
+| GET/POST | `/boot/v3/{img}/usbfile/{nome}` | B | `stuff` | o `vmlinuz` ou o `initrd.img` da construção atual |
+
+`/usb` é como a máquina descobre que o pendrive de onde ela bootou está para
+trás: o initrd carrega o próprio carimbo em `/etc/nutellaboot-build`, compara,
+e se for diferente baixa os arquivos, confere o md5 e regrava a partição
+sozinho. Construção sem `client/build/build.json` responde `BUILD unknown`, e
+aí a máquina não confere nada. `{nome}` sai de uma lista fechada
+(`vmlinuz`, `initrd.img`). Veja `docs/boot-flow.md`.
 
 ### Exemplo: manifest
 
@@ -163,6 +172,7 @@ ALLOWNETWORKCHANGE='f'
 |---|---|---|---|---|
 | POST | `/api/v1/site-images` | C | `{id, fullname, model, unlocked?, wallpaper_locked?}` | imagem criada **com as credenciais em claro** (única vez) |
 | POST | `/api/v1/site-images/bulk` | A | TSV ou `{rows:[…]}` | `{results:[…]}`; com `?format=csv`, CSV das credenciais |
+| POST | `/api/v1/site-images/{img}/unlock` | C | — | destrava o formulário inteiro da imagem |
 | GET | `/api/v1/site-images?prefix=` | C | — | `{images:[…]}` (o sub-admin vê só as dele) |
 | GET | `/api/v1/site-images/{img}` | C, I | — | `image.json` |
 | PATCH | `/api/v1/site-images/{img}` | C | `{fullname?, unlocked?, model?, wallpaper_locked?}` | imagem atualizada |
@@ -180,6 +190,20 @@ em `reserved_names` no `data/server.json`); recebem 403 com a explicação.
 
 Cada site-image guarda o campo `owner` (`"admin"` ou `"invite:<CÓDIGO>"`), que
 é o que faz o console filtrar.
+
+**A criação em massa devolve OS DOIS links da sede.** São duas telas —
+`/configureitor/` (formulário e papel de parede) e `/hotconfig/` (laboratório
+durante a prova) — e as duas usam o mesmo `?id=&tk=`. O CSV sai assim:
+
+```
+id,ok,token,machine_key,boot_key,configureitor_url,hotconfig_url,error
+```
+
+Quem prefere não montar `curl` na mão tem o cliente de referência:
+
+```bash
+tools/nb3-api bulk sedes.tsv > credenciais.csv
+```
 
 > **`/api/v1/site-images/…` continua respondendo, para sempre**, como alias de
 > `/api/v1/site-images/…`. O agente de telemetria embarcado nas camadas já
@@ -244,6 +268,18 @@ Notas que economizam depuração:
 | POST | `/api/v1/owners/{id}/disable` | A | `{disabled?: true}` | suspende (ou reativa) o console |
 | PATCH | `/api/v1/owners/{id}/quotas` | A | `{max_models?, max_images?, build_quota?}` | `{id, quotas, usage}` |
 
+**Convites** — a credencial de sub-administração é o próprio código:
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| GET | `/api/v1/invites` | A | — | `{invites:[…]}` |
+| POST | `/api/v1/invites` | A | `{label?, note?, model?, count?, max_images?, max_models?, build_quota?, expires_at?, unlocked?, wallpaper_locked?}` | `{invites:[…]}` — **com os códigos**; `count` emite vários de uma vez |
+| DELETE | `/api/v1/invites/{code}` | A | — | **409** listando o que ficaria órfão; `?force=true` apaga assim mesmo |
+
+`unlocked` no convite escolhe o perfil da imagem que ele vai criar: **Livre**
+(o dono manda em tudo) ou **Oficial** (valem os cadeados do modelo). `model`
+prende o convite a um modelo só.
+
 `GET /api/v1/whoami` é o que a tela consulta ao abrir para saber o que
 mostrar; sem ele o console descobriria as próprias permissões apanhando de
 401/404.
@@ -256,6 +292,32 @@ na hora, e nenhuma limpeza feita por fora deixa a cota travada por engano.
 preserva o histórico e o dono dos objetos. `DELETE /invites/{code}` apaga a
 credencial: se o convite já criou alguma coisa, responde **409** listando o
 que ficaria órfão e só prossegue com `?force=true`.
+
+### Auto-atendimento e pedidos
+
+Quem tem um código de convite cria a própria imagem sem passar pela
+administração; quem não tem, pede um. Estas três rotas são as **únicas sem
+credencial** da API, e por isso são as únicas com limite por IP.
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| GET | `/api/v1/public/models` | — | — | `{models:[…]}` — só os marcados `public` |
+| POST | `/api/v1/public/site-images` | — | `{code, id, fullname, model?}` | imagem criada **com as credenciais em claro** |
+| POST | `/api/v1/public/requests` | — | `{wanted_name, contact, note?}` | `{ok, id}` |
+
+O `model` do corpo só é considerado quando o convite não prende um; nome
+começando por dígito é recusado com 403 (espaço reservado à administração).
+
+Do outro lado, a administração despacha os pedidos:
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| GET | `/api/v1/requests` | A | — | `{requests:[…]}` |
+| POST | `/api/v1/requests/{rid}/approve` | A | `{action:"issue_code"\|"create", model?, max_images?, build_quota?, unlocked?}` | o código emitido, ou a imagem já criada com as credenciais |
+| POST | `/api/v1/requests/{rid}/reject` | A | `{reason?}` | pedido marcado como recusado |
+
+`issue_code` devolve um convite para a pessoa se virar; `create` já cria a
+imagem e devolve as credenciais para repassar.
 
 ### Configuração e wallpaper
 
@@ -280,6 +342,15 @@ guardam-se apenas como hash com sal, e enviar vazio mantém a atual.
 | PUT | `/api/v1/site-images/{img}/machines/{mac}/binding` | C, I, S`bindings:write` | `{user_id}` ou `{name, seat}` | vínculo criado |
 | DELETE | `/api/v1/site-images/{img}/machines/{mac}/binding` | C, I, S`bindings:write` | — | `204` |
 | GET | `/api/v1/site-images/{img}/bindings` | C, I, S`machines:read` | — | `{bindings:[{mac, …}]}` |
+
+O `user_id` do vínculo tem que existir no roster da imagem, senão vem 404 —
+é o que impede um número de assento virar vínculo fantasma.
+
+> **`GET /bindings` percorre as máquinas CONHECIDAS**, não os vínculos
+> gravados: uma máquina passa a existir quando reporta status pela primeira
+> vez. Vincular antes disso funciona e fica gravado, mas **não aparece na
+> lista** até a máquina bootar. Quem pré-vincula os assentos na véspera vai
+> ver `{"bindings": []}` e achar que perdeu o trabalho.
 
 ### Máquinas e telemetria
 
@@ -421,6 +492,31 @@ arquivos e as telas usam essa URL — a máquina de gestão não serve 400 MB po
 sede. A imagem genérica não leva segredo nenhum e pode ficar pública; a da sala
 ganha um sufixo aleatório no nome por causa da chave que carrega.
 
+### Relatório da sede por período
+
+| Método | Caminho | Cred. | Resposta |
+|---|---|---|---|
+| GET | `/api/v1/site-images/{img}/report?since=&until=&format=&lang=` | C, I | HTML autocontido (padrão) ou JSON com `format=json` |
+
+`since`/`until` em epoch. `lang` é `pt`, `en` ou `es`. O HTML **não busca nada
+de fora** — CSS embutido e gráficos em SVG desenhados pelo servidor —, então
+serve para salvar e mandar por mensagem. Aceita `?tk=` na URL além do
+cabeçalho, porque é um link que se abre em outra aba.
+
+O conteúdo sai da série temporal que o servidor guarda a cada envio de status
+(memória, carga, editores em uso) mais o inventário do último `hwinfo`, os
+vínculos com os times, os alertas do período e as estranhezas do `dmesg`.
+
+### Builds de camada por imagem
+
+Além da fila global (`/api/v1/layerbuilds`), a sede constrói a própria camada
+de pacotes extras, gastando a cota dela:
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| POST | `/api/v1/site-images/{img}/layerbuilds` | C, I | `{name, packages:[…]}` | job criado + `quota` restante |
+| GET | `/api/v1/site-images/{img}/layerbuilds` | C, I | — | `{jobs:[…], quota}` |
+
 ### Publicação no servidor de arquivos
 
 | Método | Caminho | Cred. | Corpo | Resposta |
@@ -448,6 +544,38 @@ Eventos disponíveis: `machine.first_seen`, `machine.status`, `machine.locked`, 
 `http://` ou `https://`, e cada evento é validado contra o catálogo.
 
 ---
+
+## Cliente de referência (`tools/nb3-api`)
+
+Um arquivo, só biblioteca padrão do Python 3. É para ser **copiado**: quem
+integra leva o arquivo e usa, sem venv, sem `pip` e sem depender deste
+repositório.
+
+```bash
+export NB3_BASE_URL=https://nutellaboot.naquadah.com.br
+export NB3_API_KEY=nb3s_...          # serve nb3a_, nb3s_ e o nb3i_ da sede
+
+nb3-api whoami
+nb3-api bulk sedes.tsv > credenciais.csv
+nb3-api roster set 26brbr @times.json
+nb3-api bind 26brbr 52-54-00-12-34-56 team-001 --seat 012
+nb3-api lock 26brbr                  # a sala inteira
+nb3-api machines 26brbr
+nb3-api report 26brbr 1785600000 1785700000 > relatorio.html
+```
+
+Três coisas nele que valem para qualquer cliente que você escreva:
+
+- **TLS sempre verificado**, sem opção de desligar;
+- **falha alto**: resposta fora de 2xx imprime o corpo no stderr e sai != 0. É
+  o defeito da invariante 15 — `curl -sS` sem `--fail` devolvia o JSON de erro
+  com código de saída **zero**, e dois modelos ficaram vazios com o script
+  dizendo que tinha registrado;
+- **Bearer, sempre**. O cookie de sessão é do navegador e só vale com o
+  cabeçalho `X-NB-Console`; ferramenta usa chave.
+
+Os exemplos em `curl` continuam nas seções abaixo de propósito: eles são a
+prova de que a API é HTTP comum, e não depende de cliente nenhum.
 
 ## Integração com o MOJ
 
