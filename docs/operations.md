@@ -813,6 +813,57 @@ consulta a cada 4 segundos) **e** enfileira o comando (que o agente executa).
 Se um falhar, o outro resolve. E matar o processo da tela não destrava: o
 agente relança em até 3 segundos enquanto o estado for "bloqueada".
 
+### Todas as sedes numa tela
+
+```
+https://nutellaboot.naquadah.com.br/laboratorios/
+```
+
+Uma linha por sede — máquinas, quantas rodaram na janela escolhida, quantas
+apareceram nela pela primeira vez, quantas estão ligadas, travadas e em alerta.
+Clicar na seta expande a sede e mostra as máquinas; clicar na linha seleciona a
+sede inteira. A seleção mistura os dois níveis (uma sede inteira e máquinas
+soltas de outra) e os comandos valem para o recorte.
+
+Acima de 50 máquinas, confirmar exige **digitar o número** — um clique errado em
+"desligar" com a frota selecionada é a prova inteira no chão.
+
+O sub-admin vê só as sedes dele. O botão **Baixar CSV** dá as mesmas contas da
+tela, com a janela de dias escolhida.
+
+### Relatório da frota
+
+Na mesma tela, o painel **Relatório da frota** (só administração). Escolha a
+janela de dias, clique em *Gerar* e espere: a tela mostra "gerando…" e sozinha
+troca para os links quando fica pronto.
+
+Sai um HTML para olhar — perfil nacional de memória e processadores, e por sede
+os editores usados, memória, carga, alertas e o que apareceu no dmesg — e os
+dados brutos para processar em planilha ou script:
+
+| arquivo | uma linha por |
+|---|---|
+| `inventario.csv` | máquina (processador, núcleos, RAM, time, organização, país) |
+| `editores.csv` | máquina × editor (amostras e minutos acumulados) |
+| `recursos-hora.csv` | máquina × hora (memória e carga, média e pico) |
+| `recursos-brutos.csv.gz` | amostra (o arquivo grande, comprimido) |
+| `alertas.csv` | alerta que tocou, com quem dispensou e quando |
+
+Quanto tempo leva: a frota inteira (1890 máquinas, 25 milhões de amostras) com
+7 dias são 1,5 GB lidos e cerca de dois minutos e meio. O resultado dá ~200 MB,
+quase tudo no `recursos-brutos.csv.gz`. **Uma geração de cada vez** — duas juntas leriam os
+mesmos 1,5 GB em paralelo, e é o mesmo disco que atende o boot das salas. Por
+isso também: gere depois da prova, ou num intervalo, e não no meio do início
+simultâneo.
+
+Os arquivos ficam em `data/reports/frota/` e são sobrescritos a cada geração.
+Se precisar guardar o de uma prova, baixe (ou copie o diretório) antes de gerar
+o próximo.
+
+Se o serviço reiniciar no meio da geração, o painel mostra a falha depois de
+meia hora e o botão volta a funcionar — a passada não continua de onde parou,
+é só pedir de novo.
+
 ### Vínculo time ↔ máquina
 
 O roster (lista de times, com nome, organização, país e lugar) vem do MOJ ou é

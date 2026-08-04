@@ -347,3 +347,25 @@ def test_o_hotconfig_pergunta_o_que_pode_mandar():
     trecho = trecho[: trecho.index("async function sendCommand")]
     assert "catch" in trecho and "return" in trecho, "a consulta pode derrubar a tela"
     assert "b.disabled = true" in trecho
+
+
+def test_todo_arquivo_do_relatorio_tem_rotulo():
+    """A tela traduz o nome do arquivo por um `ARQ_LABEL[nome]`, e essa chave é
+    montada em tempo de execução — o guarda de i18n, que lê `t("literal")`, não
+    a enxerga. Acrescentar um arquivo no servidor sem rótulo aqui daria um
+    botão escrito `report_f_qualquercoisa` na tela, e nenhum teste reclamaria.
+    """
+    import json
+
+    from server.app.services import fleet_report
+
+    js = (REPO / "web" / "laboratorios" / "app.js").read_text(encoding="utf-8")
+    bloco = js.split("const ARQ_LABEL = {")[1].split("};")[0]
+    mapa = dict(re.findall(r'"([^"]+)":\s*"([^"]+)"', bloco))
+    assert set(mapa) == set(fleet_report.ARQUIVOS), (
+        "a lista da tela e a do servidor divergiram"
+    )
+    pt = json.loads(
+        (REPO / "web" / "common" / "locales" / "pt.json").read_text(encoding="utf-8")
+    )
+    assert not (set(mapa.values()) - set(pt)), "rótulo sem tradução"

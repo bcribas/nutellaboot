@@ -198,6 +198,7 @@ async function carregar() {
   for (const sede of [...expandidas.keys()]) {
     if (expandidas.get(sede) !== null) carregarMaquinas(sede);
   }
+  carregarRelatorio();
   render();
 }
 
@@ -274,6 +275,99 @@ async function mandar(cmd) {
   }
 }
 
+// --- relatório da frota -----------------------------------------------------
+//
+// O botão pede e a tela pergunta; quem faz a conta é um subprocesso. A sondagem
+// é a mesma de 5 s que já roda — enquanto está `building` ela mostra isso, e
+// quando vira `done` os links aparecem sozinhos.
+
+// Nome do arquivo → rótulo. Lista aqui e no servidor pelo mesmo motivo: o que
+// não está nas duas não é oferecido nem servido.
+const ARQ_LABEL = {
+  "relatorio.html": "report_f_html",
+  "inventario.csv": "report_f_inventario",
+  "editores.csv": "report_f_editores",
+  "recursos-hora.csv": "report_f_recursos_hora",
+  "recursos-brutos.csv.gz": "report_f_recursos_brutos",
+  "alertas.csv": "report_f_alertas",
+  "resumo.json": "report_f_resumo",
+};
+
+let relatorio = null;
+let podeRelatorio = true;
+
+function tamanho(bytes) {
+  if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} kB`;
+  return `${bytes} B`;
+}
+
+function renderRelatorio() {
+  const sec = $("#relatorio");
+  sec.hidden = !podeRelatorio;
+  if (!podeRelatorio) return;
+  const r = relatorio || {};
+  const estado = $("#restado");
+  const arquivos = $("#rfiles");
+  estado.classList.toggle("err", r.status === "failed");
+  $("#rgerar").disabled = r.status === "building";
+
+  if (r.status === "building") {
+    estado.textContent = t("report_fleet_building");
+  } else if (r.status === "failed") {
+    estado.textContent = t("report_fleet_failed", { erro: r.error || "" });
+  } else if (r.status === "done") {
+    const janela = Math.round(((r.until || 0) - (r.since || 0)) / 86400);
+    estado.textContent = t("report_fleet_ready", {
+      when: new Date((r.built_at || 0) * 1000).toLocaleString(),
+      dias: janela,
+    });
+  } else {
+    estado.textContent = t("report_fleet_none");
+  }
+
+  arquivos.innerHTML = "";
+  for (const f of r.files || []) {
+    const a = document.createElement("a");
+    a.href = `/api/v1/labs/report/${encodeURIComponent(f.name)}`;
+    // o HTML é para olhar, os dados são para levar embora
+    if (f.name.endsWith(".html")) {
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.className = "destaque";
+    } else {
+      a.setAttribute("download", "");
+    }
+    a.innerHTML = `<span>${t(ARQ_LABEL[f.name] || f.name)}</span><span class="tam">${tamanho(
+      f.size || 0
+    )}</span>`;
+    arquivos.appendChild(a);
+  }
+}
+
+async function carregarRelatorio() {
+  if (!podeRelatorio) return;
+  try {
+    relatorio = await api.get("/api/v1/labs/report", { kind: "admin" });
+  } catch (e) {
+    // sub-admin não tem esta rota: some a seção em vez de piscar erro a cada
+    // 5 s numa tela que, para ele, funciona
+    if (e.status === 401 || e.status === 403) podeRelatorio = false;
+    else return;
+  }
+  renderRelatorio();
+}
+
+async function pedirRelatorio() {
+  $("#rgerar").disabled = true;
+  try {
+    relatorio = await api.post(`/api/v1/labs/report?dias=${dias}`, {}, { kind: "admin" });
+  } catch (e) {
+    toast(`${t("error")}: ${e.message}`, true);
+  }
+  renderRelatorio();
+}
+
 function renderFiltros() {
   const box = $("#filters");
   box.innerHTML = "";
@@ -309,6 +403,7 @@ async function main() {
   for (const b of document.querySelectorAll("[data-cmd]")) {
     b.onclick = () => mandar(b.dataset.cmd);
   }
+  $("#rgerar").onclick = pedirRelatorio;
   await carregar();
   timer = setInterval(carregar, SONDA_MS);
   window.addEventListener("beforeunload", () => clearInterval(timer));

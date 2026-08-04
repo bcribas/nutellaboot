@@ -9,13 +9,14 @@ conta de 1890 máquinas, que está em `services/labs.py`.
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from .. import auth
-from ..services import labs
+from ..services import fleet_report, labs, ownership
 from ..services import machines as m
-from ..services import ownership
 from .machines import comandos_bloqueados, publicar_evento
 
 router = APIRouter(prefix="/api/v1")
@@ -112,3 +113,54 @@ async def comandar_frota(body: dict, p=Depends(auth.require_console)) -> dict:
         "machines": sum(r.get("machines", 0) for r in resultados.values()),
         "failed": sorted(k for k, r in resultados.items() if r.get("error")),
     }
+
+
+# --- o relatório da frota ----------------------------------------------------
+#
+# Só a administração. O artefato é UM arquivo com a frota inteira dentro;
+# gerá-lo por dono custaria os ~118 s por pessoa e abriria um caminho para a
+# sede de alguém entrar no relatório de outro. Sub-admin continua com o
+# relatório da sede dele, que já existe e é barato.
+
+
+@router.get("/labs/report")
+async def estado_do_relatorio(p=Depends(auth.require_admin)) -> dict:
+    return fleet_report.estado()
+
+
+@router.post("/labs/report", status_code=202)
+async def gerar_relatorio(
+    dias: float = Query(7, gt=0, le=3650), p=Depends(auth.require_admin)
+) -> dict:
+    """Dispara a passada. Responde 202 e o estado — quem pergunta se ficou
+    pronto é a tela, na sondagem de 5 s que ela já faz.
+
+    Pedir de novo enquanto uma anda NÃO é erro: a tela sonda, e duas abas
+    abertas fariam a segunda receber um 409 que ninguém pediu. `started` diz
+    qual das duas foi a que disparou.
+    """
+    ate = time.time()
+    iniciou = fleet_report.agendar(ate - dias * 86400, ate)
+    return {**fleet_report.estado(), "started": iniciou}
+
+
+@router.get("/labs/report/{nome}")
+async def baixar_do_relatorio(nome: str, request: Request):
+    """Os arquivos gerados.
+
+    `principal_de_link` porque são `<a download>`, que não manda cabeçalho — foi
+    exatamente assim que o CSV da frota deu 401 na cara de quem clicava. E o
+    `nome` sai de uma LISTA FECHADA: é caminho vindo da URL indo para o disco, e
+    o diretório vizinho tem as chaves de todas as sedes.
+    """
+    p = auth.principal_de_link(request)
+    if p is None or p.kind != "admin":
+        raise HTTPException(401, "credencial ausente ou inválida")
+    caminho = fleet_report.caminho_de(nome)
+    if caminho is None:
+        raise HTTPException(404, "arquivo não existe")
+    return FileResponse(
+        caminho,
+        media_type=fleet_report.TIPOS.get(caminho.suffix, "application/octet-stream"),
+        filename=nome,
+    )

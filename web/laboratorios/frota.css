@@ -72,6 +72,39 @@ tr.maquinas > td { padding: 0 0 10px 34px; background: var(--panel); }
 .mchip .mac { font-family: ui-monospace, monospace; }
 .mchip .time { color: var(--muted); }
 
+/* o relatório da frota: pedido, estado e os arquivos para baixar */
+.relatorio {
+  margin: 0 16px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 10px 14px;
+}
+
+.relatorio .rhead { display: flex; align-items: center; gap: 10px; }
+.relatorio .rhead .spacer { flex: 1; }
+.relatorio .sub { color: var(--muted); font-size: 12px; }
+.relatorio .sub.err { color: var(--bad); }
+
+.rfiles { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.rfiles:empty { margin-top: 0; }
+
+.rfiles a {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.rfiles a:hover { border-color: var(--accent); }
+.rfiles a .tam { color: var(--muted); }
+.rfiles a.destaque { border-color: var(--accent); font-weight: 600; }
+
 /* a confirmação de dedo pesado: digitar o número de máquinas */
 .confirma {
   position: fixed;

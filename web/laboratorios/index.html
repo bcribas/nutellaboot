@@ -46,6 +46,19 @@
   <button type="button" class="danger" data-cmd="mlpoweroff" data-i18n="poweroff"></button>
 </div>
 
+<!-- O relatório é a passada pesada (minutos de CPU sobre a frota inteira), por
+     isso aqui só se pede e se pergunta se ficou pronto. Fica escondido para
+     quem não é administração: a rota é só dela. -->
+<section class="relatorio" id="relatorio" hidden>
+  <div class="rhead">
+    <strong data-i18n="report_fleet_title"></strong>
+    <span class="sub" id="restado"></span>
+    <span class="spacer"></span>
+    <button type="button" class="small primary" id="rgerar" data-i18n="report_fleet_build"></button>
+  </div>
+  <div class="rfiles" id="rfiles"></div>
+</section>
+
 <main>
   <table class="frota" id="sites"></table>
   <p id="empty" class="muted"></p>

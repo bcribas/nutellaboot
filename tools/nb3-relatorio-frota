@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""nb3-relatorio-frota — o perfil da frota inteira, numa passada só.
+
+Roda como SUBPROCESSO, e isso não é preferência: uma frota de 54 sedes × 35
+máquinas com 7 dias de amostra são 1,5 GB e ~118 s de CPU (medido). Dentro do
+worker congelaria o boot de todas as salas, e thread não salvaria — quem gasta
+o tempo é `json.loads`, que segura a GIL.
+
+Escreve tudo de uma vez porque ler 1,5 GB duas vezes seria pagar duas vezes:
+
+    relatorio.html         o visual, autocontido (CSS embutido, SVG desenhado)
+    inventario.csv         uma linha por máquina
+    editores.csv           sede, máquina, editor, amostras, minutos
+    recursos-hora.csv      por máquina por hora: média e pico de memória e carga
+    recursos-brutos.csv.gz amostra por amostra
+    alertas.csv            o que tocou, quando, e quem dispensou
+
+E lê linha a linha, escrevendo linha a linha: acumular 33 milhões de amostras
+em memória trocaria o problema de CPU por um de RAM.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import gzip
+import html
+import json
+import sys
+import time
+from collections import Counter, defaultdict
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+
+from server.app import fsdb  # noqa: E402
+from server.app.services import alerts, machines as m, report, store  # noqa: E402
+
+
+def _hora(ts: float) -> str:
+    return time.strftime("%Y-%m-%d %H:00", time.localtime(ts))
+
+
+class Saidas:
+    """Os arquivos abertos ao mesmo tempo — a passada escreve em todos."""
+
+    def __init__(self, destino: Path):
+        destino.mkdir(parents=True, exist_ok=True)
+        self.destino = destino
+        self._abertos = []
+        self.inventario = self._csv(
+            "inventario.csv",
+            ["sede", "sede_nome", "mac", "processador", "nucleos", "ram_mb",
+             "assento", "time", "organizacao", "pais", "primeira_vez", "ultima_vez"],
+        )
+        self.editores = self._csv(
+            "editores.csv", ["sede", "mac", "editor", "amostras", "minutos_acumulados"]
+        )
+        self.hora = self._csv(
+            "recursos-hora.csv",
+            ["sede", "mac", "hora", "amostras", "mem_media", "mem_pico", "carga_media", "carga_pico"],
+        )
+        self.alertas = self._csv(
+            "alertas.csv", ["sede", "mac", "quando", "tipo", "detalhe", "dispensado_por", "dispensado_em"]
+        )
+        bruto = gzip.open(destino / "recursos-brutos.csv.gz", "wt", newline="", encoding="utf-8")
+        self._abertos.append(bruto)
+        self.bruto = csv.writer(bruto)
+        self.bruto.writerow(["sede", "mac", "t", "mem_pct", "carga", "swap_mb"])
+
+    def _csv(self, nome: str, cabecalho: list[str]):
+        f = open(self.destino / nome, "w", newline="", encoding="utf-8")
+        self._abertos.append(f)
+        w = csv.writer(f)
+        w.writerow(cabecalho)
+        return w
+
+    def fechar(self):
+        for f in self._abertos:
+            f.close()
+
+
+def _serie_em_linhas(caminho: Path, desde: float, ate: float):
+    """As amostras de uma máquina, uma a uma. Não devolve lista: são até 19 mil
+    por máquina e 33 milhões na frota."""
+    if not caminho.is_file():
+        return
+    with open(caminho, encoding="utf-8", errors="replace") as f:
+        for linha in f:
+            linha = linha.strip()
+            if not linha.startswith("{"):
+                continue
+            try:
+                d = json.loads(linha)
+            except ValueError:
+                # o teto do arquivo corta a metade mais antiga, e a primeira
+                # linha que sobra pode estar partida ao meio
+                continue
+            t = d.get("t") or 0
+            if desde and t < desde:
+                continue
+            if ate and t > ate:
+                continue
+            yield d
+
+
+def uma_sede(image_id: str, desde: float, ate: float, saidas: Saidas) -> dict:
+    info = store.get_site_image(image_id) or {}
+    nome = info.get("fullname") or image_id
+    roster = {
+        str(e.get("user_id")): e
+        for e in (fsdb.read_json(store.site_image_dir(image_id) / "roster.json", []) or [])
+    }
+
+    ram, cpus, editores = Counter(), Counter(), Counter()
+    minutos = Counter()
+    mems, cargas = [], []
+    picos_mem, picos_carga = 0.0, 0.0
+    n_alertas, tipos_alerta = 0, Counter()
+    dmesg = Counter()
+    total_amostras = 0
+    maquinas = 0
+
+    for mac in m.list_macs(image_id):
+        d = m.machine_dir(image_id, mac)
+        info_m = fsdb.read_json(d / "machine.json", {}) or {}
+        status = fsdb.read_json(d / "status.json", {}) or {}
+        hw = status.get("hwinfo") or {}
+        binding = fsdb.read_json(d / "binding.json") or {}
+        entrada = roster.get(str(binding.get("user_id", ""))) or {}
+        maquinas += 1
+
+        ram[report._faixa_ram(hw.get("memtotal_mb"))] += 1
+        cpus[str(hw.get("processor") or "?")] += 1
+        org = entrada.get("organization")
+        saidas.inventario.writerow([
+            image_id, nome, mac,
+            hw.get("processor") or "", hw.get("cores") or "", hw.get("memtotal_mb") or "",
+            binding.get("seat") or entrada.get("seat") or "",
+            binding.get("name") or entrada.get("display_name") or entrada.get("name")
+            or binding.get("user_id") or "",
+            (org or {}).get("name", "") if isinstance(org, dict) else "",
+            entrada.get("country") or "",
+            _quando_iso(info_m.get("first_seen")), _quando_iso(info_m.get("last_seen")),
+        ])
+
+        # --- a passada pelas amostras: cru, por hora e agregados, de uma vez ---
+        por_hora: dict[str, dict] = defaultdict(
+            lambda: {"n": 0, "mem": [], "ld": []}
+        )
+        vistos_editor = Counter()
+        for s in _serie_em_linhas(d / "samples.jsonl", desde, ate):
+            total_amostras += 1
+            mem, ld = s.get("mem"), s.get("ld")
+            saidas.bruto.writerow([image_id, mac, s.get("t", ""), mem if mem is not None else "",
+                                   ld if ld is not None else "", s.get("sw", "")])
+            b = por_hora[_hora(s.get("t") or 0)]
+            b["n"] += 1
+            if isinstance(mem, (int, float)):
+                b["mem"].append(mem)
+                mems.append(mem)
+                picos_mem = max(picos_mem, mem)
+            if isinstance(ld, (int, float)):
+                b["ld"].append(ld)
+                cargas.append(ld)
+                picos_carga = max(picos_carga, ld)
+            for ed in s.get("ed") or []:
+                editores[ed] += 1
+                vistos_editor[ed] += 1
+
+        for hora in sorted(por_hora):
+            b = por_hora[hora]
+            saidas.hora.writerow([
+                image_id, mac, hora, b["n"],
+                round(sum(b["mem"]) / len(b["mem"])) if b["mem"] else "",
+                max(b["mem"]) if b["mem"] else "",
+                round(sum(b["ld"]) / len(b["ld"]), 2) if b["ld"] else "",
+                max(b["ld"]) if b["ld"] else "",
+            ])
+
+        # o acumulado que a própria máquina conta (o nb2 fazia assim)
+        tempos = (status.get("operations") or {}).get("editors_time") or {}
+        for ed, amostras in vistos_editor.items():
+            mins = tempos.get(ed) if isinstance(tempos, dict) else None
+            saidas.editores.writerow([image_id, mac, ed, amostras, mins if isinstance(mins, int) else ""])
+            if isinstance(mins, int):
+                minutos[ed] += mins
+
+        for ev in alerts.history(image_id, mac):
+            quando = ev.get("at") or 0
+            if (desde and quando < desde) or (ate and quando > ate):
+                continue
+            if ev.get("event") != "raised":
+                continue
+            n_alertas += 1
+            tipos_alerta[str(ev.get("kind") or "?")] += 1
+            saidas.alertas.writerow([
+                image_id, mac, _quando_iso(quando), ev.get("kind") or "",
+                ev.get("detail") or "", ev.get("dismissed_by") or "",
+                _quando_iso(ev.get("dismissed_at")),
+            ])
+
+        for rotulo, quantas in report._dmesg(image_id, mac, desde, ate).items():
+            dmesg[rotulo] += quantas
+
+    return {
+        "id": image_id,
+        "nome": nome,
+        "maquinas": maquinas,
+        "amostras": total_amostras,
+        "ram": dict(ram),
+        "cpus": dict(cpus),
+        "editores": dict(editores),
+        "minutos": dict(minutos),
+        "mem_media": round(sum(mems) / len(mems)) if mems else None,
+        "mem_pico": round(picos_mem) if mems else None,
+        "carga_media": round(sum(cargas) / len(cargas), 2) if cargas else None,
+        "carga_pico": round(picos_carga, 2) if cargas else None,
+        "alertas": n_alertas,
+        "tipos_alerta": dict(tipos_alerta),
+        "dmesg": dict(dmesg),
+    }
+
+
+def _quando_iso(ts) -> str:
+    try:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(ts))) if ts else ""
+    except (TypeError, ValueError):
+        return ""
+
+
+def _tabela(cabecalho, linhas) -> str:
+    th = "".join(f"<th>{html.escape(c)}</th>" for c in cabecalho)
+    corpo = "".join(
+        "<tr>" + "".join(f"<td>{report._esc(c)}</td>" for c in linha) + "</tr>" for linha in linhas
+    )
+    return f"<table><tr>{th}</tr>{corpo}</table>"
+
+
+def html_frota(sedes: list[dict], desde: float, ate: float) -> str:
+    nac_ram, nac_cpu, nac_ed, nac_dmesg, nac_alerta = Counter(), Counter(), Counter(), Counter(), Counter()
+    maquinas = amostras = alertas_n = 0
+    for s in sedes:
+        nac_ram.update(s["ram"])
+        nac_cpu.update(s["cpus"])
+        nac_ed.update(s["editores"])
+        nac_dmesg.update(s["dmesg"])
+        nac_alerta.update(s["tipos_alerta"])
+        maquinas += s["maquinas"]
+        amostras += s["amostras"]
+        alertas_n += s["alertas"]
+
+    p = [
+        "<!doctype html><html lang='pt'><head><meta charset='utf-8'>",
+        "<title>NutellaBoot 3 — perfil da frota</title>",
+        f"<style>{report.CSS}</style></head><body>",
+        "<h1>Perfil da frota</h1>",
+        f"<p class='sub'>{len(sedes)} sedes · {maquinas} máquinas · "
+        f"{amostras} amostras · {alertas_n} alertas<br>"
+        f"{_quando_iso(desde)} — {_quando_iso(ate)} · gerado em {_quando_iso(time.time())}</p>",
+        "<h2>Memória, no país</h2>", report._barras(dict(nac_ram)),
+        "<h2>Processadores, no país</h2>",
+        report._barras(dict(Counter(nac_cpu).most_common(20))),
+        "<h2>Editores, no país</h2>",
+        report._barras(dict(nac_ed)) or "<p class='nada'>sem amostra de editor no período</p>",
+    ]
+    if nac_alerta:
+        p += ["<h2>Alertas, no país</h2>", report._barras(dict(nac_alerta))]
+    if nac_dmesg:
+        p += ["<h2>Estranhezas do dmesg, no país</h2>", report._barras(dict(nac_dmesg))]
+
+    p.append("<h2>Por sede</h2>")
+    p.append(_tabela(
+        ["sede", "máquinas", "amostras", "mem. média", "mem. pico", "carga média",
+         "carga pico", "alertas", "editor mais usado"],
+        [
+            [f"{s['id']} — {s['nome']}", s["maquinas"], s["amostras"],
+             _pct(s["mem_media"]), _pct(s["mem_pico"]), s["carga_media"], s["carga_pico"],
+             s["alertas"],
+             (Counter(s["editores"]).most_common(1) or [("—", 0)])[0][0]]
+            for s in sedes
+        ],
+    ))
+
+    for s in sedes:
+        p.append(f"<h2>{report._esc(s['id'])} — {report._esc(s['nome'])}</h2>")
+        p.append("<div class='par'>")
+        p.append(f"<div><h3>Memória</h3>{report._barras(s['ram'])}</div>")
+        p.append(f"<div><h3>Processadores</h3>{report._barras(dict(Counter(s['cpus']).most_common(10)))}</div>")
+        p.append("</div>")
+        if s["editores"]:
+            p.append(f"<h3>Editores</h3>{report._barras(s['editores'])}")
+        if s["tipos_alerta"]:
+            p.append(f"<h3>Alertas</h3>{report._barras(s['tipos_alerta'])}")
+        if s["dmesg"]:
+            p.append(f"<h3>Estranhezas do dmesg</h3>{report._barras(s['dmesg'])}")
+    p.append("</body></html>")
+    return "".join(p)
+
+
+def _pct(v):
+    return f"{v}%" if v is not None else "—"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Perfil da frota inteira.")
+    # Padrões de propósito: `--ate $(date +%s)` na mão TRUNCA o segundo, e um
+    # evento com fração no mesmo segundo cai fora da janela. Custou uma
+    # investigação para descobrir; quem chama sem argumento não tropeça nisso.
+    ap.add_argument("--desde", type=float, default=0, help="epoch; padrão: 7 dias atrás")
+    ap.add_argument("--ate", type=float, default=0, help="epoch; padrão: agora")
+    ap.add_argument("--saida", required=True)
+    a = ap.parse_args()
+    a.ate = a.ate or time.time()
+    a.desde = a.desde or (a.ate - 7 * 86400)
+
+    destino = Path(a.saida)
+    saidas = Saidas(destino)
+    t0 = time.time()
+    try:
+        sedes = [uma_sede(i["id"], a.desde, a.ate, saidas) for i in store.list_site_images()]
+    finally:
+        saidas.fechar()
+
+    (destino / "relatorio.html").write_text(html_frota(sedes, a.desde, a.ate), encoding="utf-8")
+    (destino / "resumo.json").write_text(
+        json.dumps({"sedes": sedes, "desde": a.desde, "ate": a.ate}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    print(
+        f"pronto: {len(sedes)} sedes, "
+        f"{sum(s['amostras'] for s in sedes)} amostras, {time.time() - t0:.1f}s"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

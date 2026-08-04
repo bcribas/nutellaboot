@@ -468,6 +468,51 @@ aconteceu, e uma recusada não impede as outras: sede de outro dono responde
 `404` ali dentro (não 403 — um 403 confirmaria que o nome existe), e o cadeado
 do modelo vale igual, com `403` e o nome do campo.
 
+### Relatório da frota: o perfil nacional e os dados brutos
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| POST | `/api/v1/labs/report` | A | `?dias=7` | `202` `{status, since, until, started}` |
+| GET | `/api/v1/labs/report` | A | — | `{status, since, until, built_at?, error?, files:[{name,size}]}` |
+| GET | `/api/v1/labs/report/{nome}` | A (também por link) | — | o arquivo |
+
+**Só administração.** O artefato é um arquivo único com a frota inteira dentro:
+gerá-lo por dono custaria o tempo de máquina por pessoa e abriria caminho para a
+sede de alguém entrar no relatório de outro. Sub-admin continua com
+`GET /site-images/{img}/report`, que é o mesmo agregado da sede dele e sai na
+hora.
+
+A geração é **assíncrona e uma de cada vez**, como a imagem do pendrive: uma
+frota de 54 sedes × 35 máquinas com 7 dias de amostra são 1,5 GB lidos, 25
+milhões de amostras e ~140 s de CPU (medido). Dentro do worker congelaria o boot de todas as salas, e thread não
+resolveria — quem gasta o tempo é `json.loads`, que segura a GIL. Por isso um
+subprocesso (`tools/nb3-relatorio-frota`), estado em disco, e a tela
+perguntando se ficou pronto.
+
+`status` é `missing`, `building`, `done` ou `failed` (com `error`). Pedir de
+novo enquanto uma anda **não é erro**: responde `202` com `started: false`, para
+que duas abas abertas não recebam um 409 que ninguém pediu. Um `building` mais
+velho que meia hora é tratado como geração morta — se o worker reinicia no meio,
+a tarefa vai junto e o estado ficaria travado para sempre.
+
+Os arquivos, todos de uma passada só (ler 1,5 GB duas vezes seria pagar duas
+vezes):
+
+| arquivo | o que é |
+|---|---|
+| `relatorio.html` | o visual, autocontido: perfil nacional de RAM e processadores, e por sede — máquinas, editores, memória e carga (média e pico), alertas e dmesg |
+| `inventario.csv` | uma linha por máquina: sede, MAC, processador, núcleos, RAM, assento, time, organização, país, primeira e última vez vista |
+| `editores.csv` | sede, MAC, editor, amostras em que apareceu, minutos acumulados |
+| `recursos-hora.csv` | sede, MAC, hora, amostras, memória média e pico, carga média e pico |
+| `recursos-brutos.csv.gz` | amostra por amostra: sede, MAC, instante, memória, carga, swap |
+| `alertas.csv` | sede, MAC, quando, tipo, detalhe, quem dispensou e quando |
+| `resumo.json` | os agregados por sede, os mesmos que o HTML desenha |
+
+O download aceita o **cookie sem `X-NB-Console`**, pelo motivo de sempre: são
+`<a download>`. O `{nome}` sai de uma **lista fechada** — é caminho vindo da URL
+indo para o disco, e `data/reports/` tem `data/site-images/` de vizinho, com o
+token e a chave de máquina de cada sede. Nome fora da lista é `404`.
+
 ### Comandos e bloqueio de tela
 
 | Método | Caminho | Cred. | Corpo | Resposta |
