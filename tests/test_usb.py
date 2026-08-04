@@ -14,6 +14,7 @@ diretório público), e que a da sala nunca sai sem credencial.
 """
 
 import asyncio
+import json
 import os
 
 import pytest
@@ -467,6 +468,106 @@ def test_o_menu_do_grub_usa_o_nome_e_cai_para_o_id():
 def test_a_ferramenta_aceita_o_nome_de_exibicao():
     ferramenta = (REPO / "tools" / "nb3-genusb").read_text()
     assert "--fullname" in ferramenta
+
+
+# --- a ferramenta rodando de verdade ---
+#
+# Não havia teste nenhum que EXECUTASSE o nb3-genusb: os que existiam liam o
+# texto do arquivo. Foi por essa fresta que o `NB_SITE_NAME` saiu ausente do
+# pendrive gerado à mão — a ferramenta escrevia a linha, mas só quando alguém
+# passava `--fullname`, e quem gera o pendrive da sede não passa.
+#
+# Uma imagem de 40 MB com kernel e initrd de mentira sai em 0,4 s. Barato o
+# bastante para rodar sempre, e é o único teste que olha o arquivo que a sede
+# recebe de verdade.
+
+FERRAMENTAS_USB = ("sfdisk", "mformat", "mcopy", "mmd", "mdir", "truncate", "dd", "grub2-mkstandalone")
+
+
+def _gera_pendrive(tmp_path, imagem: str, fullname: str, *extra: str):
+    import shutil
+    import subprocess
+
+    faltando = [t for t in FERRAMENTAS_USB if not shutil.which(t)]
+    if faltando:
+        pytest.skip(f"sem {', '.join(faltando)} para gerar a imagem")
+
+    data = tmp_path / "data"
+    (data / "site-images" / imagem).mkdir(parents=True)
+    (data / "site-images" / imagem / "image.json").write_text(
+        json.dumps({"id": imagem, "fullname": fullname, "model": "t"}), encoding="utf-8"
+    )
+    (tmp_path / "vmlinuz").write_bytes(b"kernel")
+    (tmp_path / "initrd.img").write_bytes(b"initrd")
+    saida = tmp_path / "p.img"
+    r = subprocess.run(
+        [
+            str(REPO / "tools" / "nb3-genusb"),
+            "--output", str(saida),
+            "--imageroot", imagem,
+            "--no-bios",
+            "--size", "40",
+            "--kernel", str(tmp_path / "vmlinuz"),
+            "--initrd", str(tmp_path / "initrd.img"),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "NB3_DATA_ROOT": str(data)},
+    )
+    assert r.returncode == 0, f"{r.stdout}\n{r.stderr}"
+
+    def ler(nome: str) -> str:
+        p = subprocess.run(
+            ["mcopy", "-i", f"{saida}@@{2048 * 512}", f"::/{nome}", "-"],
+            capture_output=True,
+            text=True,
+        )
+        assert p.returncode == 0, p.stderr
+        return p.stdout
+
+    return r.stdout, ler
+
+
+def test_a_ferramenta_busca_o_nome_da_sede_sozinha(tmp_path):
+    """Quem gera o pendrive da sede não digita `--fullname` — e não deveria
+    precisar: a ferramenta já recebeu o `--imageroot` e sabe onde fica o
+    registro. Sem isto o menu do GRUB fica sem o nome, sem ninguém errar nada."""
+    saida, ler = _gera_pendrive(tmp_path, "sala1", "Sede São Paulo")
+    assert 'set NB_SITE_NAME="Sede São Paulo"' in ler("nutellaboot.conf")
+    assert 'set IMAGEROOT="sala1"' in ler("nutellaboot.conf")
+    assert "Sede São Paulo" in saida, "a saída não diz qual sede foi gravada"
+
+
+def test_a_linha_de_comando_ganha_do_registro(tmp_path):
+    _, ler = _gera_pendrive(tmp_path, "sala1", "Do registro", "--fullname", "Da linha")
+    assert 'set NB_SITE_NAME="Da linha"' in ler("nutellaboot.conf")
+
+
+def test_sem_nome_no_registro_a_ferramenta_avisa(tmp_path):
+    """Silêncio foi o que deixou o pendrive sair sem o nome no menu."""
+    saida, ler = _gera_pendrive(tmp_path, "sala1", "")
+    assert "NB_SITE_NAME" not in ler("nutellaboot.conf")
+    assert "sem nome de exibição" in saida, saida
+
+
+def test_o_pendrive_gerado_tem_grub_valido(tmp_path):
+    """O grub.cfg é gerado por concatenação de texto; um erro ali só aparece na
+    máquina, com o menu vazio."""
+    import shutil
+    import subprocess
+
+    check = shutil.which("grub2-script-check") or shutil.which("grub-script-check")
+    _, ler = _gera_pendrive(tmp_path, "sala1", 'R$ 10 "x" \\ `y`')
+    conf = ler("nutellaboot.conf")
+    cfg = ler("grub.cfg")
+    if not check:
+        pytest.skip("sem grub-script-check")
+    for nome, texto in (("nutellaboot.conf", conf), ("grub.cfg", cfg)):
+        p = tmp_path / nome
+        p.write_text(texto, encoding="utf-8")
+        r = subprocess.run([check, str(p)], capture_output=True, text=True)
+        assert r.returncode == 0, f"{nome}: {r.stderr}\n{texto}"
 
 
 @pytest.mark.parametrize(

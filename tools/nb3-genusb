@@ -96,6 +96,17 @@ if [ "$FETCH_KEY" = 1 ]; then
     [ -n "$BOOT_KEY" ] || { echo "não consegui obter a chave de boot de $IMAGEROOT" >&2; exit 1; }
 fi
 
+# O nome de exibição sai do próprio registro da sede quando não vier na linha
+# de comando. Exigir que o operador o digite de novo é como este recurso nasceu
+# quebrado: quem gera o pendrive à mão não passa `--fullname`, e o menu do GRUB
+# ficava sem o nome sem ninguém errar nada.
+if [ -z "$FULLNAME" ] && [ -n "$IMAGEROOT" ] && [ -f "$DATA/site-images/$IMAGEROOT/image.json" ]; then
+    FULLNAME=$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1])).get("fullname", ""))
+' "$DATA/site-images/$IMAGEROOT/image.json" 2> /dev/null || true)
+fi
+
 # mdir/truncate/dd tambem sao usados: sem conferir, o mdir so falha na ULTIMA
 # linha do script, depois de a imagem inteira estar pronta
 for t in sfdisk mformat mcopy mmd mdir truncate dd grub2-mkstandalone; do
@@ -287,6 +298,10 @@ echo "pronto: $OUT"
 echo "  modo:      ${IMAGEROOT:-genérico (defina IMAGEROOT em nutellaboot.conf)}"
 if [ -n "$FULLNAME" ]; then
     echo "  sede:      $FULLNAME"
+elif [ -n "$IMAGEROOT" ]; then
+    # dizer o que ficou de fora vale mais que o silêncio: foi assim que um
+    # pendrive saiu sem o nome no menu sem nenhum sinal
+    echo "  sede:      (sem nome de exibição; use --fullname para o menu mostrá-lo)"
 fi
 echo "  servidor:  ${SERVER:-padrão do initrd}"
 echo "  gravar:    sudo dd if=$OUT of=/dev/sdX bs=4M status=progress oflag=sync"
