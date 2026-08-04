@@ -327,10 +327,31 @@ imagem e devolve as credenciais para repassar.
 | PUT | `/api/v1/site-images/{img}/config` | C, I, S`config:write` | `{values:{…}}` | `{ok, values}` |
 | PUT | `/api/v1/site-images/{img}/wallpaper` | C, I, S`config:write` | multipart `file` | `{md5, size, filename, content_type}` |
 | DELETE | `/api/v1/site-images/{img}/wallpaper` | C, I, S`config:write` | — | `204` |
+| GET | `/api/v1/site-images/{img}/wallpaper` | C, I (`?tk=` ou cookie) | — | o arquivo, para a prévia |
 
 Campos marcados como `locked` no esquema só aceitam escrita de administração
 (ou se a imagem estiver marcada `unlocked`). Senhas nunca voltam pela API:
 guardam-se apenas como hash com sal, e enviar vazio mantém a atual.
+
+**O papel de parede pode vir do MODELO.** A organização define um no modelo e
+toda sede dele passa a usá-lo:
+
+| Método | Caminho | Cred. | Corpo | Resposta |
+|---|---|---|---|---|
+| PUT | `/api/v1/models/{nome}/wallpaper` | C (dono do modelo) | multipart `file` | `{md5, size, filename, content_type}` |
+| GET | `/api/v1/models/{nome}/wallpaper` | C | — | o arquivo |
+| DELETE | `/api/v1/models/{nome}/wallpaper` | C (dono do modelo) | — | `204` |
+
+A herança é **por consulta, não por cópia**: a sede que não tem o seu próprio
+usa o do modelo, resolvido na hora de servir — trocar no modelo na véspera
+chega a todas as sedes já criadas, no boot seguinte. O `wallpaper` do
+`GET /config` traz `origin` (`"image"` ou `"model"`) para a tela poder dizer de
+onde veio.
+
+`PATCH /api/v1/models/{nome}` aceita `wallpaper_locked`. Travado é
+`modelo.wallpaper_locked` **ou** `imagem.wallpaper_locked`: o do modelo vale
+para todas e não se contorna sede a sede; o da imagem continua existindo porque
+os convites o emitem por sede. Só a administração troca um wallpaper travado.
 
 ### Roster e vínculos
 

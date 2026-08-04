@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from .. import auth
 from ..models import ModelLayers
 from ..services import layer_roles, ownership, store
+from ..services import wallpaper as wp
 from ..settings import settings
 
 router = APIRouter(prefix="/api/v1")
@@ -87,7 +89,10 @@ async def patch_model(name: str, body: dict, p=Depends(auth.require_console)) ->
     if body.get("public") is not None and p.kind != "admin":
         raise HTTPException(403, "só a administração publica um modelo")
     store.set_model_meta(
-        name, public=body.get("public"), description=body.get("description")
+        name,
+        public=body.get("public"),
+        description=body.get("description"),
+        wallpaper_locked=body.get("wallpaper_locked"),
     )
     return store.get_model(name) or {}
 
@@ -100,6 +105,49 @@ async def delete_model(name: str, p=Depends(auth.require_console)) -> None:
         store.delete_model(name)
     except store.ImageError as e:
         raise HTTPException(409, str(e))
+
+
+# --- papel de parede do modelo ---
+#
+# Definido uma vez pela organização e herdado por TODA sede do modelo, sem
+# cópia: `services/wallpaper.efetivo()` resolve na hora de servir, para que
+# trocar aqui na véspera chegue às sedes já criadas. Com `wallpaper_locked` no
+# modelo, nenhuma delas troca.
+
+
+@router.get("/models/{name}/wallpaper")
+async def get_model_wallpaper(name: str, p=Depends(auth.require_console)):
+    if not ownership.can_use_model(p, name):
+        raise HTTPException(404, "modelo não existe")
+    achado = wp.do_modelo(name)
+    if not achado:
+        raise HTTPException(404, "sem wallpaper")
+    caminho, meta = achado
+    return FileResponse(
+        caminho,
+        media_type=meta.get("content_type", "image/png"),
+        headers={"ETag": f'"{meta["md5"]}"'},
+    )
+
+
+@router.put("/models/{name}/wallpaper")
+async def put_model_wallpaper(
+    name: str, file: UploadFile = File(...), p=Depends(auth.require_console)
+) -> dict:
+    if not ownership.can_manage_model(p, name):
+        raise HTTPException(404, "modelo não existe")
+    data = await file.read(wp.MAX_BYTES + 1)
+    try:
+        return wp.gravar(store.model_dir(name), data, file.filename or "")
+    except wp.WallpaperError as e:
+        raise HTTPException(413 if "maior que" in str(e) else 400, str(e))
+
+
+@router.delete("/models/{name}/wallpaper", status_code=204)
+async def delete_model_wallpaper(name: str, p=Depends(auth.require_console)) -> None:
+    if not ownership.can_manage_model(p, name):
+        raise HTTPException(404, "modelo não existe")
+    wp.apagar(store.model_dir(name))
 
 
 # --- camadas do modelo ---

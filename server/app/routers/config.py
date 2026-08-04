@@ -2,36 +2,37 @@
 
 from __future__ import annotations
 
-import hashlib
 import time
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from .. import auth, fsdb
+from .. import auth
 from ..services import config as cfg
 from ..services import store, webhook_push
+from ..services import wallpaper as wp
 from ..services.notify import notify
 
 router = APIRouter(prefix="/api/v1")
 
-MAX_WALLPAPER_BYTES = 12 * 1024 * 1024
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-JPEG_MAGIC = b"\xff\xd8\xff"
-
 
 def _check_wallpaper_editable(image: str, p) -> None:
     """Wallpaper travado é decisão da organização (como os campos `locked`):
-    só a administração troca."""
-    info = store.get_site_image(image) or {}
-    if info.get("wallpaper_locked") and p.kind != "admin":
+    só a administração troca.
+
+    A trava pode vir do MODELO (vale para todas as sedes dele, e é o caminho
+    normal) ou da própria sede (que os convites emitem por imagem)."""
+    if wp.travado(image) and p.kind != "admin":
         raise HTTPException(400, "o papel de parede desta imagem foi definido pela organização")
 
 
 @router.get("/site-images/{image}/config")
 async def get_config(image: str, p=Depends(auth.require_image_access())) -> dict:
     info = store.get_site_image(image) or {}
-    wallpaper = fsdb.read_json(store.site_image_dir(image) / "wallpaper.json")
+    achado = wp.efetivo(image)
+    # com `origin`: um papel de parede que a pessoa não reconhece e não
+    # consegue trocar, sem dizer de onde veio, vira chamado de suporte
+    wallpaper = achado[1] if achado else None
     can_edit_locked = p.kind == "admin" or bool(info.get("unlocked"))
     return {
         "image": {
@@ -44,8 +45,9 @@ async def get_config(image: str, p=Depends(auth.require_image_access())) -> dict
         "values": cfg.effective_values(image),
         "wallpaper": wallpaper,
         "can_edit_locked": can_edit_locked,
-        # wallpaper travado: definido pela organização, o dono não troca
-        "can_edit_wallpaper": p.kind == "admin" or not info.get("wallpaper_locked"),
+        # wallpaper travado: definido pela organização (no modelo ou na
+        # própria sede), o dono não troca
+        "can_edit_wallpaper": p.kind == "admin" or not wp.travado(image),
     }
 
 
@@ -84,12 +86,12 @@ async def get_wallpaper(image: str, request: Request, tk: str = Query("")):
     if p is None or not p.can_see_image(image):
         raise HTTPException(401, "credencial ausente ou inválida")
 
-    d = store.site_image_dir(image)
-    meta = fsdb.read_json(d / "wallpaper.json")
-    if not meta or not (d / "wallpaper.png").is_file():
+    achado = wp.efetivo(image)
+    if not achado:
         raise HTTPException(404, "sem wallpaper")
+    caminho, meta = achado
     return FileResponse(
-        d / "wallpaper.png",
+        caminho,
         media_type=meta.get("content_type", "image/png"),
         headers={"ETag": f'"{meta["md5"]}"'},
     )
@@ -104,26 +106,11 @@ async def put_wallpaper(
     """Recebe o arquivo (o nb2 pedia uma URL, baixava no servidor na hora de
     salvar e derrubava o salvamento inteiro quando a URL falhava)."""
     _check_wallpaper_editable(image, p)
-    data = await file.read(MAX_WALLPAPER_BYTES + 1)
-    if len(data) > MAX_WALLPAPER_BYTES:
-        raise HTTPException(413, f"arquivo maior que {MAX_WALLPAPER_BYTES // 2**20} MB")
-    if not data:
-        raise HTTPException(400, "arquivo vazio")
-    if not (data.startswith(PNG_MAGIC) or data.startswith(JPEG_MAGIC)):
-        raise HTTPException(400, "formato não reconhecido: envie PNG ou JPEG")
-
-    md5 = hashlib.md5(data).hexdigest()
-    d = store.site_image_dir(image)
-    with fsdb.locked(d):
-        (d / "wallpaper.png").write_bytes(data)
-        meta = {
-            "md5": md5,
-            "size": len(data),
-            "filename": file.filename,
-            "content_type": "image/png" if data.startswith(PNG_MAGIC) else "image/jpeg",
-        }
-        fsdb.write_json(d / "wallpaper.json", meta)
-    return meta
+    data = await file.read(wp.MAX_BYTES + 1)
+    try:
+        return wp.gravar(store.site_image_dir(image), data, file.filename or "")
+    except wp.WallpaperError as e:
+        raise HTTPException(413 if "maior que" in str(e) else 400, str(e))
 
 
 @router.delete("/site-images/{image}/wallpaper", status_code=204)
@@ -131,7 +118,5 @@ async def delete_wallpaper(
     image: str, p=Depends(auth.require_image_access(service_scope="config:write"))
 ) -> None:
     _check_wallpaper_editable(image, p)
-    d = store.site_image_dir(image)
-    with fsdb.locked(d):
-        (d / "wallpaper.png").unlink(missing_ok=True)
-        (d / "wallpaper.json").unlink(missing_ok=True)
+    # apaga só o DA SEDE; se o modelo tiver um, a sede volta a usar aquele
+    wp.apagar(store.site_image_dir(image))

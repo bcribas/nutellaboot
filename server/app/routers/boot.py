@@ -249,10 +249,16 @@ async def wallpaper(
     key: str | None = Query(None),
 ):
     await _autorizar(request, image, x_nb_boot_key, key)
-    from .. import fsdb
+    from ..services import wallpaper as wp
 
-    meta = fsdb.read_json(store.site_image_dir(image) / "wallpaper.json")
-    path = store.site_image_dir(image) / "wallpaper.png"
-    if not meta or not path.is_file():
+    # o da sede, ou o do modelo: a herança é resolvida na hora de servir, para
+    # que trocar no modelo chegue a toda sede no boot seguinte
+    achado = wp.efetivo(image)
+    if not achado:
         raise HTTPException(404, "sem wallpaper")
-    return FileResponse(path, media_type="image/png", headers={"ETag": f'"{meta["md5"]}"'})
+    path, meta = achado
+    return FileResponse(
+        path,
+        media_type=meta.get("content_type", "image/png"),
+        headers={"ETag": f'"{meta["md5"]}"'},
+    )

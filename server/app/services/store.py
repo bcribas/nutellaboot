@@ -172,13 +172,23 @@ def set_schema_field(name: str, key: str, patch: dict) -> dict:
     return schema
 
 
-def set_model_meta(name: str, *, public: bool | None = None, description: str | None = None) -> None:
+def set_model_meta(
+    name: str,
+    *,
+    public: bool | None = None,
+    description: str | None = None,
+    wallpaper_locked: bool | None = None,
+) -> None:
     with fsdb.locked(model_dir(name)):
         tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
         if public is not None:
             tpl["public"] = bool(public)
         if description is not None:
             tpl["description"] = str(description)
+        if wallpaper_locked is not None:
+            # trava do MODELO: vale para toda sede dele e não se contorna sede
+            # a sede. Destravar aqui libera todas de uma vez.
+            tpl["wallpaper_locked"] = bool(wallpaper_locked)
         fsdb.write_json(model_dir(name) / "model.json", tpl)
 
 

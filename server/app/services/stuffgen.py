@@ -13,9 +13,9 @@ import secrets
 import time
 from pathlib import Path
 
-from .. import fsdb
 from ..settings import REPO_ROOT, settings
 from . import config, store
+from . import wallpaper as wp_svc
 
 STUFF_DIR = REPO_ROOT / "client" / "stuff"
 VAR_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -59,12 +59,45 @@ def modules() -> list[Path]:
     return sorted(files, key=lambda p: str(p.relative_to(STUFF_DIR)))
 
 
+# O corpo dos módulos, lido uma vez e reusado. Numa primeira fase 1600 máquinas
+# ligam quase juntas, e cada boot relia ~35 arquivos (~100 kB) dentro do ÚNICO
+# event loop que atende todo o resto.
+#
+# A chave é (caminho, mtime, tamanho) de todos eles: a varredura continua a cada
+# requisição — são ~35 `stat`, baratos — e é ela que garante que editar um
+# módulo chegue ao próximo boot. Cache que não invalida é sede bootando com o
+# script velho, que é pior que servidor lento.
+_cache_modulos: tuple[tuple, str] | None = None
+
+
+def _corpo_dos_modulos() -> str:
+    global _cache_modulos
+    mods = modules()
+    try:
+        chave = tuple((str(m), m.stat().st_mtime_ns, m.stat().st_size) for m in mods)
+    except OSError:
+        chave = ()
+    if _cache_modulos and _cache_modulos[0] == chave and chave:
+        return _cache_modulos[1]
+    partes = []
+    for mod in mods:
+        partes.append(f"# ===== módulo: {mod.relative_to(STUFF_DIR)} =====")
+        partes.append(mod.read_text())
+    corpo = "\n".join(partes)
+    _cache_modulos = (chave, corpo)
+    return corpo
+
+
 def render(image_id: str) -> str:
     # effective_values aplica o esquema: campos bloqueados voltam ao padrão do
     # modelo mesmo que a imagem tenha salvo outro valor antes do bloqueio.
     values = dict(config.effective_values(image_id))
     raw = store.config_values(image_id)
-    wallpaper = fsdb.read_json(store.site_image_dir(image_id) / "wallpaper.json")
+    # o da sede, ou o do modelo: é o md5 daqui que faz a máquina baixar, então
+    # esquecer a herança neste ponto seria a sede ficar sem papel de parede
+    # mesmo com o modelo tendo um
+    achado = wp_svc.efetivo(image_id)
+    wp_meta = achado[1] if achado else None
 
     lines = [
         "#!/bin/sh",
@@ -83,8 +116,8 @@ def render(image_id: str) -> str:
         f"NB_MACHINE_KEY={_sh_quote(store.machine_key(image_id))}",
         f"NB_BOOT_KEY={_sh_quote(store.boot_key(image_id))}",
     ]
-    if wallpaper and wallpaper.get("md5"):
-        lines.append(f"NB_WALLPAPER_MD5={_sh_quote(wallpaper['md5'])}")
+    if wp_meta and wp_meta.get("md5"):
+        lines.append(f"NB_WALLPAPER_MD5={_sh_quote(wp_meta['md5'])}")
 
     # o separador é do CAMPO, não global: `60-polkit.sh` percorre
     # NB_HIDE_DOCS_APPS com o IFS padrão, então uma lista de aplicativos
@@ -107,9 +140,4 @@ def render(image_id: str) -> str:
     if lockhash:
         lines.append(f"NB_LOCK_FALLBACK_HASH={_sh_quote(lockhash)}")
 
-    parts = ["\n".join(lines), ""]
-    for mod in modules():
-        rel = mod.relative_to(STUFF_DIR)
-        parts.append(f"# ===== módulo: {rel} =====")
-        parts.append(mod.read_text())
-    return "\n".join(parts) + "\n"
+    return "\n".join(["\n".join(lines), "", _corpo_dos_modulos()]) + "\n"

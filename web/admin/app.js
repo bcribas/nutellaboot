@@ -355,6 +355,7 @@ async function showModel(m) {
 
   const modelo = await api.get(`/api/v1/models/${m.name}`, A);
   card.appendChild(layersEditor(m, modelo.layers || []));
+  card.appendChild(wallpaperEditor(m, modelo));
   card.appendChild(await locksEditor(m));
   card.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -482,12 +483,27 @@ async function locksEditor(m) {
   const data = await api.get(`/api/v1/models/${m.name}/schema`, A);
   const table = document.createElement("table");
   const estado = {};
+  const padrao = {};
+  const original = {};
   for (const f of data.fields) {
     estado[f.key] = f.locked;
+    padrao[f.key] = f.default;
+    original[f.key] = JSON.stringify(f.default ?? null);
     const tr = document.createElement("tr");
     const td0 = document.createElement("td");
     td0.innerHTML = `<span class="mono">${f.key}</span><br><span class="muted">${tr_(f.label)}</span>`;
+
+    // O valor padrão importa DUAS vezes: é o que a sede vê ao abrir o
+    // formulário, e — quando o campo está trancado — é o valor que vai para
+    // TODA máquina da sala, sem ninguém poder mudar.
     const td1 = document.createElement("td");
+    const ed = editorDePadrao(f, (v) => {
+      padrao[f.key] = v;
+    });
+    ed.disabled = !m.can_manage;
+    td1.appendChild(ed);
+
+    const td2 = document.createElement("td");
     const btn = document.createElement("button");
     btn.className = "small";
     btn.disabled = !m.can_manage;
@@ -500,8 +516,8 @@ async function locksEditor(m) {
       pinta();
     };
     pinta();
-    td1.appendChild(btn);
-    tr.append(td0, td1);
+    td2.appendChild(btn);
+    tr.append(td0, td1, td2);
     table.appendChild(tr);
   }
   wrap.appendChild(table);
@@ -511,11 +527,144 @@ async function locksEditor(m) {
     salvar.style.marginTop = "10px";
     salvar.textContent = t("locks_save");
     salvar.onclick = async () => {
-      await api.put(`/api/v1/models/${m.name}/schema/locks`, { locks: estado }, A);
-      toast(t("locks_saved"));
+      try {
+        // um PATCH por campo ALTERADO: o servidor valida o padrão pelo mesmo
+        // caminho que valida o que a sede digita, e mandar todos faria uma
+        // recusa de um campo parecer recusa de tudo
+        for (const f of data.fields) {
+          if (JSON.stringify(padrao[f.key] ?? null) === original[f.key]) continue;
+          await api.patch(
+            `/api/v1/models/${m.name}/schema/fields/${encodeURIComponent(f.key)}`,
+            { default: padrao[f.key] },
+            A,
+          );
+          original[f.key] = JSON.stringify(padrao[f.key] ?? null);
+        }
+        await api.put(`/api/v1/models/${m.name}/schema/locks`, { locks: estado }, A);
+        toast(t("locks_saved"));
+      } catch (e) {
+        toast(`${t("error")}: ${e.message}`, true);
+      }
     };
     wrap.appendChild(salvar);
   }
+  return wrap;
+}
+
+// O controle do valor padrão, do tipo do campo. Uma caixa de texto para tudo
+// deixaria alguém digitar "sim" num campo booleano e só descobrir na sala.
+function editorDePadrao(f, aoMudar) {
+  if (f.type === "bool") {
+    const s = document.createElement("select");
+    for (const [v, rot] of [[true, t("yes")], [false, t("no")]]) {
+      const o = document.createElement("option");
+      o.value = String(v);
+      o.textContent = rot;
+      s.appendChild(o);
+    }
+    s.value = String(!!f.default);
+    s.onchange = () => aoMudar(s.value === "true");
+    return s;
+  }
+  if (f.type === "select") {
+    const s = document.createElement("select");
+    for (const op of f.options || []) {
+      const o = document.createElement("option");
+      o.value = typeof op === "string" ? op : op.value;
+      o.textContent = tr_(typeof op === "string" ? op : op.label) || o.value;
+      s.appendChild(o);
+    }
+    s.value = f.default ?? "";
+    s.onchange = () => aoMudar(s.value);
+    return s;
+  }
+  const i = document.createElement("input");
+  i.type = f.type === "int" ? "number" : "text";
+  i.className = "mono";
+  i.style.width = "18ch";
+  // lista vira texto separado por vírgula, que é o mesmo separador do stuff
+  i.value = Array.isArray(f.default) ? f.default.join(",") : (f.default ?? "");
+  i.oninput = () => {
+    if (f.type === "list") aoMudar(i.value ? i.value.split(",").map((s) => s.trim()) : []);
+    else if (f.type === "int") aoMudar(i.value === "" ? null : Number(i.value));
+    else aoMudar(i.value);
+  };
+  return i;
+}
+
+// Papel de parede do MODELO: definido uma vez pela organização e herdado por
+// toda sede dele. Com a trava, nenhuma delas troca.
+function wallpaperEditor(m, modelo) {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `<h4 style="margin:18px 0 2px">${t("model_wallpaper")}</h4>
+    <p class="help muted">${t("model_wallpaper_help")}</p>`;
+
+  const img = document.createElement("img");
+  img.style.maxWidth = "260px";
+  img.style.borderRadius = "6px";
+  img.alt = "";
+  img.src = `/api/v1/models/${encodeURIComponent(m.name)}/wallpaper?v=${Date.now()}`;
+  img.onerror = () => {
+    img.remove();
+  };
+  wrap.appendChild(img);
+
+  const acoes = document.createElement("div");
+  acoes.className = "actions";
+  acoes.style.marginTop = "10px";
+
+  const file = document.createElement("input");
+  file.type = "file";
+  file.accept = "image/png,image/jpeg";
+  file.hidden = true;
+  const enviar = document.createElement("button");
+  enviar.className = "small";
+  enviar.textContent = t("wallpaper_choose");
+  enviar.disabled = !m.can_manage;
+  enviar.onclick = () => file.click();
+  file.onchange = async () => {
+    if (!file.files[0]) return;
+    const fd = new FormData();
+    fd.append("file", file.files[0]);
+    try {
+      await api.request("PUT", `/api/v1/models/${encodeURIComponent(m.name)}/wallpaper`, {
+        raw: fd,
+        kind: "admin",
+      });
+      toast(t("saved"));
+      showModel(m);
+    } catch (e) {
+      toast(`${t("error")}: ${e.message}`, true);
+    }
+  };
+
+  const remover = document.createElement("button");
+  remover.className = "small danger";
+  remover.textContent = t("wallpaper_remove");
+  remover.disabled = !m.can_manage;
+  remover.onclick = async () => {
+    await api.del(`/api/v1/models/${encodeURIComponent(m.name)}/wallpaper`, A);
+    showModel(m);
+  };
+
+  const trava = document.createElement("button");
+  trava.className = "small";
+  trava.disabled = !m.can_manage;
+  let travado = !!modelo.wallpaper_locked;
+  const pinta = () => {
+    trava.textContent = travado ? `🔒 ${t("model_wallpaper_locked")}` : `🔓 ${t("model_wallpaper_free")}`;
+    trava.className = "small" + (travado ? " danger" : "");
+  };
+  trava.onclick = async () => {
+    travado = !travado;
+    pinta();
+    await api.patch(`/api/v1/models/${encodeURIComponent(m.name)}`, { wallpaper_locked: travado }, A);
+    toast(t("saved"));
+  };
+  pinta();
+
+  acoes.append(file, enviar, remover, trava);
+  wrap.appendChild(acoes);
   return wrap;
 }
 
