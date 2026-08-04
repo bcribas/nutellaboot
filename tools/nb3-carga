@@ -116,8 +116,17 @@ async def uma_maquina(cli, base, image, mac, chave, medidas, ate, boot_atraso):
                     continue
                 medidas["longpoll"].ok(time.monotonic() - t0)
                 for c in r.json().get("commands", []):
-                    # o que interessa é quando a máquina VIU o comando
-                    medidas["comando"].ok(time.monotonic() - float(os.environ.get("NB3_CMD_T0", t0)))
+                    # O que interessa é quando a máquina VIU o comando — e só
+                    # o processo que ENFILEIROU sabe o instante zero. Um
+                    # processo auxiliar medindo "tempo desde que meu poll
+                    # começou" produz uma distribuição uniforme na janela de
+                    # espera e uma mediana de metade dela, que parece
+                    # exatamente com "o sinal não está acordando ninguém". Foi
+                    # o que aconteceu na primeira medida: 12,5 s de mediana
+                    # onde o número real era 750 ms.
+                    t_cmd = os.environ.get("NB3_CMD_T0")
+                    if t_cmd:
+                        medidas["comando"].ok(time.monotonic() - float(t_cmd))
                     cid = c["id"]
                     await cli.post(
                         f"{base}/api/v1/site-images/{image}/machines/{mac}/commands/{cid}/ack",

@@ -1003,3 +1003,50 @@ O agente fica pendurado numa requisição de até 25 segundos; se a rede oscilar
 ele reconecta e recebe o que ficou pendente — comandos não se perdem, ficam na
 fila até serem confirmados. Verifique se a máquina aparece como online no
 painel. Se estiver offline, o comando será entregue quando ela voltar.
+
+---
+
+## Capacidade: o que a máquina aguenta
+
+Medido, não estimado — `tools/nb3-carga` simula o ciclo de vida real de N
+máquinas (boot, telemetria a cada 45 s e long-poll contínuo) e mede o que a
+sala sente.
+
+**1600 máquinas, um worker uvicorn**, em servidor de 16 núcleos:
+
+| | mediana | p95 | pior |
+|---|---|---|---|
+| `stuff` (o boot inteiro, 1600 de uma vez) | 30 ms | 60 ms | 99 ms |
+| `manifest` | 16 ms | 58 ms | 93 ms |
+| telemetria (`status`) | 4 ms | 976 ms | 5,1 s |
+| **comando visto pela máquina** | **750 ms** | 1,3 s | 1,4 s |
+
+Zero erros. O worker ficou entre **24% e 60% de um núcleo**, com 108 MB de RSS
+e ~1600 conexões presas.
+
+Duas armadilhas que essa medição ensinou, e que valem para quem for repeti-la:
+
+- **um processo Python não dirige 1600 conexões.** A primeira medida acusava
+  p95 de 69 s no `stuff`; era o gerador engasgando, não o servidor — que estava
+  em 24% de um núcleo. Use `--offset` e vários processos (foram oito);
+- **só quem enfileira o comando sabe o instante zero.** Um processo auxiliar
+  medindo "tempo desde que meu long-poll começou" dá mediana de metade da
+  janela de espera, que se parece exatamente com "o sinal não acorda ninguém".
+  O número real era 750 ms.
+
+O que dimensiona o servidor não é o tráfego: são as **conexões ociosas**. Cada
+máquina segura uma esperando comando, o tempo todo. Daí `LimitNOFILE=65535` na
+unidade e `worker_connections 8192` no nginx — o padrão de 1024 descritores
+derruba a sala inteira, e o sintoma é "não conecta mais ninguém".
+
+Como repetir:
+
+```bash
+# oito geradores contra a mesma sede, 200 máquinas cada
+for i in $(seq 0 7); do
+  [ "$i" = 0 ] || AUX=--comando-so-leitor
+  .venv/bin/python tools/nb3-carga --server "$SERVER" --key "$NB3_ADMIN_KEY" \
+      --modelo maratona2026 --maquinas 200 --offset $((i*200)) \
+      --segundos 150 --rampa 60 $AUX &
+done; wait
+```
