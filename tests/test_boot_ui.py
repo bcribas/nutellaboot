@@ -362,14 +362,27 @@ def test_a_barra_nao_depende_de_medir_o_arquivo():
     assert "stat -c %s" not in codigo
 
 
-def test_o_stdbuf_vem_com_a_biblioteca_dele():
-    """`stdbuf` funciona por LD_PRELOAD: sem a `libstdbuf.so` no caminho que
-    ele espera, o comando falha e leva o download junto. Copiar um sem o outro
-    é a falha muda de sempre."""
+def test_a_libstdbuf_vai_para_um_caminho_completo():
+    """Copiar a biblioteca não basta: ela tem que cair no CAMINHO que o stdbuf
+    procura.
+
+    `copy_exec ORIGEM DIRETÓRIO` só acrescenta o nome do arquivo quando o
+    diretório já existe no initrd em construção. Como /usr/libexec/coreutils
+    não existia, a `libstdbuf.so` foi gravada COMO o arquivo
+    /usr/libexec/coreutils — e o stdbuf, achando arquivo onde esperava
+    diretório, saiu 125 antes de rodar o aria2c. Nenhuma máquina bootou.
+
+    Daí as duas exigências: destino com o nome do arquivo, e o diretório criado
+    antes."""
     hook = HOOK_INITRD.read_text()
-    usa = "stdbuf" in "\n".join(
-        l for l in DOWNLOAD.read_text().splitlines() if not l.lstrip().startswith("#")
+    codigo = "\n".join(l for l in hook.splitlines() if not l.lstrip().startswith("#"))
+    assert "copy_exec /usr/libexec/coreutils/libstdbuf.so /usr/libexec/coreutils\n" not in codigo, (
+        "destino é um diretório inexistente: a biblioteca vira arquivo com o nome dele"
     )
-    assert usa, "a barra deixou de usar stdbuf; revise este teste"
-    assert "copy_exec /usr/bin/stdbuf" in hook
-    assert "libstdbuf.so" in hook
+    assert 'mkdir -p "$DESTDIR' in codigo, "o diretório da libstdbuf.so não é criado antes"
+    # o destino do copy_exec da biblioteca termina no nome do arquivo
+    for m in re.finditer(r"copy_exec\s+(\S+)\s+(\S+)", codigo):
+        if "libstdbuf" in m.group(1):
+            assert m.group(2).endswith("libstdbuf.so") or m.group(2) == m.group(1), (
+                f"destino sem o nome do arquivo: {m.group(2)}"
+            )

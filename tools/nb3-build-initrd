@@ -82,6 +82,29 @@ done
 
 chroot "$MNT" update-initramfs -c -k "$KVER" || chroot "$MNT" update-initramfs -u -k "$KVER"
 
+# A falha de um hook é MUDA: o `copy_exec` não reclama de destino errado, e o
+# arquivo simplesmente não está lá na hora do boot. Foi assim com o `head`
+# (todo valor do pendrive voltava vazio) e com a `libstdbuf.so`, que foi
+# gravada com o nome do diretório e derrubou o download de todas as máquinas.
+# Conferir o que ENTROU custa uma listagem e transforma a classe inteira em
+# erro de build.
+echo ">> conferindo o que entrou no initrd"
+LISTA=$(mktemp)
+chroot "$MNT" lsinitramfs "/boot/initrd.img-$KVER" > "$LISTA"
+FALTOU=""
+for f in usr/bin/aria2c usr/bin/wget.good usr/bin/md5sum \
+    usr/bin/stdbuf usr/libexec/coreutils/libstdbuf.so \
+    scripts/nutellaboot scripts/nb3-ui \
+    etc/ssl/certs/ca-certificates.crt; do
+    grep -Fq "$f" "$LISTA" || FALTOU="$FALTOU $f"
+done
+rm -f "$LISTA"
+if [ -n "$FALTOU" ]; then
+    echo "ERRO: o hook não pôs no initrd:$FALTOU" >&2
+    echo "      (destino de copy_exec com diretório inexistente vira ARQUIVO com o nome do diretório)" >&2
+    exit 1
+fi
+
 mkdir -p "$OUT"
 cp "$MNT/boot/initrd.img-$KVER" "$OUT/initrd.img"
 cp "$MNT/boot/vmlinuz-$KVER" "$OUT/vmlinuz"

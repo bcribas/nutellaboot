@@ -212,6 +212,27 @@ O ambiente de teste tem um nginx externo que faz proxy de
   embutido. Só apareceu num boot de verdade em qemu. Comando externo no
   caminho de boot: confira se o hook o copia (`tests/test_bootstrap_shell.py`
   roda com um PATH mínimo).
+- **`copy_exec ORIGEM DIRETÓRIO` grava COM O NOME DO DIRETÓRIO** quando o
+  diretório ainda não existe no initrd em construção — o initramfs-tools só
+  acrescenta o nome do arquivo se o destino já for um diretório lá dentro.
+  `/usr/bin` existe, então funciona; `/usr/libexec/coreutils` não existia, e a
+  `libstdbuf.so` virou o ARQUIVO `/usr/libexec/coreutils`. O `stdbuf` achou
+  arquivo onde esperava diretório, saiu 125 **antes de executar o aria2c**, e
+  nenhuma máquina baixou mais nada. Destino sempre com o caminho completo, e
+  `mkdir -p "$DESTDIR/..."` antes. O `nb3-build-initrd` agora confere a lista
+  do que entrou (`lsinitramfs`) e falha alto.
+- **O awk do initrd é o do busybox, e o `printf "%d"` dele é de 32 bits.** A
+  camada base tem 6,1 GiB: o total da barra saía `-2147483648`. Use `%.0f` para
+  qualquer contagem de bytes. O awk de desenvolvimento é de 64 bits, então o
+  teste passa — o guarda que vale é o estático
+  (`tests/test_download_progress.py`). Aritmética do `ash` e `test -ge` são de
+  64 bits, esses não truncam.
+- **Nada do caminho de boot pode depender de enfeite.** A barra de progresso
+  tinha poder de veto sobre o download: com `2>&1 | awk` filtrando só as linhas
+  de progresso, todo diagnóstico do aria2 (TLS, 404, DNS) e o próprio erro do
+  `stdbuf` iam para o lixo. Quem filtra repassa o que não casou para
+  `/dev/stderr`, e quem usa ferramenta opcional sonda antes
+  (`nb_progress_probe`) e degrada em vez de falhar.
 - **`nb3-qemu-shot` com 2 GB não boota**: o kernel não descompacta um initrd de
   185 MB e a tela fica parada em "Booting", sem erro. Use `--mem 4G`.
 

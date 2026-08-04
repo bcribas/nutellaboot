@@ -43,12 +43,28 @@ copy_exec /usr/bin/stat /usr/bin
 # no fim: a barra fica parada o download inteiro e pula para 100% (medido —
 # num download de 10 s, todas as amostras com o mesmo carimbo de tempo).
 #
-# Ele funciona por LD_PRELOAD, então a biblioteca auxiliar tem que vir junto E
-# no mesmo caminho: `stdbuf` procura por um caminho absoluto compilado dentro
-# dele. Sem ela, o comando falha com "failed to find libstdbuf.so" e o
-# download inteiro morre — é por isso que há teste guardando o par.
-copy_exec /usr/bin/stdbuf /usr/bin
-copy_exec /usr/libexec/coreutils/libstdbuf.so /usr/libexec/coreutils
+# Ele funciona por LD_PRELOAD e procura a biblioteca por um caminho ABSOLUTO
+# compilado dentro dele (dá para ver com `strings`). Sem ela, sai 125 sem nem
+# executar o comando.
+#
+# O DESTINO VAI COM O CAMINHO COMPLETO, e o diretório é criado antes. Com
+# `copy_exec ORIGEM DIRETÓRIO`, o initramfs-tools só acrescenta o nome do
+# arquivo quando o diretório JÁ EXISTE no initrd em construção; como
+# /usr/libexec/coreutils não existia, a biblioteca foi gravada COMO o arquivo
+# /usr/libexec/coreutils. O stdbuf achou arquivo onde esperava diretório e
+# nenhuma máquina baixou mais nada — com a mensagem comida pelo filtro do awk.
+_nb_lsb=
+for _c in /usr/libexec/coreutils/libstdbuf.so /usr/lib/*/coreutils/libstdbuf.so; do
+    if [ -f "$_c" ]; then
+        _nb_lsb=$_c
+        break
+    fi
+done
+if [ -n "$_nb_lsb" ]; then
+    copy_exec /usr/bin/stdbuf /usr/bin/stdbuf
+    mkdir -p "$DESTDIR${_nb_lsb%/*}"
+    copy_exec "$_nb_lsb" "$_nb_lsb"
+fi
 
 # --- TLS DE VERDADE ---
 # O nb2 embutia um único certificado no stuff e depois desligava a verificação

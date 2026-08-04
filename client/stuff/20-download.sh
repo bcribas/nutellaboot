@@ -11,6 +11,31 @@
 #  - aceita VÁRIAS URLs do mesmo arquivo: o aria2 usa todas como espelhos e
 #    contorna seeder morto sozinho.
 
+# A BARRA NÃO PODE TER PODER DE VETO SOBRE O DOWNLOAD.
+#
+# Ela já teve, e parou a sala inteira: o `stdbuf` foi para o initrd sem a
+# `libstdbuf.so` no caminho que ele espera, saiu 125 ANTES de rodar o aria2, e
+# a mensagem dele morreu no filtro do awk aqui embaixo. Cinco tentativas, 50 s
+# de sleep e "could not download", sem uma linha dizendo o motivo.
+#
+# Por isso a decisão é tomada UMA vez, aqui, e o pior caso é perder o enfeite:
+#
+#   live      stdbuf funciona — os números chegam um por segundo
+#   buffered  sem stdbuf: o aria2 buferiza no cano e a barra anda aos trancos
+#   off       sem awk: baixa sem barra nenhuma
+nb_progress_probe() {
+    [ -n "${NB_PROGRESS_MODE:-}" ] && return 0
+    if ! command -v awk > /dev/null 2>&1; then
+        NB_PROGRESS_MODE=off
+    elif stdbuf -o0 true > /dev/null 2>&1; then
+        NB_PROGRESS_MODE=live
+    else
+        NB_PROGRESS_MODE=buffered
+        nb_warn "no working stdbuf: the progress bar will move in bursts"
+    fi
+    export NB_PROGRESS_MODE
+}
+
 # A barra vem dos números do PRÓPRIO aria2.
 #
 # Medir o arquivo não funciona: o aria2 pré-aloca, então ele nasce com o
@@ -28,6 +53,10 @@
 # a quebra de linha — mas o corte pelo último \r fica como rede, porque com
 # RS='\r' e uma entrada sem nenhum CR o awk lê tudo como UM registro e a barra
 # imprime uma vez só, no começo, e congela.
+#
+# O QUE NÃO É PROGRESSO VAI PARA A TELA. Como a chamada usa 2>&1, tudo que o
+# aria2 tem a dizer — TLS, 404, DNS — passa por aqui; filtrar sem repassar é
+# cegar o boot, que foi exatamente o que aconteceu.
 nb_aria_progress() {
     awk '
         function bytes(s,   n, u) {
@@ -62,9 +91,21 @@ nb_aria_progress() {
             }
             if (match($0, /DL:[0-9.]+[KMGT]?i?B/)) vel = bytes(substr($0, RSTART + 3, RLENGTH - 3))
             if (match($0, /ETA:[0-9dhms]+/)) eta = segundos(substr($0, RSTART + 4, RLENGTH - 4))
-            # %d e não print: com print o awk sai em notação científica
-            # (5.03316e+06) e a aritmética do shell recusa
-            printf "%d %d %d %d\n", feito, total, vel, eta
+            # %.0f e não print: com print o awk sai em notação científica
+            # (5.03316e+06) e a aritmética do shell recusa.
+            #
+            # E não %d: o awk do busybox — que é o do initrd — converte %d em
+            # inteiro de 32 BITS. A camada base tem 6,1 GiB, e o total saía
+            # -2147483648. O awk do desenvolvimento é de 64 bits, então o teste
+            # passava. O %.0f usa o double e chega inteiro do outro lado; a
+            # aritmética do ash e o `test -ge` são de 64 bits (conferido).
+            printf "%.0f %.0f %.0f %d\n", feito, total, vel, eta
+            fflush()
+            next
+        }
+        {
+            # aria2 tem algo a dizer: para a tela, não para o lixo
+            print > "/dev/stderr"
             fflush()
         }
     ' | while read -r _ap_feito _ap_total _ap_vel _ap_eta; do
@@ -96,15 +137,20 @@ nb_download() {
         # --async-dns=false para honrar /etc/hosts (pin de NB_HOSTS).
         # A chave de boot vai no cabeçalho: o aria2c faz GET, e os endpoints
         # do servidor aceitam a chave tanto por POST quanto por cabeçalho.
-        if [ "${NB_DL_PROGRESS:-0}" = 1 ]; then
+        nb_progress_probe
+        if [ "${NB_DL_PROGRESS:-0}" = 1 ] && [ "$NB_PROGRESS_MODE" != off ]; then
             nb_ui_closeline
+            # prefixo, não comando: `stdbuf -o0` tira os números do buffer do
+            # libc (sem ele chegam todos de uma vez no fim), mas se ele não
+            # funcionar o aria2 roda direto. Enfeite não derruba download.
+            _pre=
+            [ "$NB_PROGRESS_MODE" = live ] && _pre="stdbuf -o0"
             # o código de saída vai para um arquivo: num cano, `$?` é do último
             # comando (o awk), e é o do aria2 que decide se vale repetir
             rm -f "$_rcfile"
             {
-                # stdbuf -o0: sem ele os números ficam no buffer do libc e a
-                # barra só se mexe quando o download acaba
-                stdbuf -o0 aria2c --quiet=false --console-log-level=warn \
+                # shellcheck disable=SC2086
+                $_pre aria2c --quiet=false --console-log-level=warn \
                     --show-console-readout=true --summary-interval=0 \
                     --timeout=30 --connect-timeout=15 --max-tries=1 \
                     --check-certificate=true --ca-certificate="$NB_CA_BUNDLE" \
