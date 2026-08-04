@@ -1039,6 +1039,31 @@ máquina segura uma esperando comando, o tempo todo. Daí `LimitNOFILE=65535` na
 unidade e `worker_connections 8192` no nginx — o padrão de 1024 descritores
 derruba a sala inteira, e o sintoma é "não conecta mais ninguém".
 
+### O mesmo teste contra a produção, por HTTPS
+
+| | mediana | p95 | pior |
+|---|---|---|---|
+| `stuff` | 189 ms | 6,4 s | 6,9 s |
+| telemetria | 79 ms | 9,5 s | 32 s |
+
+O worker ficou em **86% de um núcleo**, com carga 0,61 numa máquina de 16.
+
+E houve ~3000 `ConnectTimeout` — que **não foram do servidor**. Ele contou
+`ListenOverflows 0`, `ListenDrops 0`, `TCPReqQFullDrop 0`, e o nginx registrou
+14 430 respostas 200 sem um único erro. As falhas apareceram do lado do
+gerador (`TcpAttemptFails 3183`, `SynRetrans 50 658` na máquina que gerava):
+1600 conexões TLS saindo de **um IP só**, por um NAT só.
+
+A prova real não é assim — são ~50 sedes de ~35 máquinas, cada uma na sua
+rede. O que este teste prova é que o servidor absorve tudo que chega até ele;
+o que ele **não** prova é o caminho, porque o caminho do teste era um funil que
+a prova não tem.
+
+> **A margem que sobra é de um núcleo.** 1600 máquinas custam 86% de UM worker,
+> e worker só pode haver um (invariante 2). Para 2000 a conta fica apertada. Se
+> chegar perto do limite, o caminho não é subir workers — é tirar os sinais de
+> long-poll e SSE da memória do processo, e isso é mudança de arquitetura.
+
 Como repetir:
 
 ```bash
@@ -1050,3 +1075,118 @@ for i in $(seq 0 7); do
       --segundos 150 --rampa 60 $AUX &
 done; wait
 ```
+
+---
+
+## Instalar o servidor (do zero)
+
+O que está no ar hoje, feito exatamente assim em
+`nutellaboot.mdp.naquadah.com.br` (Ubuntu 24.04).
+
+```bash
+apt-get install -y python3-venv python3-pip nginx certbot python3-certbot-nginx \
+    squashfs-tools rsync mtools grub-efi-amd64-bin grub-pc-bin grub-common
+
+adduser --system --group --home /var/lib/nutellaboot3 --shell /usr/sbin/nologin nutellaboot
+install -d -o nutellaboot -g nutellaboot -m 0750 /var/lib/nutellaboot3
+
+git clone https://github.com/bcribas/nutellaboot.git /opt/nutellaboot3
+python3 -m venv /opt/nutellaboot3/.venv
+/opt/nutellaboot3/.venv/bin/pip install fastapi "uvicorn[standard]" python-multipart httpx
+
+install -m 0644 /opt/nutellaboot3/systemd/nutellaboot3.service /etc/systemd/system/
+install -m 0644 /opt/nutellaboot3/deploy/sysctl-nutellaboot3.conf /etc/sysctl.d/60-nutellaboot3.conf
+sysctl --system
+
+cd /opt/nutellaboot3
+NB3_DATA_ROOT=/var/lib/nutellaboot3 .venv/bin/python tools/nb3-init --id producao   # IMPRIME a chave
+chown -R nutellaboot:nutellaboot /var/lib/nutellaboot3
+
+systemctl enable --now nutellaboot3
+```
+
+**A chave de administração sai uma vez só.** Em disco fica apenas o hash. Guarde
+antes de fechar o terminal.
+
+### nginx e certificado
+
+```bash
+install -m 0644 /opt/nutellaboot3/deploy/nginx-nutellaboot3.conf /etc/nginx/sites-available/nutellaboot3
+ln -sf /etc/nginx/sites-available/nutellaboot3 /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
+# o snippet está comentado no fim do próprio arquivo de configuração
+$EDITOR /etc/nginx/snippets/nutellaboot3-proxy.conf
+# e os globais em nginx.conf: worker_processes auto, worker_rlimit_nofile 65535,
+# worker_connections 8192, multi_accept on
+nginx -t && systemctl reload nginx
+
+certbot --nginx -d nutellaboot.mdp.naquadah.com.br --redirect
+```
+
+**Sem certificado válido nada boota**: o initrd verifica TLS em todo download, e
+essa é uma invariante do projeto. Confira do lado de fora antes de seguir:
+
+```bash
+curl https://nutellaboot.mdp.naquadah.com.br/api/v1/health
+curl https://nutellaboot.mdp.naquadah.com.br/boot/v3/sanity      # penguin
+```
+
+### Publicar no servidor de arquivos
+
+O servidor envia camadas e imagens de pendrive para o `files.mdp` por rsync
+sobre SSH, com um usuário **sem privilégio** e uma chave que só sabe fazer isso.
+
+No `files.mdp`:
+
+```bash
+adduser --system --group --home /var/lib/nb3pub --shell /bin/sh nb3pub
+chgrp nb3pub /var/www/html/maratonalinux /var/www/html/mlbootimages
+chmod 2775   /var/www/html/maratonalinux /var/www/html/mlbootimages   # setgid
+```
+
+No servidor do NutellaBoot, como o usuário do serviço:
+
+```bash
+sudo -u nutellaboot ssh-keygen -t ed25519 -N "" -f /var/lib/nutellaboot3/.ssh/id_ed25519
+ssh-keyscan -t ed25519 files.mdp.naquadah.com.br > /var/lib/nutellaboot3/.ssh/known_hosts
+```
+
+E a pública entra no `authorized_keys` do `nb3pub` **restrita**:
+
+```
+restrict,command="/usr/bin/rrsync -wo /var/www/html" ssh-ed25519 AAAA... nutellaboot3@...
+```
+
+`restrict` tira porta, agente, X11, tty e encaminhamento; o `command` prende a
+chave ao rsync em modo **somente escrita** sob `/var/www/html`. Mesmo vazando,
+ela não lê nada nem abre shell — dá para conferir:
+
+```bash
+sudo -u nutellaboot ssh nb3pub@files.mdp.naquadah.com.br "cat /etc/shadow"
+# /usr/bin/rrsync error: SSH_ORIGINAL_COMMAND does not run rsync
+```
+
+O `known_hosts` pré-carregado não é zelo: o serviço roda com `BatchMode=yes` e
+sem ele o primeiro envio falharia pedindo confirmação que ninguém vai dar.
+
+Por fim, no `data/server.json`:
+
+```json
+"publish": {
+  "enabled": true,
+  "host": "files.mdp.naquadah.com.br",
+  "user": "nb3pub",
+  "paths": {"layers": "maratonalinux", "usb": "mlbootimages"}
+}
+```
+
+Os caminhos são **relativos** à raiz do `rrsync`; absoluto seria recusado.
+
+### Atualizar
+
+```bash
+cd /opt/nutellaboot3 && git pull && systemctl restart nutellaboot3
+```
+
+O `stuff` é lido do disco a cada boot, então mudança em `client/stuff/` chega às
+máquinas sem reiniciar o serviço. Rota nova, sim, precisa de reinício.
