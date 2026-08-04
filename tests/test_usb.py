@@ -676,7 +676,8 @@ def test_publicada_e_velha_nao_redireciona(client, build, genusb, data_root, sed
     sede que não boota e nada explicando. Regerar sem republicar é o caminho
     comum para isso — o botão apontava para o velho."""
     estado = asyncio.run(usb.gerar_da_sala("sala1"))
-    _publica(data_root, estado["file"], quando=_mtime(data_root, estado["file"]) - 10)
+    # bem antes, para não depender da folga de relógio
+    _publica(data_root, estado["file"], quando=_mtime(data_root, estado["file"]) - 600)
 
     r = client.get(f"/api/v1/site-images/sala1/usb/image?tk={sede['token']}", follow_redirects=False)
     assert r.status_code == 200, r.text
@@ -717,8 +718,13 @@ def test_publicar_dentro_da_geracao_nao_conta_como_velha(client, build, genusb, 
     A comparação é com o mtime do arquivo, que responde à pergunta certa: o
     arquivo daqui mudou depois de eu mandá-lo?"""
     estado = asyncio.run(usb.gerar_da_sala("sala1"))
-    # publicado uma fração ANTES do fim da geração, como acontece de verdade
-    _publica(data_root, estado["file"], quando=estado["built_at"] - 0.001)
+    # A ordem de verdade: o arquivo é escrito, ENTÃO publicado, e só depois o
+    # `built_at` é carimbado. Ancorar no mtime (e não em `built_at - epsilon`)
+    # é o que torna isto determinístico — a distância entre escrever e carimbar
+    # depende do subprocesso e a primeira versão deste teste piscava.
+    # publicado NO MESMO instante em que o arquivo foi escrito, que é o que
+    # acontece de verdade quando a geração publica sozinha
+    _publica(data_root, estado["file"], quando=_mtime(data_root, estado["file"]))
 
     e = usb.image_state("sala1")
     assert e["publish_stale"] is False, "publicação normal marcada como velha"

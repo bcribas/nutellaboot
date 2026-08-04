@@ -18,6 +18,7 @@
   "cancel": "Cancelar",
   "clean_home": "Limpiar la home",
   "close": "Cerrar",
+  "command_locked": "Bloqueado por la organización de la maratón ({field} está bloqueado en el modelo)",
   "command_sent": "Comando enviado a {n} máquina(s)",
   "config_intro": "Estas opciones se aplican a todas las máquinas que arranquen esta imagen, a partir del próximo arranque.",
   "config_link": "Enlace de configuración",

@@ -41,6 +41,42 @@ def _paths_reais() -> set[str]:
     }
 
 
+def _metodos_reais() -> set[tuple[str, str]]:
+    """(MÉTODO, caminho normalizado) de tudo que a API expõe."""
+    from server.app.main import create_app
+
+    fora = set()
+    for caminho, ops in create_app().openapi()["paths"].items():
+        if not caminho.startswith(("/api/v1", "/boot/v3")) or caminho in SILENCIOSAS:
+            continue
+        for metodo in ops:
+            if metodo.upper() in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+                fora.add((metodo.upper(), _normaliza(caminho)))
+    return fora
+
+
+def _metodos_citados() -> set[tuple[str, str]]:
+    """O que as TABELAS do documento prometem, linha a linha.
+
+    Comparar só caminhos deixava passar método novo em rota já documentada — foi
+    assim que o `GET /commands` entrou sem ninguém notar, ao lado de um `POST`
+    que já estava lá."""
+    fora = set()
+    for linha in DOC.read_text(encoding="utf-8").splitlines():
+        if not linha.startswith("|"):
+            continue
+        celulas = [c.strip() for c in linha.strip("|").split("|")]
+        if len(celulas) < 2:
+            continue
+        metodos = re.findall(r"\b(GET|POST|PUT|PATCH|DELETE)\b", celulas[0])
+        if not metodos:
+            continue
+        for caminho in re.findall(r"`(/(?:api/v1|boot/v3)[^`]*)`", celulas[1]):
+            for m in metodos:
+                fora.add((m, _normaliza(caminho.split("?")[0])))
+    return fora
+
+
 def _paths_citados() -> set[str]:
     """Os caminhos que o documento menciona, com os placeholders normalizados.
 
@@ -73,6 +109,16 @@ def test_toda_rota_esta_no_documento():
     assert not faltando, (
         "rotas fora do docs/api.md (documente, ou explique em SILENCIOSAS):\n  "
         + "\n  ".join(faltando)
+    )
+
+
+def test_todo_metodo_esta_no_documento():
+    """Rota já documentada que ganha um método novo é a mesma omissão: quem lê
+    o documento não descobre que ela passou a responder também a outro verbo."""
+    faltando = sorted(_metodos_reais() - _metodos_citados())
+    assert not faltando, (
+        "métodos fora do docs/api.md:\n  "
+        + "\n  ".join(f"{m} {c}" for m, c in faltando)
     )
 
 

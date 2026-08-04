@@ -220,3 +220,87 @@ def test_acks_log_is_capped(data_root, img):
     linhas = path.read_text().splitlines()
     assert json.loads(linhas[-1])["i"] == 3999
     assert all(json.loads(line) for line in linhas)
+
+
+# --- o cadeado do modelo vale também aqui ------------------------------------
+#
+# `DISABLE_FIREWALL` nasce travado no esquema padrão ("o firewall é obrigatório
+# durante a maratona"), e a trava valia no configureitor e NÃO valia no
+# hotconfig: a mesma pessoa que a tela de configuração impedia de desligar o
+# firewall desligava pela tela do laboratório, na sala inteira, durante a prova.
+
+
+@pytest.fixture
+def com_esquema(data_root, img):
+    from server.app.services.default_schema import build_default_schema
+
+    fsdb.write_json(data_root / "models" / "t" / "schema.json", build_default_schema())
+    return img
+
+
+def _manda(client, headers, comando):
+    return client.post(
+        "/api/v1/site-images/testes3/commands",
+        json={"command": comando, "target": "all"},
+        headers=headers,
+    )
+
+
+@pytest.fixture
+def uma_maquina(client, com_esquema, hm):
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    return MAC
+
+
+def test_a_sede_nao_desliga_o_firewall_travado(client, uma_maquina, hi):
+    r = _manda(client, hi, "disablefirewall")
+    assert r.status_code == 403, r.text
+    assert "DISABLE_FIREWALL" in r.text
+
+
+def test_ligar_o_firewall_continua_liberado(client, uma_maquina, hi):
+    """Move a máquina PARA o valor travado: recusar seria impedir a sede de
+    consertar o que a organização quer."""
+    assert _manda(client, hi, "enablefirewall").status_code == 200
+
+
+def test_a_administracao_desliga(client, uma_maquina, admin_key):
+    ha = {"Authorization": f"Bearer {admin_key}"}
+    assert _manda(client, ha, "disablefirewall").status_code == 200
+
+
+def test_imagem_destravada_desliga(client, uma_maquina, hi, data_root):
+    info = fsdb.read_json(data_root / "site-images" / "testes3" / "image.json")
+    fsdb.write_json(data_root / "site-images" / "testes3" / "image.json", {**info, "unlocked": True})
+    assert _manda(client, hi, "disablefirewall").status_code == 200
+
+
+def test_destravar_o_campo_no_modelo_libera(client, uma_maquina, hi, data_root):
+    from server.app.services import store
+
+    store.set_schema_field("t", "DISABLE_FIREWALL", {"locked": False})
+    assert _manda(client, hi, "disablefirewall").status_code == 200
+
+
+def test_a_regra_e_a_MESMA_das_duas_telas(client, uma_maquina, hi):
+    """O que o configureitor recusa, o hotconfig recusa. Duas cópias da regra é
+    exatamente como as portas ficaram diferentes."""
+    r = client.put(
+        "/api/v1/site-images/testes3/config",
+        json={"values": {"DISABLE_FIREWALL": True}},
+        headers=hi,
+    )
+    assert r.status_code == 400, "o configureitor deixou passar; revise este teste"
+    assert _manda(client, hi, "disablefirewall").status_code == 403
+
+
+def test_a_rota_diz_o_que_pode_ser_mandado(client, uma_maquina, hi, admin_key):
+    r = client.get("/api/v1/site-images/testes3/commands", headers=hi)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["blocked"] == {"disablefirewall": "DISABLE_FIREWALL"}
+    assert "disablefirewall" not in d["allowed"]
+    assert "enablefirewall" in d["allowed"]
+
+    ha = {"Authorization": f"Bearer {admin_key}"}
+    assert client.get("/api/v1/site-images/testes3/commands", headers=ha).json()["blocked"] == {}

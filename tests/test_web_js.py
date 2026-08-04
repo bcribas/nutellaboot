@@ -334,3 +334,16 @@ def test_nenhuma_tela_baixa_direto_do_servidor_de_arquivos():
         codigo = "\n".join(l for l in js.splitlines() if not l.lstrip().startswith("//"))
         assert "public_url ||" not in codigo, tela
         assert "href = img.public_url" not in codigo, tela
+
+
+def test_o_hotconfig_pergunta_o_que_pode_mandar():
+    """O servidor recusa comando que contradiz campo travado no modelo — o
+    botão não pode prometer o que ele vai negar. E falhar essa consulta não
+    pode esconder a tela: sem a lista, todos os botões continuam oferecidos e
+    a recusa vem do servidor, que é o que valia antes."""
+    js = (REPO / "web" / "hotconfig" / "app.js").read_text(encoding="utf-8")
+    assert "/commands`" in js and "desabilitarComandosBloqueados" in js
+    trecho = js[js.index("async function desabilitarComandosBloqueados") :]
+    trecho = trecho[: trecho.index("async function sendCommand")]
+    assert "catch" in trecho and "return" in trecho, "a consulta pode derrubar a tela"
+    assert "b.disabled = true" in trecho

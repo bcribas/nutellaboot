@@ -18,6 +18,7 @@
   "cancel": "Cancel",
   "clean_home": "Clean home",
   "close": "Close",
+  "command_locked": "Locked by the contest organization ({field} is locked in the model)",
   "command_sent": "Command sent to {n} machine(s)",
   "config_intro": "These settings apply to every machine booting this image. They take effect on the next boot.",
   "config_link": "Settings link",

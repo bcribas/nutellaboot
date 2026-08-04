@@ -94,6 +94,18 @@ def kernel_state() -> dict:
 
 ARQUIVOS_DE_BOOT = ("vmlinuz", "initrd.img")
 
+# Folga ao comparar o mtime de um arquivo com um instante de `time.time()`.
+#
+# Não é zelo: são DOIS RELÓGIOS. O mtime vem do relógio grosso do kernel
+# (granularidade de tique, alguns milissegundos) e `published_at` vem do
+# relógio fino — os dois divergem, e nos dois sentidos. Sem folga, um arquivo
+# publicado no mesmo instante em que foi escrito cai de um lado ou do outro
+# conforme a sorte.
+#
+# Dois segundos ficam muito acima dessa divergência e muito abaixo do caso que
+# a checagem existe para pegar: regerar sem republicar leva minutos, no mínimo.
+TOLERANCIA_RELOGIO = 2.0
+
 
 def build_info() -> dict:
     """O que `tools/nb3-build-initrd` carimbou na construção atual.
@@ -247,7 +259,9 @@ def _com_derivados(estado: dict, *, esperado_kernel: str, esperado_boot: str = "
             mtime = file_path(e["file"]).stat().st_mtime
         except OSError:
             mtime = e.get("built_at", 0)
-        e["publish_stale"] = bool(e["published"] and pub.get("published_at", 0) < mtime)
+        e["publish_stale"] = bool(
+            e["published"] and pub.get("published_at", 0) + TOLERANCIA_RELOGIO < mtime
+        )
         e["public_url"] = "" if e["publish_stale"] else pub.get("url", "")
         e["publish_error"] = pub.get("error", "") if pub.get("status") == "failed" else ""
     return e

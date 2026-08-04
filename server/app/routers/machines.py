@@ -245,6 +245,41 @@ async def get_machine(
     return m.get_machine(image, m.normalize_mac(mac))
 
 
+def _comandos_bloqueados(image: str, *, is_admin: bool) -> dict[str, str]:
+    """Comandos que esta credencial NÃO pode mandar nesta imagem, e por causa
+    de qual campo.
+
+    O cadeado do modelo vale aqui pelo mesmo motivo que vale no configureitor —
+    e por um tempo não valeu: quem a tela de configuração impedia de desligar o
+    firewall desligava pela tela do laboratório, na sala inteira.
+    """
+    from ..services import config as cfg
+
+    valores = cfg.effective_values(image)
+    fora = {}
+    for comando, (campo, impoe) in m.COMANDOS_DE_CONFIG.items():
+        if cfg.pode_editar(image, campo, is_admin=is_admin):
+            continue
+        # só o sentido que CONTRADIZ o valor travado é barrado: voltar para ele
+        # é a sede consertando o que a organização quer
+        if valores.get(campo) != impoe:
+            fora[comando] = campo
+    return fora
+
+
+@router.get("/site-images/{image}/commands")
+async def comandos_permitidos(
+    image: str, p=Depends(auth.require_image_access(service_scope="commands:write"))
+) -> dict:
+    """O que esta credencial pode mandar. A tela usa para não oferecer botão
+    que o servidor vai recusar, e quem integra para não descobrir apanhando."""
+    bloqueados = _comandos_bloqueados(image, is_admin=(p.kind == "admin"))
+    return {
+        "allowed": sorted(m.ALLOWED_COMMANDS - set(bloqueados)),
+        "blocked": bloqueados,
+    }
+
+
 @router.post("/site-images/{image}/commands")
 async def create_command(
     image: str, body: dict, p=Depends(auth.require_image_access(service_scope="commands:write"))
@@ -252,6 +287,12 @@ async def create_command(
     command = body.get("command", "")
     if command not in m.ALLOWED_COMMANDS:
         raise HTTPException(400, f"comando não permitido: {command}")
+    bloqueados = _comandos_bloqueados(image, is_admin=(p.kind == "admin"))
+    if command in bloqueados:
+        raise HTTPException(
+            403,
+            f"{command}: {bloqueados[command]} está bloqueado pela organização da maratona",
+        )
     target = body.get("target", "all")
     macs = m.list_macs(image) if target == "all" else [m.normalize_mac(x) for x in target]
     macs = [x for x in macs if m.valid_mac(x)]

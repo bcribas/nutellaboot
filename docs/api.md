@@ -172,7 +172,6 @@ ALLOWNETWORKCHANGE='f'
 |---|---|---|---|---|
 | POST | `/api/v1/site-images` | C | `{id, fullname, model, unlocked?, wallpaper_locked?}` | imagem criada **com as credenciais em claro** (única vez) |
 | POST | `/api/v1/site-images/bulk` | A | TSV ou `{rows:[…]}` | `{results:[…]}`; com `?format=csv`, CSV das credenciais |
-| POST | `/api/v1/site-images/{img}/unlock` | C | — | destrava o formulário inteiro da imagem |
 | GET | `/api/v1/site-images?prefix=` | C | — | `{images:[…]}` (o sub-admin vê só as dele) |
 | GET | `/api/v1/site-images/{img}` | C, I | — | `image.json` |
 | PATCH | `/api/v1/site-images/{img}` | C | `{fullname?, unlocked?, model?, wallpaper_locked?}` | imagem atualizada |
@@ -436,15 +435,40 @@ rastro. O evento `alert.raised` também vai por webhook, para o MOJ.
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
 | POST | `/api/v1/site-images/{img}/commands` | C, I, S`commands:write` | `{command, target, args?, delay?}` | `{command_id, machines}` |
+| GET | `/api/v1/site-images/{img}/commands` | C, I, S`commands:write` | — | `{allowed:[…], blocked:{comando: campo}}` |
 | GET | `/api/v1/site-images/{img}/machines/{mac}/commands?wait=25` | M | — | `{commands:[…], lock}` (long-poll) |
 | POST | `/api/v1/site-images/{img}/machines/{mac}/commands/{cid}/ack` | M | `{status, output?}` | `{ok, found}` |
-| POST | `/api/v1/site-images/{img}/lock` · `/unlock` | C, I, S`commands:write` | — | `{command_id, machines, locked}` |
-| POST | `/api/v1/site-images/{img}/machines/{mac}/lock` · `/unlock` | C, I, S`commands:write` | — | idem, para uma máquina |
+| POST | `/api/v1/site-images/{img}/lock` | C, I, S`commands:write` | — | trava a TELA de todas as máquinas |
+| POST | `/api/v1/site-images/{img}/unlock` | C, I, S`commands:write` | — | destrava a tela de todas |
+| POST | `/api/v1/site-images/{img}/machines/{mac}/lock` | C, I, S`commands:write` | — | idem, para uma máquina |
+| POST | `/api/v1/site-images/{img}/machines/{mac}/unlock` | C, I, S`commands:write` | — | idem |
+
+> `…/unlock` destrava a **tela de bloqueio**, não o formulário. Campo travado
+> do formulário se destrava no modelo (`PATCH …/schema/fields/{chave}`) ou
+> marcando a imagem como `unlocked` (`PATCH /api/v1/site-images/{img}`) — são
+> coisas diferentes com nomes parecidos, e chamar a errada no meio da prova
+> desbloqueia a sala inteira.
 
 `target` é `"all"` ou uma lista de MACs. `delay` adia a execução em segundos.
 Comandos aceitos: `donottouch`, `cantouch`, `cleanhomenow`, `mlreboot`,
 `mlpoweroff`, `disablefirewall`, `enablefirewall`, `resetcontaeditores`,
 `precontest`. Qualquer outro valor é recusado com `400`.
+
+**O cadeado do modelo vale aqui.** Um comando que contradiz um campo `locked`
+do formulário é recusado com **403**, dizendo qual campo — `disablefirewall`
+com `DISABLE_FIREWALL` travado é o caso que existe hoje. A regra é a mesma do
+configureitor (`locked` e não `is_admin` e não `unlocked`), e ela vive num lugar
+só de propósito: por um tempo valeu na tela de configuração e não valeu aqui, e
+quem não podia desligar o firewall pela primeira desligava pela segunda, na sala
+inteira.
+
+Só o sentido permissivo é barrado: `enablefirewall` move a máquina PARA o valor
+travado e continua liberado. Chave de serviço conta como "não é administração" —
+para deixar um sistema externo desligar o firewall, destrave o campo no modelo.
+
+O `GET` responde o que ESTA credencial pode mandar. A tela do laboratório usa
+para não oferecer botão que o servidor vai recusar; quem integra, para não
+descobrir apanhando.
 
 O parâmetro `wait` (0 a 30 segundos) é o long-poll: a conexão fica aberta até
 chegar comando ou estourar o tempo. O agente usa `wait=25`.

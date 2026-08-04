@@ -205,6 +205,23 @@ def check_password(stored: str, password: str) -> bool:
     )
 
 
+def pode_editar(image_id: str, key: str, *, is_admin: bool) -> bool:
+    """Se esta credencial pode mudar este campo nesta imagem.
+
+    A regra vive aqui e não em cada porta: o cadeado do modelo já valia no
+    configureitor e NÃO valia nos comandos do hotconfig, então quem a tela de
+    configuração impedia de desligar o firewall desligava pela tela do
+    laboratório, na sala inteira. Duas cópias da mesma regra é como as portas
+    ficam diferentes.
+    """
+    field = _field_map(schema_for(image_id)).get(key)
+    if field is None:
+        return False
+    if not field.get("locked"):
+        return True
+    return bool(is_admin or (get_site_image(image_id) or {}).get("unlocked"))
+
+
 def write_values(image_id: str, incoming: dict, *, is_admin: bool) -> dict:
     schema = schema_for(image_id)
     fields = _field_map(schema)
@@ -221,6 +238,8 @@ def write_values(image_id: str, incoming: dict, *, is_admin: bool) -> dict:
             if field is None:
                 raise ConfigError(f"{key}: campo não existe neste modelo")
             if field.get("locked") and not (is_admin or unlocked):
+                # mesma condição de `pode_editar`, aplicada aqui em lote para
+                # não reler o esquema uma vez por campo
                 raise ConfigError(f"{key}: campo bloqueado pela organização da maratona")
 
             if field.get("type") == "password":

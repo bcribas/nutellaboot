@@ -33,6 +33,22 @@ ALLOWED_COMMANDS = {
     "precontest",
 }
 
+# Comandos que impõem, na máquina, o valor de um campo do formulário — e o
+# valor que cada um impõe.
+#
+# É o que liga o cadeado do modelo aos botões do laboratório. `DISABLE_FIREWALL`
+# nasce travado ("o firewall é obrigatório durante a maratona"), e mesmo assim o
+# botão do hotconfig desligava o firewall da sala inteira: a trava valia no
+# configureitor e não valia aqui.
+#
+# O sentido importa. `enablefirewall` move a máquina PARA o valor travado, então
+# continua liberado — recusá-lo impediria a sede de consertar o que a
+# organização quer. Só o sentido permissivo é barrado.
+COMANDOS_DE_CONFIG = {
+    "disablefirewall": ("DISABLE_FIREWALL", True),
+    "enablefirewall": ("DISABLE_FIREWALL", False),
+}
+
 ONLINE_WINDOW = 90  # segundos sem contato para considerar a máquina offline
 
 

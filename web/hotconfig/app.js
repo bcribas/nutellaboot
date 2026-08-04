@@ -332,6 +332,25 @@ function showDetail(m) {
   document.body.appendChild(box);
 }
 
+// O servidor recusa comando que contradiz um campo travado no modelo — o
+// botão não pode prometer o que ele vai negar. Falhar aqui não pode esconder a
+// tela: sem a lista, todos os botões continuam oferecidos e quem clicar recebe
+// a recusa do servidor, que é o que valia antes.
+async function desabilitarComandosBloqueados() {
+  let d;
+  try {
+    d = await api.get(`/api/v1/site-images/${api.imageId}/commands`);
+  } catch {
+    return;
+  }
+  for (const [cmd, campo] of Object.entries(d.blocked || {})) {
+    const b = $(`[data-cmd="${cmd}"]`);
+    if (!b) continue;
+    b.disabled = true;
+    b.title = t("command_locked", { field: campo });
+  }
+}
+
 async function sendCommand(cmd) {
   const macs = [...selected];
   if (!macs.length) return;
@@ -446,6 +465,7 @@ async function main() {
   }
   $("#imginfo").textContent = api.imageId;
   $("#goconfig").href = api.telaIrma("configureitor");
+  await desabilitarComandosBloqueados();
   renderFilters();
   $("#search").oninput = render;
   $("#reportbtn").onclick = abrirRelatorio;
