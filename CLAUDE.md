@@ -135,6 +135,22 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
     tivesse só o token da imagem escalaria para sub-admin. O que fica gravado
     é `owner` (`"admin"` ou `"invite:<CÓDIGO>"`). Há teste.
 
+19. **O boot REGRAVA o pendrive da sede quando ele está para trás**, e por isso
+    `client/stuff/25-usbupdate.sh` é o arquivo mais perigoso do projeto: errar
+    ali não dá tela feia, dá pendrive que não liga mais no meio de uma prova.
+    A ordem não é negociável — baixar para o disco local, **conferir o md5**, e
+    só então tocar na partição (não cabem os dois pares: ~399 MB para 202 MB de
+    conteúdo, então os antigos saem antes). `nutellaboot.conf` e `wifi.conf`
+    são da sede e não se toca. Falha de REDE não conta como tentativa (nada foi
+    tocado, e blip de rede não pode condenar máquina); falha de ESCRITA conta, e
+    o marcador em `$STORAGEDIR/.usbupd-tried` é o que impede um pendrive
+    protegido contra escrita de reiniciar a máquina para sempre. A identidade
+    vem de `tools/nb3-build-initrd`, que carimba `/etc/nutellaboot-build`
+    dentro do initrd e o md5 em `client/build/build.json` — o md5 sai da
+    ferramenta porque o servidor tem um worker só. Initrd sem carimbo não
+    confere nada. Há teste com pendrive de mentira em disco
+    (`tests/test_usb_update.py`).
+
 ## Nomenclatura
 
 - **modelo** (`model`, `data/models/<n>/model.json`): o que se configura uma

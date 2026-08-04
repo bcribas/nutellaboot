@@ -82,6 +82,14 @@ if [ -f /etc/initramfs-tools/wifi.conf ]; then
     copy_file config /etc/initramfs-tools/wifi.conf /etc/nutellaboot-wifi.conf
 fi
 
+# --- identidade da construção ---
+# Carimbada por tools/nb3-build-initrd logo antes do update-initramfs. É o que
+# permite à máquina, já rodando, saber se o pendrive de onde ela bootou está
+# em dia com este servidor.
+if [ -f /etc/initramfs-tools/nb3-build-id ]; then
+    copy_file config /etc/initramfs-tools/nb3-build-id /etc/nutellaboot-build
+fi
+
 # --- padrões do servidor (sobrescritos pelo pendrive/cmdline) ---
 if [ -f /etc/initramfs-tools/nutellaboot.defaults ]; then
     copy_file config /etc/initramfs-tools/nutellaboot.defaults /etc/nutellaboot.defaults

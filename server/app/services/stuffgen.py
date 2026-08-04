@@ -74,6 +74,11 @@ def render(image_id: str) -> str:
         "",
         f"NBUID={secrets.randbelow(2**32)}",
         f"IMAGEROOT={_sh_quote(image_id)}",
+        # o nome de exibição da sede. Vem por aqui, e não do pendrive, porque o
+        # stuff é gerado por imagem a cada boot: numa imagem genérica com o
+        # IMAGEROOT digitado à mão — que é o fluxo previsto — o pendrive não
+        # teria nome nenhum para dar.
+        f"NB_SITE_NAME={_sh_quote((store.get_site_image(image_id) or {}).get('fullname', ''))}",
         f"NB_SERVER={_sh_quote(settings.base_url)}",
         f"NB_MACHINE_KEY={_sh_quote(store.machine_key(image_id))}",
         f"NB_BOOT_KEY={_sh_quote(store.boot_key(image_id))}",

@@ -96,6 +96,32 @@ já pode ser retirado**. Nada mais é lido dele durante o resto do boot. Numa
 sala com 60 máquinas, isso libera o pendrive para a próxima máquina em
 segundos, em vez de ficar preso até o sistema subir.
 
+### O pendrive se atualiza sozinho
+
+Toda construção do initrd recebe um carimbo (`tools/nb3-build-initrd` grava
+`/etc/nutellaboot-build` **dentro** do initrd e um `build.json` ao lado dos
+artefatos). A máquina, já rodando, compara o seu carimbo com o que o servidor
+diz em `/boot/v3/<sede>/usb` — e, se estiver para trás:
+
+1. baixa o kernel e o initrd novos para o **disco local** e confere o md5;
+2. só então monta a partição do pendrive, apaga os antigos e grava os novos
+   (não cabem os dois pares: são ~399 MB de partição para 202 MB de conteúdo);
+3. reinicia.
+
+O `nutellaboot.conf` e o `wifi.conf` **não são tocados** — são da sede.
+
+Se o pendrive já tiver sido retirado, a máquina para com uma tela dizendo para
+recolocá-lo e ligar de novo. Se a gravação falhar (pendrive protegido contra
+escrita), ela **não tenta de novo para aquela versão**: um marcador no disco
+local impede o reinício em laço. Falha de rede não conta como tentativa — nada
+foi tocado, e o boot segue com o initrd velho.
+
+Para desligar num dia de aperto: `nousbupdate=y` na linha de comando do kernel.
+
+> Consequência de reconstruir o initrd: **todos os pendrives em campo vão se
+> atualizar no próximo boot**. Cada máquina baixa ~200 MB a mais uma vez e
+> reinicia. Não é o que se faz na véspera da prova.
+
 ### Por que existe um pendrive genérico
 
 No NutellaBoot 2, cada sede tinha a sua imagem de pendrive de 400 MB, e a

@@ -137,6 +137,38 @@ def test_le_o_pendrive_sem_head_no_caminho(tmp_path):
     assert "S=https://exemplo.test" in r.stdout, r.stdout
 
 
+def test_a_identidade_da_construcao_viaja_dentro_do_initrd():
+    """É o que permite à máquina saber que o pendrive de onde ela bootou está
+    velho. O hook copia o carimbo e o bootstrap o exporta; sem o arquivo (todo
+    initrd anterior a isto) a variável fica VAZIA — e o stuff não confere nada,
+    porque recusar quem não sabe a própria versão seria recusar todos os
+    pendrives já gravados de uma vez."""
+    hook = HOOK.read_text()
+    assert "/etc/nutellaboot-build" in hook, "o hook não põe o carimbo no initrd"
+
+    boot = BOOTSTRAP.read_text()
+    assert "NB_INITRD_BUILD" in boot
+    assert "export" in boot[boot.index("NB_INITRD_BUILD") :][:400], "o carimbo não é exportado"
+
+    ferramenta = (REPO / "tools" / "nb3-build-initrd").read_text()
+    # gravado ANTES do update-initramfs, senão não entra no arquivo
+    # (o `index` do comando, não o da menção no cabeçalho)
+    assert ferramenta.index("nb3-build-id") < ferramenta.index('chroot "$MNT" update-initramfs')
+    assert "build.json" in ferramenta, "o servidor precisa do md5 para o cliente conferir"
+
+
+def test_o_carimbo_ausente_nao_quebra_o_boot(tmp_path):
+    """Initrd construído antes disto não tem o arquivo. `sed` num arquivo que
+    não existe tem que dar string vazia, não erro."""
+    r = subprocess.run(
+        ["sh", "-c", 'B=$(sed -n 1p /nao/existe/nutellaboot-build 2> /dev/null); echo "B=[$B]"'],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "B=[]" in r.stdout
+
+
 HOOK = REPO / "client" / "initramfs-tools" / "hooks" / "nutellaboot"
 
 # O que o initramfs-tools já põe no initrd (busybox/klibc) — visto rodando numa

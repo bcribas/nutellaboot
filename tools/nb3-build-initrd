@@ -71,6 +71,14 @@ chmod +x "$MNT/etc/initramfs-tools/hooks/nutellaboot"
 # fonte só para as mensagens dos dois lados do boot.
 cp "$REPO/client/stuff/05-ui.sh" "$MNT/etc/initramfs-tools/nb3-ui"
 
+# Identidade desta construção. Gravada AGORA, antes do update-initramfs, para
+# viajar DENTRO do initrd — é assim que a máquina, já rodando, consegue dizer
+# se o pendrive de onde ela bootou é o que este servidor espera. Sem isto não
+# há o que comparar, e um pendrive velho só se revela na tela "NO IMAGE".
+BUILD_ID="$(date -u +%Y%m%d-%H%M%S)-$(od -An -tx1 -N4 /dev/urandom | tr -d ' \n')"
+echo "$BUILD_ID" > "$MNT/etc/initramfs-tools/nb3-build-id"
+echo ">> build: $BUILD_ID"
+
 if [ -z "$KVER" ]; then
     KVER=$(ls "$MNT/lib/modules" | sort -V | tail -n1)
 fi
@@ -95,7 +103,7 @@ FALTOU=""
 for f in usr/bin/aria2c usr/bin/wget.good usr/bin/md5sum \
     usr/bin/stdbuf usr/libexec/coreutils/libstdbuf.so \
     scripts/nutellaboot scripts/nb3-ui \
-    etc/ssl/certs/ca-certificates.crt; do
+    etc/nutellaboot-build etc/ssl/certs/ca-certificates.crt; do
     grep -Fq "$f" "$LISTA" || FALTOU="$FALTOU $f"
 done
 rm -f "$LISTA"
@@ -108,9 +116,31 @@ fi
 mkdir -p "$OUT"
 cp "$MNT/boot/initrd.img-$KVER" "$OUT/initrd.img"
 cp "$MNT/boot/vmlinuz-$KVER" "$OUT/vmlinuz"
-chown "$(stat -c '%u:%g' "$REPO")" "$OUT/initrd.img" "$OUT/vmlinuz"
+# O md5 sai daqui, e não do servidor, de propósito: são 200 MB, e o servidor
+# roda com UM worker (invariante 2) — calcular o hash a cada boot congelaria o
+# SSE e o long-poll da sala inteira. Aqui é uma vez por construção.
+echo ">> resumindo a construção em build.json"
+cat > "$OUT/build.json" << EOF
+{
+  "build": "$BUILD_ID",
+  "files": {
+    "vmlinuz": {
+      "md5": "$(md5sum "$OUT/vmlinuz" | awk '{print $1}')",
+      "size": $(stat -c %s "$OUT/vmlinuz")
+    },
+    "initrd.img": {
+      "md5": "$(md5sum "$OUT/initrd.img" | awk '{print $1}')",
+      "size": $(stat -c %s "$OUT/initrd.img")
+    }
+  }
+}
+EOF
+
+chown "$(stat -c '%u:%g' "$REPO")" "$OUT/initrd.img" "$OUT/vmlinuz" "$OUT/build.json"
 
 echo
 echo "pronto:"
 ls -la "$OUT/vmlinuz" "$OUT/initrd.img"
+echo "  build:     $BUILD_ID"
+echo "  atenção:   os pendrives em campo vão se atualizar sozinhos no próximo boot"
 echo "agora: tools/nb3-genusb --imageroot <sede> --server <url>"

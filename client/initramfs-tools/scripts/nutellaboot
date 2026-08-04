@@ -342,7 +342,12 @@ mountroot() {
 
     nb_fetch_stuff || nb_no_server_screen "the boot script could not be downloaded"
     log_begin_msg "Running the boot script from the server"
-    export NB_SERVER NB_CA_BUNDLE IMAGEROOT
+    # Identidade deste initrd, carimbada por tools/nb3-build-initrd. Um initrd
+    # anterior a esta mudança não tem o arquivo: a variável fica VAZIA e o
+    # stuff não confere nada — um pendrive já gravado não tem como saber a
+    # própria versão, e recusá-lo seria recusar todos de uma vez.
+    NB_INITRD_BUILD=$(sed -n 1p /etc/nutellaboot-build 2> /dev/null)
+    export NB_SERVER NB_CA_BUNDLE IMAGEROOT NB_INITRD_BUILD
     # shellcheck disable=SC1091
     . /stuff.sh
     log_end_msg

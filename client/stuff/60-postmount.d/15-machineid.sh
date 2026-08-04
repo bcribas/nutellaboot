@@ -7,4 +7,8 @@ nb3_post_machineid() {
     [ -f "${rootmnt?}/home/.machine-id" ] || touch "${rootmnt?}/home/.machine-id"
     echo "$NBUID" > "${rootmnt?}/home/.machine-id-boot"
     echo "$IMAGEROOT" > "${rootmnt?}/etc/imageroot-icpc"
+    # arquivo separado, e não uma segunda linha no de cima: o imageroot-icpc
+    # também alimenta o user-agent do Firefox e do Epiphany (65-firefox.sh),
+    # que lê o arquivo inteiro com `$(< ...)`.
+    echo "${NB_SITE_NAME:-}" > "${rootmnt?}/etc/sitename-icpc"
 }

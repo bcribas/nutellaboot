@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import re
 import secrets
 import shlex
 import time
@@ -91,6 +92,31 @@ def kernel_state() -> dict:
     }
 
 
+ARQUIVOS_DE_BOOT = ("vmlinuz", "initrd.img")
+
+
+def build_info() -> dict:
+    """O que `tools/nb3-build-initrd` carimbou na construção atual.
+
+    `{"build": "20260803-…", "files": {"vmlinuz": {"md5":…, "size":…}, …}}`.
+
+    O md5 vem da ferramenta e NÃO é calculado aqui: são 200 MB, e o servidor
+    roda com um worker só (invariante 2) — refazer o hash a cada boot da sala
+    congelaria o SSE e o long-poll de todo mundo.
+
+    Construção anterior a isto não tem o arquivo. Aí `build` volta vazio, a
+    rota de boot diz `unknown` e a máquina não confere nada: é o único
+    comportamento honesto quando não se sabe a própria versão.
+    """
+    d = fsdb.read_json(build_dir() / "build.json", {}) or {}
+    arquivos = d.get("files") or {}
+    if not d.get("build") or not all(
+        isinstance(arquivos.get(n), dict) and arquivos[n].get("md5") for n in ARQUIVOS_DE_BOOT
+    ):
+        return {"build": "", "files": {}}
+    return {"build": str(d["build"]), "files": {n: arquivos[n] for n in ARQUIVOS_DE_BOOT}}
+
+
 def _kernel_fingerprint() -> str:
     """Impressão do par kernel+initrd usado numa geração.
 
@@ -115,6 +141,21 @@ def _boot_fingerprint(image_id: str) -> str:
 
 
 # --- o nutellaboot.conf da sala ---
+
+# O que não pode entrar num valor que o GRUB vai receber por `source`.
+#
+# `$` é o pior: `set NB_SITE_NAME="R$ 10"` faz o `source` FALHAR inteiro, e com
+# ele some o IMAGEROOT — o menu perde a sede por causa do nome. Aspa fecha a
+# string, barra invertida e crase são escape. Acento não entra nesta lista de
+# propósito: `São`, `nº` e travessão passam pelo grub-script-check sem chiar, e
+# transliterar deixaria o nome errado na tela por medo de um problema que não
+# existe.
+_GRUB_PROIBIDO = re.compile(r'["$\\`\x00-\x1f\x7f]')
+
+
+def nome_para_grub(texto: str) -> str:
+    """O `fullname` como o GRUB pode receber."""
+    return " ".join(_GRUB_PROIBIDO.sub(" ", texto or "").split())
 
 
 def conf_text(image_id: str) -> str:
@@ -148,6 +189,9 @@ def conf_text(image_id: str) -> str:
             "# Precisa de um pendrive gerado a partir de agosto de 2026: num",
             "# initrd mais antigo, use as linhas sem o `set`.",
             f'set IMAGEROOT="{image_id}"',
+            # só o menu do GRUB usa: o sistema recebe o mesmo nome pelo stuff,
+            # que é gerado por imagem e não depende de o pendrive estar em dia
+            f'set NB_SITE_NAME="{nome_para_grub(nome)}"',
             f'set NB_BOOT_KEY="{chave}"',
             f'set NB_SERVER="{settings.base_url}"',
             "",
@@ -331,8 +375,11 @@ async def gerar_da_sala(image_id: str) -> dict:
     """A imagem já configurada para uma sala. Leva a chave de boot dentro."""
     d = settings.data_root / "site-images" / image_id
     chave = (fsdb.read_text(d / "boot.key") or "").strip()
+    info = fsdb.read_json(d / "image.json", {}) or {}
     sufixo = _sufixo(image_id)
     extras = ["--imageroot", image_id, "--server", settings.base_url]
+    if info.get("fullname"):
+        extras += ["--fullname", info["fullname"]]
     if chave:
         extras += ["--boot-key", chave]
     return await _gerar(

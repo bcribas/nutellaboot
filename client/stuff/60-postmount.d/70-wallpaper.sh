@@ -52,13 +52,19 @@ nb3_wallpaper_stamp_script() {
 [ -e /home/.wallpaper-orig.png ] || exit 0
 SEDE=$(cat /etc/imageroot-icpc 2>/dev/null) || exit 0
 [ -n "$SEDE" ] || exit 0
+# o nome de exibição é opcional: pendrive antigo, ou servidor que ainda não
+# manda NB_SITE_NAME, deixa a tarja só com o identificador
+NOME=$(cat /etc/sitename-icpc 2>/dev/null || true)
 
-python3 - "$SEDE" << 'PY'
+python3 - "$SEDE" "$NOME" << 'PY'
 import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
 sede = sys.argv[1]
+nome = sys.argv[2] if len(sys.argv) > 2 else ""
+if nome:
+    sede = f"{nome} ({sede})"
 orig = "/home/.wallpaper-orig.png"
 alvo = "/home/.wallpaper.png"
 
@@ -90,11 +96,17 @@ if fonte is None:
     except TypeError:  # Pillow antigo, sem tamanho na fonte embutida
         fonte = ImageFont.load_default()
 
+# a dock do GNOME fica na esquerda e, com ícone de 48 px, ocupa uns 76: o
+# texto começava em `faixa // 2` (~45 px em 1080p) e ficava por baixo dela.
+# Mínimo absoluto porque a dock é medida em pixels de TELA, e proporcional
+# para um papel de parede maior não deixar o nome grudado na borda.
+margem = max(96, larg // 16)
+
 tarja = Image.new("RGBA", (larg, faixa), (0, 0, 0, 170))
 d = ImageDraw.Draw(tarja)
-caixa = d.textbbox((0, 0), sede, font=fonte)
+caixa = d.textbbox((margem, 0), sede, font=fonte)
 d.text(
-    (faixa // 2, (faixa - (caixa[3] - caixa[1])) // 2 - caixa[1]),
+    (margem, (faixa - (caixa[3] - caixa[1])) // 2 - caixa[1]),
     sede,
     font=fonte,
     fill=(255, 255, 255, 255),

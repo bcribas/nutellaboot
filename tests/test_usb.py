@@ -442,6 +442,77 @@ def test_o_grub_cfg_mostra_a_sede():
     assert "nb3_sede" in ferramenta
 
 
+# --- o nome de exibição da sede ---
+
+
+def test_o_conf_leva_o_nome_de_exibicao(data_root, sede):
+    """O GRUB não tem rede: o `nutellaboot.conf` é o único caminho para o nome
+    da sede chegar ao menu de boot."""
+    linhas = usb.conf_text("sala1").splitlines()
+    assert 'set NB_SITE_NAME="Sala 1"' in linhas
+    assert 'set IMAGEROOT="sala1"' in linhas
+
+
+def test_o_menu_do_grub_usa_o_nome_e_cai_para_o_id():
+    """Pendrive genérico editado à mão não tem nome nenhum, e mostrar o
+    identificador é melhor que não mostrar nada."""
+    ferramenta = (REPO / "tools" / "nb3-genusb").read_text()
+    assert "NB_SITE_NAME" in ferramenta
+    trecho = ferramenta[ferramenta.index("set nb3_sede=") :]
+    trecho = trecho[: trecho.index("menuentry")]
+    # os três degraus: com nome, só com id, e nada
+    assert trecho.count("set nb3_sede=") == 3, trecho
+
+
+def test_a_ferramenta_aceita_o_nome_de_exibicao():
+    ferramenta = (REPO / "tools" / "nb3-genusb").read_text()
+    assert "--fullname" in ferramenta
+
+
+@pytest.mark.parametrize(
+    "nome",
+    [
+        'R$ 10 "Escola" \\ `x`',
+        "Sede São Paulo — nº 3",
+        "linha\ncom\nquebra",
+        "",
+    ],
+)
+def test_um_nome_hostil_nao_derruba_o_source_do_grub(data_root, sede, tmp_path, nome):
+    """`set NB_SITE_NAME="R$ 10"` faz o `source` do GRUB FALHAR — e, junto com
+    ele, o IMAGEROOT some: o menu inteiro perde a sede por causa do nome.
+
+    Acento tem que sobreviver: transliterar deixaria o nome errado na tela por
+    medo de um problema que não existe."""
+    import shutil
+    import subprocess
+
+    p = data_root / "site-images" / "sala1" / "image.json"
+    info = fsdb.read_json(p, {})
+    info["fullname"] = nome
+    fsdb.write_json(p, info)
+
+    texto = usb.conf_text("sala1")
+    arq = tmp_path / "nutellaboot.conf"
+    arq.write_text(texto)
+
+    check = shutil.which("grub2-script-check") or shutil.which("grub-script-check")
+    if check:
+        r = subprocess.run([check, str(arq)], capture_output=True, text=True)
+        assert r.returncode == 0, f"{r.stderr}\n---\n{texto}"
+
+    # e o initrd continua lendo o IMAGEROOT depois dele
+    r = subprocess.run(
+        ["sh", "-c", rf'sed -n "s/^\(set \)\{{0,1\}}IMAGEROOT=//p" "{arq}" | tr -d "\"\'" | sed -n 1p'],
+        capture_output=True,
+        text=True,
+    )
+    assert r.stdout.strip() == "sala1", texto
+
+    if "São" in nome:
+        assert "São Paulo" in texto, "o acento foi embora"
+
+
 def test_o_bios_legado_tem_o_modulo_test():
     """O grub-embed.cfg usa `[ -z "$root" ]`, e `test` não estava na lista de
     módulos do core.img: em BIOS legado a busca reserva pela label morria com

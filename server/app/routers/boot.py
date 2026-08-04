@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from .. import auth
 from ..services import seeders, store, stuffgen, webhook_push
 from ..services.notify import notify
+from ..settings import settings
 
 router = APIRouter(prefix="/boot/v3", default_response_class=PlainTextResponse)
 
@@ -182,6 +183,61 @@ async def roster_logo(
     from .roster import logo_response
 
     return logo_response(image, org_id)
+
+
+@router.get("/{image}/usb", name="usbcheck")
+@router.post("/{image}/usb", name="usbcheck_post")
+async def usbcheck(
+    image: str,
+    request: Request,
+    x_nb_boot_key: str | None = Header(None),
+    key: str | None = Query(None),
+) -> str:
+    """Como a máquina descobre que o pendrive de onde ela bootou está velho.
+
+    Primeira linha `BUILD <id>`; depois, uma linha por arquivo no MESMO formato
+    do manifest de camadas (`MD5 ARQUIVO URL`), para o cliente reaproveitar
+    `nb_download` e `nutella_md5sum` sem parser novo.
+
+    Sem `build.json` em client/build (construção anterior a isto), responde
+    `BUILD unknown` e o cliente não faz nada — não dá para exigir que um
+    pendrive se atualize para uma versão que o servidor não sabe nomear.
+    """
+    await _autorizar(request, image, x_nb_boot_key, key)
+    from ..services import usb
+
+    info = usb.build_info()
+    if not info["build"]:
+        return "BUILD unknown\n"
+    base = f"{settings.base_url}/boot/v3/{image}/usbfile"
+    linhas = [f"BUILD {info['build']}"]
+    linhas += [f"{info['files'][n]['md5']} {n} {base}/{n}" for n in usb.ARQUIVOS_DE_BOOT]
+    return "\n".join(linhas) + "\n"
+
+
+@router.get("/{image}/usbfile/{name}", name="usbfile")
+@router.post("/{image}/usbfile/{name}", name="usbfile_post")
+async def usbfile(
+    image: str,
+    name: str,
+    request: Request,
+    x_nb_boot_key: str | None = Header(None),
+    key: str | None = Query(None),
+):
+    """O kernel e o initrd desta construção, para a máquina regravar o pendrive.
+
+    `name` sai de uma lista fechada: é caminho vindo da URL indo para o disco,
+    e o diretório vizinho tem a chave de boot de todas as sedes.
+    """
+    await _autorizar(request, image, x_nb_boot_key, key)
+    from ..services import usb
+
+    if name not in usb.ARQUIVOS_DE_BOOT:
+        raise HTTPException(404, "arquivo desconhecido")
+    caminho = usb.build_dir() / name
+    if not caminho.is_file():
+        raise HTTPException(404, "arquivo não existe")
+    return FileResponse(caminho, media_type="application/octet-stream", filename=name)
 
 
 @router.get("/{image}/wallpaper", name="wallpaper")

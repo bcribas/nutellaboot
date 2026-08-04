@@ -275,6 +275,39 @@ def test_o_carimbo_e_desenhado_com_o_sistema_rodando():
     assert "PIL" in texto
 
 
+# --- o nome de exibição da sede ---
+
+
+def test_o_stuff_leva_o_nome_de_exibicao(imagem):
+    """O nome vem por aqui, e não do pendrive: numa imagem genérica com o
+    IMAGEROOT digitado à mão — que é o fluxo previsto — o pendrive não teria
+    nome nenhum para dar."""
+    linhas = [l for l in stuffgen.render(imagem).splitlines() if l.startswith("NB_SITE_NAME=")]
+    assert linhas, "o stuff não diz o nome da sede"
+    assert "Sala 1" in linhas[0], linhas[0]
+
+
+def test_o_nome_da_sede_chega_ao_disco(imagem, raiz):
+    """Arquivo separado do imageroot-icpc: aquele é lido inteiro com `$(< ...)`
+    pelo user-agent do Firefox e do Epiphany, e uma segunda linha o
+    envenenaria."""
+    r = roda_consumidor(
+        imagem, "nb3_post_machineid", raiz, extra=f'mkdir -p "{raiz}/var/lib/dbus" "{raiz}/home"'
+    )
+    assert r.returncode == 0, r.stderr
+    assert (raiz / "etc/sitename-icpc").read_text().strip() == "Sala 1"
+    assert (raiz / "etc/imageroot-icpc").read_text().strip() == imagem
+
+
+def test_o_carimbo_fica_fora_da_dock_do_gnome():
+    """A dock fica na esquerda e, com ícone de 48 px, ocupa uns 76: o texto
+    começava em `faixa // 2` (~45 px em 1080p) e ficava por baixo dela."""
+    texto = (REPO / "client" / "stuff" / "60-postmount.d" / "70-wallpaper.sh").read_text()
+    assert "sitename-icpc" in texto, "o carimbo não mostra o nome de exibição"
+    assert "margem = max(96," in texto, "a margem da dock sumiu"
+    assert "(faixa // 2," not in texto, "o texto voltou a começar por baixo da dock"
+
+
 def test_o_tema_escuro_tambem_recebe_o_papel_de_parede(imagem, raiz):
     """A base trava `picture-uri` mas deixa `picture-uri-dark` no padrão do
     Ubuntu: em tema escuro apareceria o fundo da Canonical, e com ele sumiria

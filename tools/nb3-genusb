@@ -19,6 +19,7 @@ REPO=$(cd "$(dirname "$0")/.." && pwd)
 DATA=${NB3_DATA_ROOT:-$REPO/data}
 OUT=""
 IMAGEROOT=""
+FULLNAME=""
 SERVER=""
 BOOT_KEY="${NB3_BOOT_KEY:-}"
 ADMIN_KEY="${NB3_ADMIN_KEY:-}"
@@ -35,6 +36,7 @@ Uso: nb3-genusb [opções]
 
   -o, --output ARQUIVO     imagem de saída (padrão: maratonalinux-nb3.img)
       --imageroot ID       fixa a imagem no pendrive (padrão: genérico)
+      --fullname NOME      nome de exibição da sede (aparece no menu do GRUB)
       --boot-key CHAVE     chave de boot da imagem (ou NB3_BOOT_KEY)
       --fetch-key          busca a chave de boot na API (usa --admin-key)
       --admin-key CHAVE    chave de administração (ou NB3_ADMIN_KEY)
@@ -54,6 +56,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -o | --output) OUT=$2; shift 2 ;;
         --imageroot) IMAGEROOT=$2; shift 2 ;;
+        --fullname) FULLNAME=$2; shift 2 ;;
         --boot-key) BOOT_KEY=$2; shift 2 ;;
         --admin-key) ADMIN_KEY=$2; shift 2 ;;
         --fetch-key) FETCH_KEY=1; shift ;;
@@ -105,6 +108,15 @@ done
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
+# O nome de exibição vai para dentro de aspas que o GRUB vai reabrir no
+# `source`. `$` é o pior: `set NB_SITE_NAME="R$ 10"` faz o source FALHAR
+# inteiro, e com ele some o IMAGEROOT — o menu perde a sede por causa do nome.
+# Acento fica: passa no grub-script-check e transliterar deixaria o nome errado
+# na tela por medo de um problema que não existe.
+# (mesma regra do servidor, em `services/usb.py:nome_para_grub`)
+FULLNAME=$(printf '%s' "$FULLNAME" | tr -d '"$\\`' | tr -s '[:cntrl:][:space:]' ' ' |
+    sed -e 's/^ *//' -e 's/ *$//')
+
 # --- configuração da partição ---
 {
     echo "# gerado por nb3-genusb — edite à vontade, é só texto"
@@ -115,6 +127,12 @@ trap 'rm -rf "$WORK"' EXIT
     echo "# O 'set' na frente faz este mesmo arquivo servir ao menu do GRUB,"
     echo "# que so entende 'set VAR=valor'. O initrd aceita as duas formas."
     [ -n "$IMAGEROOT" ] && echo "set IMAGEROOT=\"$IMAGEROOT\"" || echo "#set IMAGEROOT=\"25brbr\""
+    # só o menu do GRUB usa: o sistema recebe o mesmo nome pelo stuff.
+    # `if` e não `[ ] && echo`: este script tem `set -e`, e a lista falha
+    # quando o nome está vazio — abortaria a geração inteira
+    if [ -n "$FULLNAME" ]; then
+        echo "set NB_SITE_NAME=\"$FULLNAME\""
+    fi
     if [ -n "$BOOT_KEY" ]; then
         echo "set NB_BOOT_KEY=\"$BOOT_KEY\""
     else
@@ -152,10 +170,14 @@ set default=0
 if [ -f /nutellaboot.conf ]; then
 	source /nutellaboot.conf
 fi
+# O nome de exibição entra quando o arquivo o traz; um pendrive editado à mão
+# só com o IMAGEROOT continua mostrando o identificador, que é melhor que nada.
+set nb3_sede=""
 if [ -n "\$IMAGEROOT" ]; then
 	set nb3_sede=" — \$IMAGEROOT"
-else
-	set nb3_sede=""
+	if [ -n "\$NB_SITE_NAME" ]; then
+		set nb3_sede=" — \$NB_SITE_NAME (\$IMAGEROOT)"
+	fi
 fi
 
 menuentry "Maratona Linux\$nb3_sede" {
@@ -263,6 +285,9 @@ fi
 echo
 echo "pronto: $OUT"
 echo "  modo:      ${IMAGEROOT:-genérico (defina IMAGEROOT em nutellaboot.conf)}"
+if [ -n "$FULLNAME" ]; then
+    echo "  sede:      $FULLNAME"
+fi
 echo "  servidor:  ${SERVER:-padrão do initrd}"
 echo "  gravar:    sudo dd if=$OUT of=/dev/sdX bs=4M status=progress oflag=sync"
 echo "  conteúdo:"

@@ -35,6 +35,11 @@ nb3_mountroot() {
     nb_phase "STORAGE - looking for a disk to store the system"
     runpremountconfigs
 
+    # Depois do disco (é onde os arquivos novos são conferidos antes de tocar
+    # no pendrive) e ANTES das camadas: não adianta baixar 6 GB para reiniciar
+    # em seguida. Depois do reinício elas já estão em cache.
+    nb_usb_update
+
     nb_phase "SYSTEM - downloading and mounting the system layers"
     mount_layers
 
