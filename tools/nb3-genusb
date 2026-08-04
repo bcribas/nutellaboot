@@ -6,7 +6,8 @@
 # host Fedora). Aqui tudo é feito manipulando o ARQUIVO de imagem:
 #   sfdisk grava a tabela de partição no arquivo;
 #   mformat/mcopy (mtools) formatam e populam a FAT usando offset (img@@1M);
-#   grub2-mkstandalone/grub2-mkimage produzem os bootloaders.
+#   grub2-mkstandalone/grub2-mkimage (ou grub-*, no Debian) produzem os
+#   bootloaders.
 # Nenhum passo precisa de privilégio.
 #
 # Modo genérico (padrão): o grub NÃO fixa IMAGEROOT — a sede é escolhida
@@ -46,7 +47,7 @@ Uso: nb3-genusb [opções]
       --kernel ARQUIVO     vmlinuz (padrão: client/build/vmlinuz)
       --initrd ARQUIVO     initrd.img (padrão: client/build/initrd.img)
       --size MB            tamanho da imagem (padrão: 400)
-      --no-bios            só EFI (dispensa grub2-mkimage i386-pc)
+      --no-bios            só EFI (dispensa o grub-mkimage i386-pc)
       --publish            envia a imagem pronta para o servidor de arquivos
 EOF
     exit "${1:-0}"
@@ -109,10 +110,34 @@ fi
 
 # mdir/truncate/dd tambem sao usados: sem conferir, o mdir so falha na ULTIMA
 # linha do script, depois de a imagem inteira estar pronta
-for t in sfdisk mformat mcopy mmd mdir truncate dd grub2-mkstandalone; do
+for t in sfdisk mformat mcopy mmd mdir truncate dd; do
     command -v "$t" > /dev/null || { echo "faltando: $t" >&2; exit 1; }
 done
-[ "$BIOS" = 1 ] && { command -v grub2-mkimage > /dev/null || { echo "faltando: grub2-mkimage (ou use --no-bios)" >&2; exit 1; }; }
+
+# As ferramentas do GRUB têm nomes diferentes por distribuição: `grub2-*` no
+# Fedora, `grub-*` no Debian/Ubuntu. Este script nasceu numa máquina Fedora e
+# por isso só funcionava lá — no servidor de produção (Ubuntu) a geração do
+# pendrive falhava com "faltando: grub2-mkstandalone", e o botão da interface
+# só dizia isso depois de a imagem inteira ter sido tentada.
+acha_grub() {
+    for n in "grub2-$1" "grub-$1"; do
+        if command -v "$n" > /dev/null; then
+            echo "$n"
+            return 0
+        fi
+    done
+    return 1
+}
+MKSTANDALONE=$(acha_grub mkstandalone) || {
+    echo "faltando: grub2-mkstandalone/grub-mkstandalone (Ubuntu: grub-efi-amd64-bin)" >&2
+    exit 1
+}
+if [ "$BIOS" = 1 ]; then
+    MKIMAGE=$(acha_grub mkimage) || {
+        echo "faltando: grub2-mkimage/grub-mkimage (Ubuntu: grub-pc-bin), ou use --no-bios" >&2
+        exit 1
+    }
+fi
 [ -f "$KERNEL" ] || { echo "kernel não encontrado: $KERNEL (rode nb3-build-initrd)" >&2; exit 1; }
 [ -f "$INITRD" ] || { echo "initrd não encontrado: $INITRD (rode nb3-build-initrd)" >&2; exit 1; }
 
@@ -243,7 +268,7 @@ OFFSET=$((2048 * 512))
 mformat -i "$OUT@@$OFFSET" -F -v NB3CFG ::
 
 echo ">> gerando bootloader EFI"
-grub2-mkstandalone -O x86_64-efi \
+"$MKSTANDALONE" -O x86_64-efi \
     -o "$WORK/BOOTX64.EFI" \
     "boot/grub/grub.cfg=$WORK/grub-embed.cfg" 2>/dev/null
 
@@ -256,7 +281,7 @@ if [ "$BIOS" = 1 ]; then
     if [ -n "$BOOTIMG" ]; then
         # A mesma config embutida do EFI: acha a partição pelo label e carrega
         # o grub.cfg editável de lá — nada depende de número de disco.
-        grub2-mkimage -O i386-pc -p "()/" -c "$WORK/grub-embed.cfg" -o "$WORK/core.img" \
+        "$MKIMAGE" -O i386-pc -p "()/" -c "$WORK/grub-embed.cfg" -o "$WORK/core.img" \
             biosdisk part_msdos fat search search_label configfile normal linux echo test sleep
         # boot.img no setor 0 (preservando a tabela de partição) e core.img no
         # espaço livre entre a MBR e o início da partição (1 MiB).

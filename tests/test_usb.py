@@ -621,3 +621,19 @@ def test_o_bios_legado_tem_o_modulo_test():
     ferramenta = (REPO / "tools" / "nb3-genusb").read_text()
     linha = [l for l in ferramenta.splitlines() if "biosdisk part_msdos" in l][0]
     assert " test" in linha, linha
+
+
+def test_a_ferramenta_acha_o_grub_das_duas_distribuicoes():
+    """`grub2-*` no Fedora, `grub-*` no Debian/Ubuntu.
+
+    Este script nasceu numa máquina Fedora e só funcionava lá: no servidor de
+    produção a geração do pendrive falhava com "faltando: grub2-mkstandalone",
+    e o botão da interface só dizia isso depois de tentar a imagem inteira."""
+    ferramenta = (REPO / "tools" / "nb3-genusb").read_text()
+    assert "grub-mkstandalone" in ferramenta and "grub2-mkstandalone" in ferramenta
+    # e nenhuma chamada direta ao nome do Fedora
+    codigo = "\n".join(
+        l for l in ferramenta.splitlines() if not l.lstrip().startswith("#")
+    )
+    for linha in codigo.splitlines():
+        assert not linha.strip().startswith(("grub2-mkstandalone", "grub2-mkimage")), linha
