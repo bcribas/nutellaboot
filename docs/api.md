@@ -494,8 +494,24 @@ lista, que é o que lhes dá prioridade no overlayfs.
 | GET | `/api/v1/site-images/{img}/usb` | C, I | — | `{kernel, generic, image}` |
 | POST | `/api/v1/site-images/{img}/usb` | C, I | — | `202` + estado |
 | GET | `/api/v1/site-images/{img}/usb/conf` | C, I, `?tk=` | — | `nutellaboot.conf` (texto) |
-| GET | `/api/v1/site-images/{img}/usb/image` | C, I, `?tk=` | — | a `.img` da sala |
-| GET | `/api/v1/usb/generic/image` | C, `?id=&tk=` | — | a `.img` genérica |
+| GET | `/api/v1/site-images/{img}/usb/image` | C, I, `?tk=` | — | **302** para o `.img.gz` no servidor de arquivos, ou a imagem compactada aqui |
+| GET | `/api/v1/usb/generic/image` | C, `?id=&tk=` | — | idem, para a genérica |
+
+**As duas rotas de imagem redirecionam.** Quando a cópia publicada corresponde
+à construção atual, elas respondem `302` para o `.img.gz` no
+`files.mdp.naquadah.com.br`: são ~206 MB que deixam de sair da máquina que
+atende o boot da sala. Use `curl -L`.
+
+Quando não há cópia lá — publicação desligada, envio falhado, ou publicada e
+**velha** — elas compactam na hora e transmitem daqui. Nesse caso não há
+`Content-Length`, então o download aparece sem porcentagem.
+
+> Publicada e velha é o caso que importa: o arquivo de lá tem a chave de boot
+> ANTERIOR, e quem o gravar fica com uma sede que não boota sem nada
+> explicando. Por isso `public_url` no estado só é preenchida quando a cópia
+> corresponde à construção atual, e `publish_stale` diz quando não corresponde.
+> **Não use `public_url` como destino de download** — passe pela rota, que sabe
+> escolher.
 
 Os três downloads aceitam a credencial na **query** porque um `<a download>` não
 manda cabeçalho — a mesma exceção, e pelo mesmo motivo, da prévia do wallpaper e

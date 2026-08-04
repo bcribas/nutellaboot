@@ -39,12 +39,10 @@ function botaoBaixar(url, rotulo) {
 // O comando de gravar sai da URL do botão, não fixo: o que está no servidor de
 // arquivos vem compactado (400 MB viram 205), e mandar `dd` num .gz grava o
 // arquivo compactado no pendrive — que não boota, e não diz por quê.
-function comandoGravar(url) {
-  const nome = decodeURIComponent(String(url).split("?")[0].split("/").pop() || "nutellaboot3.img");
-  const dd = "sudo dd of=/dev/sdX bs=4M status=progress oflag=sync";
-  return nome.endsWith(".gz")
-    ? `zcat ${nome} | ${dd}`
-    : `sudo dd if=${nome} of=/dev/sdX bs=4M status=progress oflag=sync`;
+// O download vem sempre compactado — pela rota, que redireciona para o `.gz`
+// do servidor de arquivos ou compacta na hora. Então o comando é um só.
+function comandoGravar(nome) {
+  return `zcat ${nome || "nutellaboot3.img.gz"} | sudo dd of=/dev/sdX bs=4M status=progress oflag=sync`;
 }
 
 function motivoDesatualizada(razoes) {
@@ -90,7 +88,12 @@ export function usbBlock(imageId, token = "") {
 
     // 1. a imagem genérica — a mesma para todas as sedes
     const g = d.generic;
-    const urlGenerica = g.public_url || api.usbGenericUrl(imageId, token);
+    // sempre a rota da API: é ela que sabe se a cópia publicada corresponde a
+    // esta construção e redireciona para o servidor de arquivos. Ler
+    // `public_url` aqui entregaria o arquivo VELHO quando a imagem foi regerada
+    // sem republicar — com a chave de boot anterior, que é uma sede que não
+    // boota e ninguém entende por quê.
+    const urlGenerica = api.usbGenericUrl(imageId, token);
     tabela.appendChild(
       linha(
         `1. ${t("usb_generic")} <span class="muted mono">${mb(g.size)}</span>`,
@@ -113,7 +116,7 @@ export function usbBlock(imageId, token = "") {
 
     const como = document.createElement("p");
     como.className = "help";
-    como.innerHTML = `${t("usb_howto")}<br><code>${comandoGravar(urlGenerica)}</code>`;
+    como.innerHTML = `${t("usb_howto")}<br><code>${comandoGravar(`${g.file || "nutellaboot3.img"}.gz`)}</code>`;
     caixa.appendChild(como);
 
     // 3. a alternativa: já configurada, sem nada para copiar
@@ -124,7 +127,7 @@ export function usbBlock(imageId, token = "") {
 
     const i = d.image;
     const tabela2 = document.createElement("table");
-    const urlSala = i.public_url || api.usbImageUrl(imageId, token);
+    const urlSala = api.usbImageUrl(imageId, token);
     const acao =
       i.status === "done"
         ? botaoBaixar(urlSala, t("usb_download"))
@@ -141,7 +144,7 @@ export function usbBlock(imageId, token = "") {
     if (i.status === "done") {
       const comoSala = document.createElement("p");
       comoSala.className = "help";
-      comoSala.innerHTML = `<code>${comandoGravar(urlSala)}</code>`;
+      comoSala.innerHTML = `<code>${comandoGravar(`${i.file}.gz`)}</code>`;
       caixa.appendChild(comoSala);
     }
 

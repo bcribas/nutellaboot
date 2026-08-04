@@ -11,8 +11,12 @@ a imagem da sala carrega a chave de boot dentro.
 
 from __future__ import annotations
 
+import gzip
+import io
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 
 from .. import auth
 from ..services import store, usb
@@ -20,15 +24,57 @@ from ..services import store, usb
 router = APIRouter(prefix="/api/v1")
 
 
-def _arquivo(nome: str):
+# Quanto se lê do disco por vez ao compactar na hora.
+BLOCO = 4 * 1024 * 1024
+
+
+def _gzip_em_pedacos(caminho: Path):
+    """Gerador SÍNCRONO de propósito: o Starlette itera geradores síncronos
+    numa thread do pool, então os ~4 s de CPU do gzip não travam o event loop
+    do worker único (invariante 2). Com um gerador `async` eles travariam."""
+    buf = io.BytesIO()
+    gz = gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6)
+    with open(caminho, "rb") as f:
+        while pedaco := f.read(BLOCO):
+            gz.write(pedaco)
+            saida = buf.getvalue()
+            if saida:
+                buf.seek(0)
+                buf.truncate()
+                yield saida
+    gz.close()
+    yield buf.getvalue()
+
+
+def _entregar(estado: dict):
+    """Redireciona para o servidor de arquivos, ou compacta e transmite daqui.
+
+    O redirecionamento é a saída normal em produção: são 206 MB que deixam de
+    sair da máquina que atende o boot de 1600 computadores. Ele só vale quando
+    a cópia publicada corresponde a ESTA construção — `public_url` já não é
+    preenchida quando não corresponde (services/usb.py).
+
+    A outra saída é para quando não há cópia lá (publicação desligada, envio
+    falhado, ou publicada e velha). Ela compacta na hora, e por isso não tem
+    `Content-Length`: o navegador baixa sem porcentagem. É o caminho de
+    exceção; guardar um `.gz` ao lado de cada `.img` custaria ~11 GB para
+    servir bem um caso que quase não acontece.
+    """
+    if estado.get("status") != "done" or not estado.get("file"):
+        raise HTTPException(404, "imagem do pendrive ainda não foi gerada")
+
+    url = usb.url_publicada_atual(estado)
+    if url:
+        return RedirectResponse(url, status_code=302)
+
+    nome = estado["file"]
     caminho = usb.file_path(nome)
     if not caminho.is_file():
         raise HTTPException(404, "imagem do pendrive ainda não foi gerada")
-    return FileResponse(
-        caminho,
-        media_type="application/octet-stream",
-        filename=nome,
-        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    return StreamingResponse(
+        _gzip_em_pedacos(caminho),
+        media_type="application/gzip",
+        headers={"Content-Disposition": f'attachment; filename="{nome}.gz"'},
     )
 
 
@@ -101,10 +147,7 @@ async def baixar_da_sala(image: str, request: Request, tk: str = Query("")):
     p = auth.principal_de_link(request, tk, image)
     if p is None or not p.can_see_image(image):
         raise HTTPException(401, "credencial ausente ou inválida")
-    estado = usb.image_state(image)
-    if estado.get("status") != "done" or not estado.get("file"):
-        raise HTTPException(404, "imagem do pendrive ainda não foi gerada")
-    return _arquivo(estado["file"])
+    return _entregar(usb.image_state(image))
 
 
 @router.get("/usb/generic/image")
@@ -112,16 +155,14 @@ async def baixar_generica(request: Request, tk: str = Query(""), id: str = Query
     """A imagem genérica.
 
     Não leva segredo nenhum dentro — é a mesma para todas as sedes —, mas ainda
-    assim pede credencial: são 400 MB saindo da máquina que responde à API
-    durante a prova. Do console vale o cookie; da tela de uma sede, `?id=&tk=`,
-    que é o que ela já tem na URL.
+    assim pede credencial: quando não há cópia no servidor de arquivos, são
+    centenas de MB saindo da máquina que responde à API durante a prova. Do
+    console vale o cookie; da tela de uma sede, `?id=&tk=`, que é o que ela já
+    tem na URL.
     """
     p = auth.principal_de_link(request, tk, id or None)
     if p is None:
         raise HTTPException(401, "credencial ausente ou inválida")
     if p.kind == "image" and id and not p.can_see_image(id):
         raise HTTPException(401, "credencial ausente ou inválida")
-    estado = usb.generic_state()
-    if estado.get("status") != "done" or not estado.get("file"):
-        raise HTTPException(404, "imagem do pendrive ainda não foi gerada")
-    return _arquivo(estado["file"])
+    return _entregar(usb.generic_state())

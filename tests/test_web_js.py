@@ -322,3 +322,15 @@ def test_o_comando_de_gravar_sai_da_url():
     assert "zcat" in js
     codigo = "\n".join(l for l in js.splitlines() if not l.lstrip().startswith("//"))
     assert "if=nutellaboot3.img" not in codigo, "o comando voltou a ser fixo"
+
+
+def test_nenhuma_tela_baixa_direto_do_servidor_de_arquivos():
+    """A URL pública só serve quando corresponde à construção ATUAL, e quem
+    sabe isso é o servidor. Uma tela que lê `public_url` e a usa como destino
+    entrega o arquivo velho — com a chave de boot anterior — quando a imagem foi
+    regerada sem republicar."""
+    for tela in ("common/usb.js", "admin/app.js"):
+        js = (REPO / "web" / tela).read_text(encoding="utf-8")
+        codigo = "\n".join(l for l in js.splitlines() if not l.lstrip().startswith("//"))
+        assert "public_url ||" not in codigo, tela
+        assert "href = img.public_url" not in codigo, tela

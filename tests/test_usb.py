@@ -290,10 +290,14 @@ def test_o_conf_nao_sai_sem_credencial(client, data_root, sede):
 
 
 def test_baixar_a_imagem_da_sala(build, genusb, client, data_root, sede):
+    import gzip
+
     asyncio.run(usb.gerar_da_sala("sala1"))
     r = client.get(f"/api/v1/site-images/sala1/usb/image?tk={sede['token']}")
     assert r.status_code == 200, r.text
-    assert r.content == b"imagem de mentira"
+    # compactada: a rota nunca mais transmite os 400 MB crus da máquina que
+    # atende o boot
+    assert gzip.decompress(r.content) == b"imagem de mentira"
 
 
 def test_a_imagem_da_sala_nao_sai_sem_credencial(build, genusb, client, data_root, sede):
@@ -637,3 +641,72 @@ def test_a_ferramenta_acha_o_grub_das_duas_distribuicoes():
     )
     for linha in codigo.splitlines():
         assert not linha.strip().startswith(("grub2-mkstandalone", "grub2-mkimage")), linha
+
+
+# --- o download: redirecionar, ou compactar aqui ------------------------------
+#
+# A rota transmitia os 400 MB CRUS do disco local, pela mesma máquina que
+# atende o boot de 1600 computadores — o tráfego que a publicação existe para
+# tirar dali. Agora ela redireciona para o `.gz` do servidor de arquivos, e só
+# compacta na hora quando não há cópia lá.
+
+
+def _publica(data_root, nome, *, quando, url="https://files.exemplo/mlbootimages/x.img.gz"):
+    fsdb.write_json(
+        data_root / "publish" / f"{nome}.json",
+        {"file": nome, "kind": "usb", "status": "done", "url": url, "published_at": quando},
+    )
+
+
+def test_publicada_e_atual_redireciona(client, build, genusb, data_root, sede):
+    estado = asyncio.run(usb.gerar_da_sala("sala1"))
+    _publica(data_root, estado["file"], quando=estado["built_at"] + 10)
+
+    r = client.get(f"/api/v1/site-images/sala1/usb/image?tk={sede['token']}", follow_redirects=False)
+    assert r.status_code == 302, r.text
+    assert r.headers["location"].endswith(".img.gz"), r.headers["location"]
+
+
+def test_publicada_e_velha_nao_redireciona(client, build, genusb, data_root, sede):
+    """O arquivo de lá tem a chave de boot ANTERIOR: quem o gravar fica com uma
+    sede que não boota e nada explicando. Regerar sem republicar é o caminho
+    comum para isso — o botão apontava para o velho."""
+    estado = asyncio.run(usb.gerar_da_sala("sala1"))
+    _publica(data_root, estado["file"], quando=estado["built_at"] - 10)
+
+    r = client.get(f"/api/v1/site-images/sala1/usb/image?tk={sede['token']}", follow_redirects=False)
+    assert r.status_code == 200, r.text
+    assert usb.image_state("sala1")["publish_stale"] is True
+    assert usb.image_state("sala1")["public_url"] == ""
+
+
+def test_sem_publicacao_vem_compactado_daqui(client, build, genusb, data_root, sede):
+    import gzip
+
+    estado = asyncio.run(usb.gerar_da_sala("sala1"))
+    original = (data_root / "usb" / estado["file"]).read_bytes()
+
+    r = client.get(f"/api/v1/site-images/sala1/usb/image?tk={sede['token']}", follow_redirects=False)
+    assert r.status_code == 200, r.text
+    assert r.content[:2] == b"\x1f\x8b", "não veio gzip"
+    assert gzip.decompress(r.content) == original
+    assert r.headers["content-disposition"].endswith('.img.gz"'), r.headers["content-disposition"]
+
+
+def test_a_generica_segue_a_mesma_regra(client, build, genusb, data_root, sede):
+    estado = asyncio.run(usb.gerar_generica())
+    r = client.get(f"/api/v1/usb/generic/image?id=sala1&tk={sede['token']}", follow_redirects=False)
+    assert r.status_code == 200
+    assert r.content[:2] == b"\x1f\x8b"
+
+    _publica(data_root, estado["file"], quando=estado["built_at"] + 10)
+    r = client.get(f"/api/v1/usb/generic/image?id=sala1&tk={sede['token']}", follow_redirects=False)
+    assert r.status_code == 302
+
+
+def test_o_download_continua_pedindo_credencial(client, build, genusb, data_root, sede):
+    """Mesmo redirecionando: o nome do arquivo publicado é imprevisível de
+    propósito, e é a credencial que decide quem o descobre."""
+    asyncio.run(usb.gerar_da_sala("sala1"))
+    assert client.get("/api/v1/site-images/sala1/usb/image", follow_redirects=False).status_code == 401
+    assert client.get("/api/v1/usb/generic/image", follow_redirects=False).status_code == 401

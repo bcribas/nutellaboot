@@ -1006,7 +1006,8 @@ async function loadUsb() {
       if (img.status === "done") {
         const a = document.createElement("a");
         a.className = "btn small";
-        a.href = img.public_url || api.usbImageUrl(img.id);
+        // a rota decide entre redirecionar e compactar na hora
+        a.href = api.usbImageUrl(img.id);
         a.setAttribute("download", "");
         a.textContent = t("usb_download");
         td.appendChild(a);

@@ -230,9 +230,22 @@ def _com_derivados(estado: dict, *, esperado_kernel: str, esperado_boot: str = "
     if e.get("file"):
         pub = publish.state(e["file"]) or {}
         e["published"] = pub.get("status") == "done"
-        e["public_url"] = pub.get("url", "")
+        # Publicada VELHA é pior que não publicada: o arquivo lá tem a chave de
+        # boot anterior, e a sede que o gravar não boota sem nada explicando.
+        # Por isso `public_url` só sai quando a cópia de lá corresponde à
+        # construção daqui — quem quiser entregar o arquivo tem que passar pela
+        # rota, que sabe escolher.
+        e["publish_stale"] = bool(
+            e["published"] and pub.get("published_at", 0) < e.get("built_at", 0)
+        )
+        e["public_url"] = "" if e["publish_stale"] else pub.get("url", "")
         e["publish_error"] = pub.get("error", "") if pub.get("status") == "failed" else ""
     return e
+
+
+def url_publicada_atual(estado: dict) -> str:
+    """A URL pública, se e só se ela serve o arquivo desta construção."""
+    return estado.get("public_url", "") if estado.get("status") == "done" else ""
 
 
 def generic_state() -> dict:
