@@ -441,9 +441,11 @@ async function main() {
   await init($("#lang"));
   if (!api.imageId) {
     $("#empty").textContent = t("no_token");
+    $("#goconfig").remove();
     return;
   }
   $("#imginfo").textContent = api.imageId;
+  $("#goconfig").href = api.telaIrma("configureitor");
   renderFilters();
   $("#search").oninput = render;
   $("#reportbtn").onclick = abrirRelatorio;

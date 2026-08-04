@@ -183,6 +183,11 @@ button, .btn {
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* `.btn` num <a>: o link entre as telas da sede tem que parecer botão sem
+   virar botão — <a> navega, e é isso que dá "abrir em outra aba" de graça. */
+a.btn { text-decoration: none; display: inline-block; }
+a.btn:hover { border-color: var(--accent); }
+
 button.primary {
   background: var(--accent);
   color: var(--accent-fg);
@@ -191,7 +196,7 @@ button.primary {
 }
 
 button.danger { border-color: var(--bad); color: var(--bad); }
-button.small { padding: 4px 9px; font-size: 13px; }
+button.small, .btn.small { padding: 4px 9px; font-size: 13px; }
 
 .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 

@@ -142,6 +142,17 @@ export function reportUrl(image, since, until, lang) {
   return `/api/v1/site-images/${encodeURIComponent(image)}/report?${q}`;
 }
 
+// A tela irmã da sede: do configureitor para o hotconfig e vice-versa.
+//
+// Quem coordena recebe dois links por mensagem e, uma vez dentro de um, não
+// tinha como chegar no outro. O caminho é montado aqui, e não escrito no HTML,
+// porque leva a credencial junto: `location.search` já tem `?id=&tk=` (ou só
+// `?id=`, quando quem abriu foi o console pelo cookie), e é a MESMA credencial
+// que a tela atual está usando — não há exposição nova, só um clique a menos.
+export function telaIrma(nome) {
+  return `/${nome}/${location.search}`;
+}
+
 export function eventsUrl(image) {
   // Com token de sede na URL, ele vai junto (o EventSource não manda
   // cabeçalho). No console não vai credencial nenhuma: o cookie de sessão

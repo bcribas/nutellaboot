@@ -276,3 +276,28 @@ obj.propriedade = 1;
     # declaração; `fantasma1` (string), `chave` (chave) e `propriedade`
     # (acesso) não são
     assert nomes == {"outra", "valor", "obj"}, nomes
+
+
+def test_as_telas_da_sede_se_enxergam():
+    """Quem coordena recebe dois links e, dentro de um, não tinha como chegar
+    no outro — e a home, que tem os dois botões, não é onde a pessoa está.
+
+    O `href` sai do JS, e não do HTML, porque leva o `?id=&tk=`: escrever a
+    credencial no HTML servido seria a única forma de errar isso."""
+    pares = [
+        ("configureitor", "gohot", "hotconfig"),
+        ("hotconfig", "goconfig", "configureitor"),
+    ]
+    for tela, elemento, irma in pares:
+        html = (REPO / "web" / tela / "index.html").read_text(encoding="utf-8")
+        js = (REPO / "web" / tela / "app.js").read_text(encoding="utf-8")
+        assert f'id="{elemento}"' in html, f"{tela}: falta o link para o {irma}"
+        assert "href=" not in html.split(f'id="{elemento}"')[1].split(">")[0], (
+            f"{tela}: o href está no HTML; a credencial tem que vir do JS"
+        )
+        assert f'api.telaIrma("{irma}")' in js, f"{tela}: o link não é montado"
+
+    api = (REPO / "web" / "common" / "api.js").read_text(encoding="utf-8")
+    assert "location.search" in api.split("export function telaIrma")[1][:200], (
+        "telaIrma precisa preservar o ?id=&tk= da tela atual"
+    )

@@ -298,8 +298,10 @@ async function main() {
   await init($("#lang"));
   if (!api.imageId) {
     $("#form").innerHTML = `<p class="muted">${t("no_token")}</p>`;
+    $("#gohot").remove();
     return;
   }
+  $("#gohot").href = api.telaIrma("hotconfig");
   try {
     const data = await api.get(`/api/v1/site-images/${api.imageId}/config`);
     schema = data.schema;
