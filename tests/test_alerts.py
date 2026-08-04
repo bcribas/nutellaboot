@@ -310,10 +310,14 @@ def test_leitor_de_cd_vazio_nao_alerta(tmp_path):
     assert varredura(tmp_path, {"sr0": {"size": "0", "model": "DVD-RAM GH24"}}) == {}
 
 
-def test_disco_no_leitor_alerta(tmp_path):
-    """Com mídia dentro o sysfs reporta tamanho — é o que distingue."""
-    fila = varredura(tmp_path, {"sr0": {"size": "1400000", "model": "DVD-RAM GH24"}})
-    assert "kind=media.cd" in fila["boot-sr0"]
+def test_disco_no_leitor_tambem_nao_alerta(tmp_path):
+    """Nem com mídia dentro.
+
+    Houve uma versão que alarmava quando o sysfs reportava tamanho — leitor com
+    disco. Saiu por decisão de operação: aparecia demais. Some o aviso E o
+    rastro, e é isso que este teste prende, para que voltar atrás seja uma
+    escolha e não um acidente."""
+    assert varredura(tmp_path, {"sr0": {"size": "1400000", "model": "DVD-RAM GH24"}}) == {}
 
 
 def test_drive_de_disquete_nunca_alerta(tmp_path):
@@ -340,12 +344,19 @@ def test_disco_removivel_interno_nao_alerta(tmp_path):
 # --- o udev ---
 
 
-def test_udev_alerta_midia_e_nao_o_drive_vazio():
-    regra = (CLIENTE / "etc/udev/rules.d/99-nb3-usb.rules").read_text()
-    assert 'ACTION=="change"' in regra, "inserir um CD não disparava nada"
-    assert "ID_CDROM_MEDIA" in regra
-    # um gravador de DVD USB vazio não pode entrar pela regra de armazenamento
-    assert 'ENV{ID_CDROM}!="1"' in regra
+def test_udev_nao_alerta_disco_optico():
+    """Nenhuma regra pode casar mídia óptica: nem `change` com ID_CDROM_MEDIA,
+    nem o drive entrando pela regra de armazenamento USB."""
+    linhas = [
+        l
+        for l in (CLIENTE / "etc/udev/rules.d/99-nb3-usb.rules").read_text().splitlines()
+        if l.strip() and not l.lstrip().startswith("#")
+    ]
+    regras = "\n".join(linhas)
+    assert "ID_CDROM_MEDIA" not in regras, "o alerta de mídia óptica voltou"
+    assert 'ACTION=="change"' not in regras
+    # e o gravador de DVD USB continua fora da regra de armazenamento
+    assert 'ENV{ID_CDROM}!="1"' in regras
 
 
 def test_o_script_do_udev_descarta_o_pendrive_de_boot():

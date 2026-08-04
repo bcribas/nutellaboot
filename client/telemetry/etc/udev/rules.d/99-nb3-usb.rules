@@ -19,13 +19,14 @@ ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_CDROM}!="1", \
     ENV{ID_FS_LABEL}!="NB3CFG", \
     RUN+="/usr/share/mlog/usb-event.sh storage $env{ID_MODEL} $env{ID_VENDOR} $kernel"
 
-# --- disco optico: o que importa e a MIDIA, nao o drive ---
-# Ter leitor de CD nao e alarme (a maioria das maquinas de laboratorio tem um).
-# Inserir um disco e: o kernel emite `change` e o cdrom_id poe ID_CDROM_MEDIA.
-# Vale para drive interno (SATA/IDE) e externo, que e o que faltava: antes,
-# NENHUMA regra casava `change`, entao por um CD inserido nao acontecia nada.
-ACTION=="change", SUBSYSTEM=="block", ENV{ID_CDROM}=="1", ENV{ID_CDROM_MEDIA}=="1", \
-    RUN+="/usr/share/mlog/usb-event.sh cd $env{ID_FS_LABEL} $env{ID_MODEL} $kernel"
+# --- disco optico: NAO alarma, de proposito ---
+# Houve uma regra aqui casando `change` + ID_CDROM_MEDIA, que e como o kernel
+# avisa que puseram um disco no drive. Ela saiu por decisao de operacao: leitor
+# de CD e comum em maquina de laboratorio, e o alerta aparecia demais.
+#
+# Some o aviso E o rastro: um CD posto durante a prova nao vira registro
+# nenhum. Para voltar atras, e esta regra que se restaura — o servidor ainda
+# entende `media.cd` e o painel ainda sabe rotula-lo.
 
 # --- celular em MTP (transferencia de arquivos) ou PTP (camera) ---
 ACTION=="add", SUBSYSTEM=="usb", ENV{ID_MTP_DEVICE}=="1", \

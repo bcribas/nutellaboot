@@ -314,11 +314,10 @@ usb_loop() {
 
         case "$nome" in
             sr* | scd*)
-                # drive óptico: só conta se houver DISCO dentro. Vazio, o
-                # sysfs reporta tamanho zero.
-                [ "$(cat "/sys/block/$nome/size" 2> /dev/null || echo 0)" -gt 0 ] || continue
-                printf 'kind=media.cd\nvendor=%s\ndetail=disc present at boot\n' \
-                    "$modelo" > "$USB_FILA/boot-$nome"
+                # disco óptico não alarma, nem vazio nem com mídia dentro:
+                # decisão de operação, tomada depois de o alerta aparecer em
+                # toda máquina de laboratório que tem leitor. Some o aviso E o
+                # rastro — um CD posto durante a prova deixa de virar registro.
                 continue
                 ;;
             fd*)
