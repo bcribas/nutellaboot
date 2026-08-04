@@ -235,9 +235,19 @@ def _com_derivados(estado: dict, *, esperado_kernel: str, esperado_boot: str = "
         # Por isso `public_url` só sai quando a cópia de lá corresponde à
         # construção daqui — quem quiser entregar o arquivo tem que passar pela
         # rota, que sabe escolher.
-        e["publish_stale"] = bool(
-            e["published"] and pub.get("published_at", 0) < e.get("built_at", 0)
-        )
+        #
+        # A comparação é com o MTIME DO ARQUIVO, não com `built_at`: o
+        # `nb3-genusb --publish` envia DENTRO da geração, e o `built_at` é
+        # carimbado depois que a ferramenta volta. Comparando com ele, toda
+        # imagem publicada do jeito normal aparecia velha por alguns
+        # microssegundos — e o redirecionamento nunca disparava. O mtime
+        # responde a pergunta certa: o arquivo daqui mudou depois de eu
+        # mandá-lo?
+        try:
+            mtime = file_path(e["file"]).stat().st_mtime
+        except OSError:
+            mtime = e.get("built_at", 0)
+        e["publish_stale"] = bool(e["published"] and pub.get("published_at", 0) < mtime)
         e["public_url"] = "" if e["publish_stale"] else pub.get("url", "")
         e["publish_error"] = pub.get("error", "") if pub.get("status") == "failed" else ""
     return e

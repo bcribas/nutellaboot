@@ -658,9 +658,13 @@ def _publica(data_root, nome, *, quando, url="https://files.exemplo/mlbootimages
     )
 
 
+def _mtime(data_root, nome):
+    return (data_root / "usb" / nome).stat().st_mtime
+
+
 def test_publicada_e_atual_redireciona(client, build, genusb, data_root, sede):
     estado = asyncio.run(usb.gerar_da_sala("sala1"))
-    _publica(data_root, estado["file"], quando=estado["built_at"] + 10)
+    _publica(data_root, estado["file"], quando=_mtime(data_root, estado["file"]) + 10)
 
     r = client.get(f"/api/v1/site-images/sala1/usb/image?tk={sede['token']}", follow_redirects=False)
     assert r.status_code == 302, r.text
@@ -672,7 +676,7 @@ def test_publicada_e_velha_nao_redireciona(client, build, genusb, data_root, sed
     sede que não boota e nada explicando. Regerar sem republicar é o caminho
     comum para isso — o botão apontava para o velho."""
     estado = asyncio.run(usb.gerar_da_sala("sala1"))
-    _publica(data_root, estado["file"], quando=estado["built_at"] - 10)
+    _publica(data_root, estado["file"], quando=_mtime(data_root, estado["file"]) - 10)
 
     r = client.get(f"/api/v1/site-images/sala1/usb/image?tk={sede['token']}", follow_redirects=False)
     assert r.status_code == 200, r.text
@@ -699,8 +703,27 @@ def test_a_generica_segue_a_mesma_regra(client, build, genusb, data_root, sede):
     assert r.status_code == 200
     assert r.content[:2] == b"\x1f\x8b"
 
-    _publica(data_root, estado["file"], quando=estado["built_at"] + 10)
+    _publica(data_root, estado["file"], quando=_mtime(data_root, estado["file"]) + 10)
     r = client.get(f"/api/v1/usb/generic/image?id=sala1&tk={sede['token']}", follow_redirects=False)
+    assert r.status_code == 302
+
+
+def test_publicar_dentro_da_geracao_nao_conta_como_velha(client, build, genusb, data_root, sede):
+    """O `nb3-genusb --publish` envia DENTRO da geração, e o `built_at` só é
+    carimbado quando a ferramenta volta. Comparando com ele, toda imagem
+    publicada do jeito normal aparecia velha por alguns microssegundos — e o
+    redirecionamento nunca disparava. Aconteceu nas 54 sedes da produção.
+
+    A comparação é com o mtime do arquivo, que responde à pergunta certa: o
+    arquivo daqui mudou depois de eu mandá-lo?"""
+    estado = asyncio.run(usb.gerar_da_sala("sala1"))
+    # publicado uma fração ANTES do fim da geração, como acontece de verdade
+    _publica(data_root, estado["file"], quando=estado["built_at"] - 0.001)
+
+    e = usb.image_state("sala1")
+    assert e["publish_stale"] is False, "publicação normal marcada como velha"
+    assert e["public_url"]
+    r = client.get(f"/api/v1/site-images/sala1/usb/image?tk={sede['token']}", follow_redirects=False)
     assert r.status_code == 302
 
 
