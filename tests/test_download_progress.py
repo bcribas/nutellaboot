@@ -171,6 +171,24 @@ def test_o_que_o_aria_diz_chega_na_tela(tmp_path):
     assert "[ERROR]" in r.stderr, f"a mensagem do aria2 sumiu: {r.stderr!r}"
 
 
+def test_a_tabela_de_sucesso_do_aria_nao_e_impressa():
+    """Repassar o que não é progresso é o que impede o boot de ficar cego — mas
+    o aria2 fecha CADA camada com oito linhas de relatório de sucesso
+    ("Download Results:", cabeçalho, régua, linha OK, legenda, mais as vazias).
+    Três camadas enchem um console VGA de 25 linhas e empurram para fora
+    justamente o que serve para diagnosticar.
+
+    A saída certa é não emitir, não filtrar depois: filtrar por texto é como se
+    volta a engolir erro."""
+    codigo = "\n".join(
+        l for l in DOWNLOAD.read_text().splitlines() if not l.lstrip().startswith("#")
+    )
+    assert "--download-result=hide" in codigo
+    assert "Download Results" not in codigo, (
+        "a tabela está sendo filtrada por texto; use --download-result=hide"
+    )
+
+
 def test_o_total_de_uma_camada_de_6gb_nao_estoura(tmp_path):
     """A camada base tem 6,1 GiB — acima de 2^31."""
     fakebin = _fakebin(tmp_path, stdbuf=STDBUF_BOM, aria=ARIA_QUE_FUNCIONA)

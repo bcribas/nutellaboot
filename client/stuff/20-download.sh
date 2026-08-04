@@ -103,6 +103,8 @@ nb_aria_progress() {
             fflush()
             next
         }
+        # linha vazia não diz nada, e o aria2 cerca o bloco de erro com elas
+        /^[ \t]*$/ { next }
         {
             # aria2 tem algo a dizer: para a tela, não para o lixo
             print > "/dev/stderr"
@@ -149,9 +151,16 @@ nb_download() {
             # comando (o awk), e é o do aria2 que decide se vale repetir
             rm -f "$_rcfile"
             {
+                # --download-result=hide cala a TABELA DE SUCESSO que o aria2
+                # imprime ao fim de cada camada ("Download Results:", cabeçalho,
+                # régua, a linha OK e a legenda): oito linhas por camada, três
+                # camadas, num console VGA de 25 linhas — o histórico útil saía
+                # rolando pela borda de cima. Não afeta erro: as mensagens de
+                # falha saem pelo log de console e continuam chegando à tela.
                 # shellcheck disable=SC2086
                 $_pre aria2c --quiet=false --console-log-level=warn \
                     --show-console-readout=true --summary-interval=0 \
+                    --download-result=hide \
                     --timeout=30 --connect-timeout=15 --max-tries=1 \
                     --check-certificate=true --ca-certificate="$NB_CA_BUNDLE" \
                     --async-dns=false --allow-overwrite=true --auto-file-renaming=false \
