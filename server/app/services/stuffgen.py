@@ -132,12 +132,35 @@ def render(image_id: str) -> str:
     for name in sorted(values):
         if not VAR_NAME_RE.match(name):
             continue  # nomes fora do padrão nunca viram código shell
-        if name.startswith("LOCK_FALLBACK"):
-            continue  # hash da senha vai como NB_LOCK_FALLBACK_HASH abaixo
+        if name.startswith(("LOCK_FALLBACK", "ROOT_PASSWORD")):
+            continue  # os hashes de senha saem com nome próprio, abaixo
         lines.append(f"{name}={_render_value(values[name], seps.get(name, SEP_PADRAO))}")
 
     lockhash = raw.get("LOCK_FALLBACK_PASSWORD_HASH", "")
     if lockhash:
         lines.append(f"NB_LOCK_FALLBACK_HASH={_sh_quote(lockhash)}")
+
+    # Senha de root: o da sede, ou o padrão do modelo. Trancado, o do modelo
+    # vale SEMPRE — é a mesma regra dos outros campos, e é o que "a sede não
+    # troca" quer dizer. Sem nenhum dos dois a variável não sai, e o
+    # `60-polkit.sh` não encosta no /etc/shadow da imagem base.
+    #
+    # O consumidor existe desde sempre (`60-polkit.sh` reescreve a linha do
+    # root a partir de NB_ROOT_PW_HASH); o que nunca existiu era esta linha.
+    campo_root = next(
+        (f for f in config.schema_for(image_id).get("fields", []) if f.get("key") == "ROOT_PASSWORD"),
+        None,
+    )
+    roothash = ""
+    if campo_root:
+        padrao = campo_root.get("default_hash", "")
+        propria = raw.get("ROOT_PASSWORD_HASH", "")
+        # a MESMA condição de effective_values: a imagem marcada `unlocked`
+        # manda na própria configuração, cadeado do modelo ou não
+        unlocked = bool((store.get_site_image(image_id) or {}).get("unlocked"))
+        travado = campo_root.get("locked") and not unlocked
+        roothash = padrao if travado else (propria or padrao)
+    if roothash:
+        lines.append(f"NB_ROOT_PW_HASH={_sh_quote(roothash)}")
 
     return "\n".join(["\n".join(lines), "", _corpo_dos_modulos()]) + "\n"

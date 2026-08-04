@@ -151,6 +151,14 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
     confere nada. Há teste com pendrive de mentira em disco
     (`tests/test_usb_update.py`).
 
+20. **A produção não recebe edição manual.** Conserto se faz aqui, entra no
+    repositório, e chega lá por `git pull` + o que o deploy manda instalar. Foi
+    quebrada uma vez, com um `sed -i` no snippet do nginx direto no servidor: a
+    máquina passou a ser diferente do repositório sem nada registrando a
+    diferença, e o próximo reinstall apagaria a correção em silêncio. Por isso
+    tudo que a produção precisa é ARQUIVO versionado (`deploy/`, `systemd/`) e
+    não instrução em comentário. O procedimento está em `docs/operations.md`.
+
 ## Nomenclatura
 
 - **modelo** (`model`, `data/models/<n>/model.json`): o que se configura uma

@@ -153,10 +153,23 @@ def set_schema_field(name: str, key: str, patch: dict) -> dict:
             # qualquer valor entrava: uma aspa simples no lugar certo virava
             # comando executado como root em toda a sala, e um `None` fazia a
             # comparação de RAM do boot dar erro de aritmética.
-            from .config import ConfigError, _coerce
+            from .config import ConfigError, _coerce, hash_do_campo
 
             try:
-                alvo["default"] = _coerce(alvo, patch["default"])
+                valor = _coerce(alvo, patch["default"])
+                if alvo.get("type") == "password":
+                    # senha em claro NÃO fica no schema.json: o console lê o
+                    # arquivo inteiro, e o padrão de um campo de senha é
+                    # justamente a senha que a organização escolheu. Guarda-se
+                    # o hash, no formato que aquele campo pede. Em branco
+                    # significa "sem padrão", e aí a máquina não é tocada.
+                    alvo["default"] = ""
+                    if valor:
+                        alvo["default_hash"] = hash_do_campo(alvo, valor)
+                    else:
+                        alvo.pop("default_hash", None)
+                else:
+                    alvo["default"] = valor
             except ConfigError as e:
                 raise ImageError(str(e))
         if "locked" in patch:

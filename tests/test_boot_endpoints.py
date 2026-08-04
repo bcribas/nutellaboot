@@ -96,6 +96,15 @@ def test_stuff_renders_vars_and_modules(client, image_with_template):
 
 def test_stuff_quotes_hostile_values(client, image_with_template, data_root):
     img = data_root / "site-images" / "testes3"
+    # `unlocked`: o esquema padrão marca DEFAULTBROWSERURL como travado, e
+    # travado o stuff leva o padrão do modelo, não o que está salvo. Isto mudou
+    # quando `_com_padroes` passou a acrescentar os campos do esquema padrão a
+    # modelos que não os têm — antes, modelo sem schema.json repassava o que
+    # estivesse gravado, cadeado nenhum. A tranca valer também ali é o
+    # comportamento certo; o que este teste prende é o ASPEAMENTO, e para
+    # exercitá-lo o valor precisa chegar ao stuff.
+    info = fsdb.read_json(img / "image.json")
+    fsdb.write_json(img / "image.json", {**info, "unlocked": True})
     fsdb.write_json(
         img / "config.json",
         {"values": {"DEFAULTBROWSERURL": "x'; rm -rf / #", "não-vale": "y", "lower": "z"}},

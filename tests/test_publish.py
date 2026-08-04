@@ -72,7 +72,9 @@ def test_usb_vai_para_o_outro_diretorio(data_root, conf_publish, fake_rsync):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b"img")
     estado = publish.publish_file(p, "usb")
-    assert estado["url"] == "https://files.exemplo/mlbootimages/pendrive.img"
+    #  porque a imagem de pendrive vai compactada — o diretório é o que
+    # este teste guarda
+    assert estado["url"] == "https://files.exemplo/mlbootimages/pendrive.img.gz"
 
 
 def test_falha_fica_pendente_com_motivo(data_root, conf_publish, tmp_path, monkeypatch):
@@ -178,3 +180,70 @@ def test_manifest_usa_a_url_publicada(client, data_root, conf_publish, fake_rsyn
         "/boot/v3/img1/manifest", headers={"X-NB-Boot-Key": criada["boot_key"]}
     ).text.splitlines()[0]
     assert "https://files.exemplo/maratonalinux/extra.squash" in linha
+
+
+# --- a imagem de pendrive vai compactada -------------------------------------
+#
+# 400 MB dos quais ~200 são o espaço vazio da partição FAT: gzip a leva a
+# 205 MB em ~4 s (medido no arquivo real). Com ~50 sedes é 20 GB contra 10 GB
+# no servidor de arquivos.
+
+
+def test_a_imagem_de_pendrive_chega_compactada(fake_rsync, conf_publish, data_root, tmp_path):
+    import gzip
+
+    conteudo = b"imagem de pendrive " * 5000
+    img = data_root / "usb" / "sala1-abc.img"
+    img.parent.mkdir(parents=True, exist_ok=True)
+    img.write_bytes(conteudo)
+
+    estado = publish.publish_file(img, "usb")
+    assert estado["status"] == "done", estado
+
+    enviado = fake_rsync / "sala1-abc.img.gz"
+    assert enviado.is_file(), sorted(p.name for p in fake_rsync.iterdir())
+    # e descompactar reproduz o original byte a byte — é o que o operador faz
+    assert gzip.decompress(enviado.read_bytes()) == conteudo
+    assert enviado.stat().st_size < len(conteudo)
+
+
+def test_a_url_publica_aponta_para_o_gz(fake_rsync, conf_publish, data_root):
+    img = data_root / "usb" / "sala1-abc.img"
+    img.parent.mkdir(parents=True, exist_ok=True)
+    img.write_bytes(b"x" * 1000)
+    estado = publish.publish_file(img, "usb")
+    assert estado["url"].endswith("sala1-abc.img.gz"), estado["url"]
+
+
+def test_o_estado_continua_indexado_pelo_nome_local(fake_rsync, conf_publish, data_root):
+    """É por `x.img` que o services/usb.py pergunta se aquela sede está
+    publicada. Indexar pelo `.gz` deixaria o botão da tela dizendo "não
+    publicada" com o arquivo já no ar."""
+    img = data_root / "usb" / "sala1-abc.img"
+    img.parent.mkdir(parents=True, exist_ok=True)
+    img.write_bytes(b"x" * 1000)
+    publish.publish_file(img, "usb")
+    assert publish.state("sala1-abc.img")["status"] == "done"
+    assert publish.state("sala1-abc.img.gz") is None
+
+
+def test_o_local_continua_cru_e_o_temporario_some(fake_rsync, conf_publish, data_root):
+    """O `.img` local é o que a rota autenticada /usb/image serve, e guardar o
+    `.gz` ao lado duplicaria cada imagem em disco."""
+    img = data_root / "usb" / "sala1-abc.img"
+    img.parent.mkdir(parents=True, exist_ok=True)
+    img.write_bytes(b"conteudo cru")
+    publish.publish_file(img, "usb")
+    assert img.read_bytes() == b"conteudo cru"
+    assert sorted(p.name for p in img.parent.iterdir()) == ["sala1-abc.img"]
+
+
+def test_camada_nao_e_recompactada(fake_rsync, conf_publish, data_root):
+    """squashfs já é comprimido: gzipar de novo gastaria CPU para não ganhar."""
+    camada = data_root / "blobs" / "base.squash"
+    camada.parent.mkdir(parents=True, exist_ok=True)
+    camada.write_bytes(b"squashfs")
+    estado = publish.publish_file(camada, "layers")
+    assert (fake_rsync / "base.squash").is_file()
+    assert not (fake_rsync / "base.squash.gz").exists()
+    assert estado["url"].endswith("base.squash")

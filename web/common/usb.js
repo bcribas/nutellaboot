@@ -36,6 +36,17 @@ function botaoBaixar(url, rotulo) {
   return a;
 }
 
+// O comando de gravar sai da URL do botão, não fixo: o que está no servidor de
+// arquivos vem compactado (400 MB viram 205), e mandar `dd` num .gz grava o
+// arquivo compactado no pendrive — que não boota, e não diz por quê.
+function comandoGravar(url) {
+  const nome = decodeURIComponent(String(url).split("?")[0].split("/").pop() || "nutellaboot3.img");
+  const dd = "sudo dd of=/dev/sdX bs=4M status=progress oflag=sync";
+  return nome.endsWith(".gz")
+    ? `zcat ${nome} | ${dd}`
+    : `sudo dd if=${nome} of=/dev/sdX bs=4M status=progress oflag=sync`;
+}
+
 function motivoDesatualizada(razoes) {
   if (razoes.includes("boot_key")) return t("usb_stale_boot_key");
   if (razoes.includes("kernel")) return t("usb_stale_kernel");
@@ -51,10 +62,12 @@ export function usbBlock(imageId, token = "") {
   async function carregar() {
     let dados;
     try {
-      dados = await api.get(`/api/v1/site-images/${encodeURIComponent(imageId)}/usb`, {
-        kind: token ? "image" : "admin",
-        token,
-      });
+      // `kind` padrão de propósito: assim o api.js manda o token da URL
+      // quando ele existe (configureitor e auto-atendimento) e cai no cookie
+      // quando não existe (console). Com `kind: "admin"` ele NÃO mandava o
+      // token da URL, e o configureitor — que se autentica só por `?tk=` —
+      // recebia 401 e ficava sem o bloco do pendrive inteiro.
+      dados = await api.get(`/api/v1/site-images/${encodeURIComponent(imageId)}/usb`, { token });
     } catch (e) {
       caixa.innerHTML = `<p class="muted">${t("usb_title")}: ${e.message}</p>`;
       return;
@@ -100,7 +113,7 @@ export function usbBlock(imageId, token = "") {
 
     const como = document.createElement("p");
     como.className = "help";
-    como.innerHTML = `${t("usb_howto")}<br><code>sudo dd if=nutellaboot3.img of=/dev/sdX bs=4M status=progress oflag=sync</code>`;
+    como.innerHTML = `${t("usb_howto")}<br><code>${comandoGravar(urlGenerica)}</code>`;
     caixa.appendChild(como);
 
     // 3. a alternativa: já configurada, sem nada para copiar
@@ -125,6 +138,13 @@ export function usbBlock(imageId, token = "") {
     );
     caixa.appendChild(tabela2);
 
+    if (i.status === "done") {
+      const comoSala = document.createElement("p");
+      comoSala.className = "help";
+      comoSala.innerHTML = `<code>${comandoGravar(urlSala)}</code>`;
+      caixa.appendChild(comoSala);
+    }
+
     if (i.status === "done" && i.stale) {
       const aviso = document.createElement("p");
       aviso.className = "warn";
@@ -147,7 +167,7 @@ export function usbBlock(imageId, token = "") {
           await api.post(
             `/api/v1/site-images/${encodeURIComponent(imageId)}/usb`,
             {},
-            { kind: token ? "image" : "admin", token }
+            { token }
           );
         } finally {
           carregar();

@@ -301,3 +301,24 @@ def test_as_telas_da_sede_se_enxergam():
     assert "location.search" in api.split("export function telaIrma")[1][:200], (
         "telaIrma precisa preservar o ?id=&tk= da tela atual"
     )
+
+
+def test_o_bloco_do_pendrive_nao_fixa_credencial_de_console():
+    """`kind: "admin"` faz o api.js NÃO mandar o token da URL — e o
+    configureitor, que se autentica só por `?tk=`, recebia 401 e ficava sem o
+    bloco do pendrive inteiro. O bloco serve três telas; a credencial tem que
+    ser a que cada uma tem."""
+    js = (REPO / "web" / "common" / "usb.js").read_text(encoding="utf-8")
+    codigo = "\n".join(l for l in js.splitlines() if not l.lstrip().startswith("//"))
+    assert 'kind: "admin"' not in codigo
+    assert '"image" : "admin"' not in codigo
+
+
+def test_o_comando_de_gravar_sai_da_url():
+    """O arquivo publicado vem compactado; `dd` num .gz grava o compactado no
+    pendrive, que não boota e não diz por quê."""
+    js = (REPO / "web" / "common" / "usb.js").read_text(encoding="utf-8")
+    assert "comandoGravar" in js
+    assert "zcat" in js
+    codigo = "\n".join(l for l in js.splitlines() if not l.lstrip().startswith("//"))
+    assert "if=nutellaboot3.img" not in codigo, "o comando voltou a ser fixo"

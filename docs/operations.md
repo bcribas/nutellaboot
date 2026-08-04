@@ -230,13 +230,24 @@ publicada num diretório público.
 > partição.
 
 **Não precisa de sudo**: a imagem é montada manipulando o arquivo
-(`sfdisk` + `mtools` + `grub2-mkstandalone`), sem `losetup` nem `mount`.
+(`sfdisk`/`mtools` + `grub-mkstandalone`), sem `losetup` nem `mount`.
 
 Para gravar no pendrive físico, aí sim:
 
 ```bash
 sudo dd if=maratona2026.img of=/dev/sdX bs=4M status=progress oflag=sync
 ```
+
+**O que vem do servidor de arquivos vem compactado** (400 MB viram ~205), então
+o comando é outro — e mandar `dd` num `.gz` grava o arquivo compactado no
+pendrive, que não boota e não diz por quê:
+
+```bash
+zcat maratona2026.img.gz | sudo dd of=/dev/sdX bs=4M status=progress oflag=sync
+```
+
+As telas mostram o comando certo para o link que oferecem; esta seção é para
+quem baixou o arquivo na mão.
 
 Depois de gravado, o pendrive é uma partição FAT normal: monte em qualquer
 computador e edite `nutellaboot.conf` (sede, chave de boot) e `wifi.conf`
@@ -1112,10 +1123,10 @@ antes de fechar o terminal.
 
 ```bash
 install -m 0644 /opt/nutellaboot3/deploy/nginx-nutellaboot3.conf /etc/nginx/sites-available/nutellaboot3
+install -d /etc/nginx/snippets
+install -m 0644 /opt/nutellaboot3/deploy/nutellaboot3-proxy.conf /etc/nginx/snippets/
 ln -sf /etc/nginx/sites-available/nutellaboot3 /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
-# o snippet está comentado no fim do próprio arquivo de configuração
-$EDITOR /etc/nginx/snippets/nutellaboot3-proxy.conf
 # e os globais em nginx.conf: worker_processes auto, worker_rlimit_nofile 65535,
 # worker_connections 8192, multi_accept on
 nginx -t && systemctl reload nginx
@@ -1184,8 +1195,25 @@ Os caminhos são **relativos** à raiz do `rrsync`; absoluto seria recusado.
 
 ### Atualizar
 
+**A produção não recebe edição manual.** Conserto se faz no repositório, e
+chega aqui por `git pull`. Editar um arquivo direto no servidor deixa a máquina
+diferente do repositório sem nada registrando a diferença — e o próximo
+reinstall apaga a correção em silêncio.
+
 ```bash
-cd /opt/nutellaboot3 && git pull && systemctl restart nutellaboot3
+cd /opt/nutellaboot3
+git pull
+
+# só se o que mudou estiver em deploy/ ou systemd/
+install -m 0644 deploy/nginx-nutellaboot3.conf /etc/nginx/sites-available/nutellaboot3
+install -m 0644 deploy/nutellaboot3-proxy.conf /etc/nginx/snippets/
+install -m 0644 deploy/sysctl-nutellaboot3.conf /etc/sysctl.d/60-nutellaboot3.conf
+install -m 0644 systemd/nutellaboot3.service /etc/systemd/system/
+nginx -t && systemctl reload nginx
+systemctl daemon-reload
+
+systemctl restart nutellaboot3
+curl -s https://nutellaboot.mdp.naquadah.com.br/api/v1/health
 ```
 
 O `stuff` é lido do disco a cada boot, então mudança em `client/stuff/` chega às

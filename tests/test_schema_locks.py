@@ -181,3 +181,23 @@ def test_convite_pode_fixar_wallpaper_travado(client, base, ha):
         files={"file": ("f.png", PNG, "image/png")},
         headers={"Authorization": f"Bearer {img['token']}"},
     ).status_code == 400
+
+
+def test_a_rota_do_esquema_devolve_as_opcoes(client, ha, base):
+    """Sem `options`, o editor do console montava uma lista VAZIA para todo
+    campo `select`: escolher o fuso ou o idioma padrão ficava impossível pela
+    tela, e nada dizia por quê."""
+    r = client.get("/api/v1/models/t/schema", headers=ha)
+    assert r.status_code == 200, r.text
+    campos = {f["key"]: f for f in r.json()["fields"]}
+
+    tz = campos["TIMEZONE"]
+    assert tz["type"] == "select"
+    assert len(tz["options"]) > 100, "as opções de fuso não vieram"
+    assert {"value", "label"} <= set(tz["options"][0])
+    # o editor usa os dois juntos: a lista para escolher e o default para marcar
+    assert tz["default"]
+
+    assert len(campos["LANGUAGE"]["options"]) == 3
+    # campo que não é select não inventa opções
+    assert campos["FORCE_CLEAN_HOME_ON_BOOT"].get("options") in (None, [])

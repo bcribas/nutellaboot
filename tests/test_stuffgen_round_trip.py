@@ -320,3 +320,42 @@ def test_o_tema_escuro_tambem_recebe_o_papel_de_parede(imagem, raiz):
     assert "picture-uri-dark" in texto
     assert "maratona-common-wallpaper.png" in texto
     assert (raiz / "etc/dconf/db/local.d/locks/91-wallpaper-dark").is_file()
+
+
+# --- a senha de root chega ao /etc/shadow ------------------------------------
+
+
+def test_a_senha_de_root_vira_a_linha_do_shadow(imagem, raiz):
+    """O consumidor existe desde sempre (`60-polkit.sh` reescreve a linha do
+    root a partir de NB_ROOT_PW_HASH) e o produtor nunca existiu. Este teste
+    junta os dois: define a senha no modelo e olha o shadow que sobra."""
+    from server.app.services import store
+
+    store.set_schema_field("t", "ROOT_PASSWORD", {"default": "senha-da-prova", "locked": True})
+    (raiz / "etc").mkdir(parents=True, exist_ok=True)
+    (raiz / "etc/shadow").write_text("root:!:20000:0:99999:7:::\nicpc:*:20000:0:99999:7:::\n")
+    (raiz / "etc/polkit-1/localauthority/90-mandatory.d").mkdir(parents=True, exist_ok=True)
+    (raiz / "etc/sudoers").write_text("")
+
+    r = roda_consumidor(imagem, "nb3_post_polkit", raiz)
+    assert r.returncode == 0, r.stderr
+
+    linhas = (raiz / "etc/shadow").read_text().splitlines()
+    root = [l for l in linhas if l.startswith("root:")]
+    assert len(root) == 1, linhas
+    assert root[0].split(":")[1].startswith("$6$"), root[0]
+    # e o resto do arquivo sobrevive: reescrever o shadow inteiro apagaria o
+    # usuário que a prova usa
+    assert any(l.startswith("icpc:") for l in linhas)
+
+
+def test_sem_senha_o_shadow_nao_e_tocado(imagem, raiz):
+    original = "root:!:20000:0:99999:7:::\n"
+    (raiz / "etc").mkdir(parents=True, exist_ok=True)
+    (raiz / "etc/shadow").write_text(original)
+    (raiz / "etc/polkit-1/localauthority/90-mandatory.d").mkdir(parents=True, exist_ok=True)
+    (raiz / "etc/sudoers").write_text("")
+
+    r = roda_consumidor(imagem, "nb3_post_polkit", raiz)
+    assert r.returncode == 0, r.stderr
+    assert (raiz / "etc/shadow").read_text() == original

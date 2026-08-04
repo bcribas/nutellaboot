@@ -252,5 +252,31 @@ def build_default_schema() -> dict:
                     "Guardada solo como hash; déjela en blanco para mantener la actual.",
                 ),
             },
+            {
+                "key": "ROOT_PASSWORD",
+                "type": "password",
+                # `crypt` e não o sha256 dos outros: este hash vai para o
+                # /etc/shadow da máquina, e lá só serve o formato do crypt(3).
+                # Trocar um pelo outro dá uma conta cuja senha nunca casa — e o
+                # erro aparece na sala, não aqui.
+                "hash": "crypt",
+                "default": "",
+                # trancado por padrão: quem decide se a sede pode ter root é a
+                # organização. Destrancar no modelo É a permissão.
+                "locked": True,
+                "label": _t(
+                    "Senha de root das máquinas",
+                    "Root password on the machines",
+                    "Contraseña de root en las máquinas",
+                ),
+                "help": _t(
+                    "Em branco, a senha de root da imagem base não é alterada. "
+                    "Guardada só como hash, no formato do /etc/shadow.",
+                    "Blank leaves the base image's root password untouched. "
+                    "Stored only as a hash, in /etc/shadow format.",
+                    "En blanco, la contraseña de root de la imagen base no se altera. "
+                    "Guardada solo como hash, en el formato de /etc/shadow.",
+                ),
+            },
         ],
     }

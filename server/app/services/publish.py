@@ -11,14 +11,26 @@ botão de reenviar quando o envio falha (servidor fora do ar, rede caindo).
 
 from __future__ import annotations
 
+import gzip
 import os
 import shlex
+import shutil
 import subprocess
 import time
 from pathlib import Path
 
 from .. import fsdb
 from ..settings import settings
+
+# Tipos cujo arquivo vai COMPACTADO para o servidor de arquivos.
+#
+# A imagem do pendrive são 400 MB dos quais ~200 são o espaço vazio da partição
+# FAT: gzip a leva a 205 MB em ~4 s (medido no arquivo real). Com ~50 sedes é a
+# diferença entre 20 GB e 10 GB no files.mdp.
+#
+# As camadas NÃO entram: squashfs já é comprimido, e gzipar de novo gastaria
+# tempo de CPU para não ganhar nada.
+COMPRIMIDOS = ("usb",)
 
 DEFAULT = {
     "enabled": False,
@@ -48,8 +60,13 @@ def enabled() -> bool:
     return bool(conf().get("enabled"))
 
 
+def nome_publicado(filename: str, kind: str) -> str:
+    """Como o arquivo se chama LÁ. Só difere de cá quando ele vai compactado."""
+    return f"{filename}.gz" if kind in COMPRIMIDOS else filename
+
+
 def public_url(filename: str, kind: str = "layers") -> str:
-    return f"{conf()['base_urls'][kind].rstrip('/')}/{filename}"
+    return f"{conf()['base_urls'][kind].rstrip('/')}/{nome_publicado(filename, kind)}"
 
 
 def _state_path(filename: str) -> Path:
@@ -94,11 +111,29 @@ def publish_file(local: Path | str, kind: str = "layers") -> dict:
             filename, kind=kind, status="disabled", error="publicação desligada em server.json"
         )
 
+    # Comprimir num temporário AO LADO do original: mesmo sistema de arquivos
+    # (o rsync com --partial se comporta), e o `.img` local continua cru,
+    # porque é ele que a rota autenticada /usb/image serve.
+    enviar = local
+    temporario = None
+    if kind in COMPRIMIDOS:
+        temporario = local.with_name(local.name + ".gz.tmp")
+        try:
+            with open(local, "rb") as origem, gzip.open(temporario, "wb", compresslevel=6) as saida:
+                shutil.copyfileobj(origem, saida, length=4 * 1024 * 1024)
+            enviar = temporario.with_name(nome_publicado(local.name, kind))
+            temporario.replace(enviar)
+            temporario = enviar
+        except OSError as e:
+            if temporario and temporario.exists():
+                temporario.unlink()
+            return _record(filename, kind=kind, status="failed", error=f"falha ao compactar: {e}")
+
     destino = f"{c['user']}@{c['host']}:{c['paths'][kind].rstrip('/')}/"
     # NB3_PUBLISH_CMD permite trocar o transporte (e testar sem rede)
     base = os.environ.get("NB3_PUBLISH_CMD")
     if base:
-        cmd = [*shlex.split(base), str(local), destino]
+        cmd = [*shlex.split(base), str(enviar), destino]
     else:
         cmd = [
             "rsync",
@@ -107,7 +142,7 @@ def publish_file(local: Path | str, kind: str = "layers") -> dict:
             "--chmod=F644",
             "-e",
             "ssh -o BatchMode=yes -o ConnectTimeout=15",
-            str(local),
+            str(enviar),
             destino,
         ]
 
@@ -118,11 +153,19 @@ def publish_file(local: Path | str, kind: str = "layers") -> dict:
         )
     except (subprocess.TimeoutExpired, OSError) as e:
         return _record(filename, kind=kind, status="failed", error=str(e))
+    finally:
+        # o comprimido é descartável: reconstruí-lo custa segundos, e guardá-lo
+        # duplicaria em disco cada imagem de pendrive
+        if temporario is not None and temporario.exists():
+            temporario.unlink()
 
     if proc.returncode != 0:
         erro = (proc.stderr or proc.stdout or f"código {proc.returncode}").strip()[-500:]
         return _record(filename, kind=kind, status="failed", error=erro)
 
+    # O estado continua indexado pelo nome LOCAL (`x.img`): é por ele que o
+    # services/usb.py pergunta se a imagem daquela sede está publicada. O que
+    # muda é a URL, que aponta para o `.gz`.
     return _record(
         filename,
         kind=kind,

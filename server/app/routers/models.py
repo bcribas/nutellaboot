@@ -226,7 +226,12 @@ async def layers_catalog(p=Depends(auth.require_console)) -> dict:
 async def get_model_schema(name: str, p=Depends(auth.require_console)) -> dict:
     if not ownership.can_use_model(p, name):
         raise HTTPException(404, "modelo não existe")
-    schema = store.get_schema(name)
+    from ..services.config import _com_padroes
+
+    # `_com_padroes` é o mesmo caminho que o `set_schema_field` usa para
+    # validar: traz do esquema padrão os metadados de formato que um
+    # `schema.json` gravado antes deles não tem.
+    schema = _com_padroes(store.get_schema(name))
     return {
         "name": name,
         "fields": [
@@ -236,6 +241,10 @@ async def get_model_schema(name: str, p=Depends(auth.require_console)) -> dict:
                 "label": f.get("label"),
                 "help": f.get("help"),
                 "default": f.get("default"),
+                # sem as opções, o editor do console montava uma lista VAZIA
+                # para todo campo `select` — e escolher o padrão de fuso ou de
+                # idioma ficava impossível pela tela
+                "options": f.get("options"),
                 "locked": bool(f.get("locked")),
             }
             for f in schema.get("fields", [])

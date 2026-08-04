@@ -29,7 +29,14 @@ class ConfigError(ValueError):
 # schema.json de um modelo é gravado na criação e nunca mais revisto, então
 # sem isto uma regra nova só valeria para modelos criados depois dela — e os
 # que estão em produção seguiriam aceitando o valor que quebra a máquina.
-HERDADOS_DO_PADRAO = ("sep", "item_pattern")
+# `hash` está aqui porque escolher o algoritmo errado é falha silenciosa NA
+# MÁQUINA: o hash da tela de bloqueio no /etc/shadow dá uma conta que nunca
+# aceita a senha. Um modelo gravado antes deste campo existir precisa herdar
+# a escolha, não o padrão.
+#
+# `options` porque sem elas o editor do console monta uma lista VAZIA e não dá
+# para escolher o padrão de um `select` — que foi o defeito relatado.
+HERDADOS_DO_PADRAO = ("sep", "item_pattern", "hash", "options")
 
 
 def schema_for(image_id: str) -> dict:
@@ -41,14 +48,28 @@ def schema_for(image_id: str) -> dict:
 def _com_padroes(schema: dict) -> dict:
     from .default_schema import build_default_schema
 
+    campos = schema.setdefault("fields", [])
     padrao = {f["key"]: f for f in build_default_schema().get("fields", [])}
-    for f in schema.get("fields", []):
+    for f in campos:
         base = padrao.get(f.get("key"))
         if not base:
             continue
         for chave in HERDADOS_DO_PADRAO:
             if chave not in f and chave in base:
                 f[chave] = base[chave]
+
+    # CAMPO NOVO do esquema padrão entra nos modelos que já existem.
+    #
+    # Sem isto, acrescentar um campo só valeria para modelo criado depois dele:
+    # o `schema.json` é gravado na criação e nunca mais revisto, e o modelo da
+    # temporada em produção ficaria sem o campo para sempre, sem nada dizendo
+    # por quê. Foi o que aconteceu com a senha de root — o campo existia no
+    # esquema padrão e não aparecia no modelo `maratona2026`.
+    #
+    # Vai no fim e nunca por cima: o que o modelo tem é dele, inclusive o
+    # cadeado e o padrão.
+    tem = {f.get("key") for f in campos}
+    campos.extend(dict(f) for k, f in padrao.items() if k not in tem)
     return schema
 
 
@@ -141,6 +162,40 @@ def hash_password(password: str) -> str:
     return f"{salt}${digest}"
 
 
+def crypt_password(password: str) -> str:
+    """Hash no formato do `/etc/shadow` (SHA-512 crypt, `$6$…`).
+
+    Por `openssl passwd` e não pelo módulo `crypt` do Python: ele saiu na 3.13,
+    e este projeto roda em 3.12 (produção) e 3.14 (desenvolvimento). A senha vai
+    por STDIN, nunca como argumento — argumento aparece no `ps` de qualquer
+    usuário da máquina.
+    """
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            ["openssl", "passwd", "-6", "-stdin"],
+            input=password,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise ConfigError(f"não consegui gerar o hash da senha: {e}") from None
+    saida = (r.stdout or "").strip()
+    if r.returncode != 0 or not saida.startswith("$6$"):
+        raise ConfigError("não consegui gerar o hash da senha (openssl)")
+    return saida
+
+
+def hash_do_campo(field: dict, password: str) -> str:
+    """O hash QUE AQUELE CAMPO pede. São dois formatos com destinos diferentes:
+    o da tela de bloqueio, conferido pelo agente, e o do /etc/shadow."""
+    if field.get("hash") == "crypt":
+        return crypt_password(password)
+    return hash_password(password)
+
+
 def check_password(stored: str, password: str) -> bool:
     if not stored or "$" not in stored:
         return False
@@ -172,7 +227,7 @@ def write_values(image_id: str, incoming: dict, *, is_admin: bool) -> dict:
                 # em branco = manter a senha atual
                 if value == "":
                     continue
-                values[f"{key}_HASH"] = hash_password(_coerce(field, value))
+                values[f"{key}_HASH"] = hash_do_campo(field, _coerce(field, value))
                 continue
             values[key] = _coerce(field, value)
 
