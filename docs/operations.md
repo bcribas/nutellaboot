@@ -1122,17 +1122,26 @@ antes de fechar o terminal.
 ### nginx e certificado
 
 ```bash
-install -m 0644 /opt/nutellaboot3/deploy/nginx-nutellaboot3.conf /etc/nginx/sites-available/nutellaboot3
 install -d /etc/nginx/snippets
 install -m 0644 /opt/nutellaboot3/deploy/nutellaboot3-proxy.conf /etc/nginx/snippets/
-ln -sf /etc/nginx/sites-available/nutellaboot3 /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 # e os globais em nginx.conf: worker_processes auto, worker_rlimit_nofile 65535,
 # worker_connections 8192, multi_accept on
-nginx -t && systemctl reload nginx
 
-certbot --nginx -d nutellaboot.mdp.naquadah.com.br --redirect
+# O certificado PRIMEIRO: o arquivo de configuração aponta para ele, e o nginx
+# não inicia apontando para arquivo que não existe.
+certbot certonly --webroot -w /opt/nutellaboot3/web -d nutellaboot.mdp.naquadah.com.br
+
+install -m 0644 /opt/nutellaboot3/deploy/nginx-nutellaboot3.conf /etc/nginx/sites-available/nutellaboot3
+ln -sf /etc/nginx/sites-available/nutellaboot3 /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
 ```
+
+> O TLS está no arquivo versionado, e não escrito pelo `certbot --nginx`, por um
+> motivo aprendido apanhando: com o certbot dono do bloco 443, reinstalar o
+> arquivo no deploy APAGAVA o HTTPS — e sem HTTPS nenhuma máquina boota. Assim
+> reinstalar é idempotente. A renovação continua automática (`certbot renew`),
+> e o desafio sai pela porta 80.
 
 **Sem certificado válido nada boota**: o initrd verifica TLS em todo download, e
 essa é uma invariante do projeto. Confira do lado de fora antes de seguir:
