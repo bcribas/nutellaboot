@@ -361,6 +361,69 @@ def test_sem_senha_o_shadow_nao_e_tocado(imagem, raiz):
     assert (raiz / "etc/shadow").read_text() == original
 
 
+# --- a regra JS do polkit -----------------------------------------------------
+#
+# Os .pkla do pacote maratona-usuario-icpc são letra morta no Ubuntu 24.04 (o
+# polkit 124 removeu o backend localauthority; o suporte virou um pacote que
+# não vem instalado). Foi assim que o icpc trocou de wifi numa máquina com os
+# três arquivos no lugar. Quem vale agora é a regra JS escrita a cada boot.
+
+
+def _regras(raiz):
+    return (raiz / "etc/polkit-1/rules.d/90-maratona-icpc.rules").read_text()
+
+
+def test_a_regra_js_bloqueia_rede_disco_e_relogio(imagem, raiz):
+    (raiz / "etc/polkit-1/localauthority/90-mandatory.d").mkdir(parents=True, exist_ok=True)
+    (raiz / "etc/shadow").write_text("root:!:1:0:99999:7:::\n")
+    (raiz / "etc/sudoers").write_text("")
+    r = roda_consumidor(imagem, "nb3_post_polkit", raiz)
+    assert r.returncode == 0, r.stderr
+    js = _regras(raiz)
+    assert 'subject.user != "icpc"' in js
+    assert "org.freedesktop.NetworkManager." in js
+    assert "org.freedesktop.udisks2." in js
+    assert "org.freedesktop.timedate1." in js
+    assert js.count("polkit.Result.NO;") == 3
+    # sintaxe mínima: todo addRule aberto é fechado
+    assert js.count("{") == js.count("}")
+
+
+def test_a_sede_com_permissao_de_rede_nao_ganha_o_bloqueio(imagem, raiz, data_root):
+    """ALLOWNETWORKCHANGE=t tira SÓ o bloco do NetworkManager — relógio e disco
+    continuam travados, e é a mesma flag que já removia o .pkla."""
+    (raiz / "etc/polkit-1/localauthority/90-mandatory.d").mkdir(parents=True, exist_ok=True)
+    (raiz / "etc/shadow").write_text("root:!:1:0:99999:7:::\n")
+    (raiz / "etc/sudoers").write_text("")
+    r = roda_consumidor(imagem, "nb3_post_polkit", raiz, extra="ALLOWNETWORKCHANGE=t")
+    assert r.returncode == 0, r.stderr
+    js = _regras(raiz)
+    assert "NetworkManager" not in js
+    assert "org.freedesktop.udisks2." in js
+    assert "org.freedesktop.timedate1." in js
+
+
+def test_todo_modulo_postmount_e_chamado():
+    """Um módulo novo precisa de DOIS passos: o arquivo e a chamada em
+    runpostmountconfigs. O segundo passava calado — módulo órfão definido e
+    nunca executado."""
+    import re
+
+    stuff_dir = REPO / "client" / "stuff"
+    definidas = set()
+    for p in stuff_dir.rglob("*.sh"):
+        definidas |= set(re.findall(r"^(nb3_post_[a-z0-9_]+)\s*\(\)", p.read_text(), re.M))
+    corpo = (stuff_dir / "90-main.sh").read_text()
+    chamadas = set(re.findall(r"^\s*(nb3_post_[a-z0-9_]+)\b", corpo, re.M))
+    # helpers internos (chamados por outro módulo, não pelo main) declaram-se
+    # aqui, com o motivo
+    internas = {
+        "nb3_post_polkit_rules",  # chamado por nb3_post_polkit
+    }
+    orfas = definidas - chamadas - internas
+    assert not orfas, f"módulos definidos e nunca chamados: {sorted(orfas)}"
+
+
 # --- o wifi do pendrive vira perfil do NetworkManager ------------------------
 #
 # O mesmo `wifi.conf` alimenta o wpa_supplicant do initrd (para o boot) e os

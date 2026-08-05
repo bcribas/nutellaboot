@@ -98,8 +98,12 @@ commands_loop() {
         # o estado de bloqueio vem junto: garante a tela mesmo se o comando
         # tiver se perdido (rede caindo no meio, agente reiniciado)
         if echo "$resp" | nb3-json locked | grep -q true; then
-            ensure_locked
+            # o destravamento local pela senha de emergência vale até o
+            # servidor mudar de ideia por um comando novo (donottouch limpa o
+            # override) ou destravar — o estado repetido não retrava
+            [ -e "$STATE_DIR/local-unlock" ] || ensure_locked
         else
+            rm -f "$STATE_DIR/local-unlock"
             ensure_unlocked
         fi
     done
@@ -109,13 +113,28 @@ commands_loop() {
 #
 # Matar o processo NÃO destrava: enquanto o estado for "locked", o agente
 # relança a tela. (No nb2 o desbloqueio era literalmente `pkill maratona-wait`.)
+#
+# QUEM CONFERE A SENHA DE EMERGÊNCIA É O AGENTE, não a tela. A tela roda como
+# icpc e o hash mora em /etc/.nb3, 0600 root, junto com a chave de máquina —
+# dar o arquivo à tela seria dar a chave ao competidor. A tela só coleta as
+# teclas e as escreve no FIFO; aqui (root) o hash é conferido, e no acerto a
+# tela é fechada por quem sempre a fechou (ensure_unlocked). Antes a tela
+# tentava ler o hash, falhava em silêncio, e NENHUMA senha destravava.
+
+NB_UNLOCK_FIFO=${NB_UNLOCK_FIFO:-/run/nb3-unlock.fifo}
 
 ensure_locked() {
     touch "$STATE_DIR/locked"
     pgrep -f maratona-wait > /dev/null && return 0
     log "abrindo a tela de bloqueio"
+    # a tela recebe o que precisa por argumento e ambiente — ela NÃO lê
+    # /etc/.nb3 (não pode: 0600 root). A chave de boot vai por ambiente, não
+    # por argumento, para não aparecer no ps de outros usuários.
     su icpc -c "DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1001 \
-        /usr/bin/maratona-wait" &
+        NB_BOOT_KEY='$NB_BOOT_KEY' \
+        /usr/bin/maratona-wait --image '$IMAGEROOT' --server '$NB_SERVER' \
+        --theme '${NB_LOCK_THEME:-classico}' --lang '${NB_LANGUAGE:-pt}' \
+        --fifo '$NB_UNLOCK_FIFO'" &
     disown
 }
 
@@ -134,8 +153,55 @@ lock_watchdog() {
     done
 }
 
-cmd_donottouch() { ensure_locked; }
-cmd_cantouch() { ensure_unlocked; }
+# salt$sha256(salt+senha) — o formato que config.hash_password grava no
+# servidor. Shell puro de propósito: dá para testar sem gjs nem GTK.
+verify_lock_password() {
+    _hash=${NB_LOCK_FALLBACK_HASH:-}
+    _typed=$1
+    [ -n "$_hash" ] || return 1
+    case "$_hash" in *\$*) ;; *) return 1 ;; esac
+    _salt=${_hash%%\$*}
+    _want=${_hash#*\$}
+    _got=$(printf '%s' "$_salt$_typed" | sha256sum | awk '{print $1}')
+    [ "$_got" = "$_want" ]
+}
+
+setup_unlock_fifo() {
+    rm -f "$NB_UNLOCK_FIFO"
+    mkfifo -m 620 "$NB_UNLOCK_FIFO" || return 1
+    # o grupo icpc escreve; ninguém mais lê (620: dono root lê/escreve)
+    chown root:icpc "$NB_UNLOCK_FIFO" 2> /dev/null || chmod 622 "$NB_UNLOCK_FIFO"
+}
+
+unlock_listener() {
+    while :; do
+        # um FIFO sem escritor bloqueia o read — é o comportamento certo aqui
+        if IFS= read -r _pass < "$NB_UNLOCK_FIFO"; then
+            if verify_lock_password "$_pass"; then
+                log "destravado pela senha de emergência"
+                # o override local segura o destravamento contra o long-poll:
+                # sem ele, o servidor (que continua 'locked') retravaria a tela
+                # em segundos e a senha certa viraria um piscar de olhos
+                touch "$STATE_DIR/local-unlock"
+                ensure_unlocked
+            else
+                log "senha de emergência recusada"
+            fi
+        fi
+        _pass=""
+    done
+}
+
+cmd_donottouch() {
+    # comando NOVO de travar anula o destravamento local: a organização
+    # retrava por cima, e vale ela
+    rm -f "$STATE_DIR/local-unlock"
+    ensure_locked
+}
+cmd_cantouch() {
+    rm -f "$STATE_DIR/local-unlock"
+    ensure_unlocked
+}
 cmd_cleanhomenow() { echo cleannow > /dev/shm/icpc-clean-homed.fifo; }
 cmd_mlreboot() { (sleep 20 && reboot) & disown; }
 cmd_mlpoweroff() { (sleep 20 && poweroff) & disown; }
@@ -149,7 +215,7 @@ cmd_precontest() {
     # relatório é o uso DURANTE a prova, não o da preparação da sala. O nb2
     # fazia isso e o nb3 tinha perdido.
     cmd_resetcontaeditores
-    ensure_locked
+    cmd_donottouch
 }
 
 # --- contagem de uso dos editores -------------------------------------------
@@ -363,6 +429,7 @@ case "$MAC" in
 esac
 
 log "iniciando (imagem=$IMAGEROOT mac=$MAC servidor=$NB_SERVER)"
+setup_unlock_fifo && unlock_listener &
 telemetry_loop &
 logs_loop &
 usb_loop &

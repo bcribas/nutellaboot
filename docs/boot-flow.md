@@ -498,10 +498,17 @@ Quem lê esse arquivo:
   - **USB** — esvazia a fila que a regra de udev enche e reporta na hora;
   - **`lock_watchdog`** — garante que a tela de bloqueio volte em até 3 s se
     alguém matar o processo.
-- **`/usr/bin/maratona-wait`**, a tela de bloqueio. Lê o tema, o idioma e o
-  hash da senha de emergência daqui. No nb2, esses valores eram corrigidos em
-  tempo de execução com um `sed -i 16d` — apagar a linha 16 do arquivo, por
-  número.
+- **`/usr/bin/maratona-wait`**, a tela de bloqueio. Roda como `icpc` e **não
+  lê o `/etc/.nb3`** (não pode: 0600 root, com a chave de máquina dentro) —
+  recebe tema, idioma, sede e servidor por argumento do agente, e a chave de
+  boot por ambiente. A senha de emergência digitada vai INTEIRA para o agente
+  por um FIFO (`/run/nb3-unlock.fifo`), e é o agente, como root, que confere o
+  hash e fecha a tela. O desenho anterior — a tela lendo o hash do arquivo —
+  nunca funcionou: a leitura falhava em silêncio e nenhuma senha destravava.
+  O destravamento local cria um override que o long-poll respeita (senão o
+  servidor, ainda `locked`, retravaria em segundos); um comando NOVO de travar
+  anula o override. No nb2, esses valores eram corrigidos em tempo de execução
+  com um `sed -i 16d` — apagar a linha 16 do arquivo, por número.
 - **`/etc/udev/rules.d/99-nb3-usb.rules`**, que dispara
   `/usr/share/mlog/usb-event.sh` quando alguém conecta pendrive, celular
   (MTP/PTP) ou tethering. É udev e não varredura porque o laço de telemetria

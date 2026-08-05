@@ -161,3 +161,46 @@ def test_bulk_tsv_csv(client, admin_key, data_root):
     assert len(lines) == 4
     assert "26spsp,True,nb3i_" in lines[1]
     assert lines[3].startswith("ruim id,False")
+
+
+# --- a licença do CLion -------------------------------------------------------
+#
+# No nb2 ela ficava num /secret/ público. Aqui: credencial de boot, arquivo em
+# data/secret/clion.key (dado, não código — o repositório é público), e as
+# variáveis do stuff só saem quando a chave está instalada. Foram três defeitos
+# empilhados: nada servia o arquivo, NB_CLION_KEY nunca era emitido, e a versão
+# padrão apontava para o diretório do CLion errado.
+
+
+def test_clionkey_exige_chave_de_boot(client, image_with_template, data_root):
+    (data_root / "secret").mkdir(parents=True, exist_ok=True)
+    (data_root / "secret" / "clion.key").write_bytes(b"licenca-de-mentira")
+    assert client.get("/boot/v3/testes3/clionkey").status_code == 401
+    r = client.get("/boot/v3/testes3/clionkey", headers=BK)
+    assert r.status_code == 200
+    assert r.content == b"licenca-de-mentira"
+
+
+def test_clionkey_sem_arquivo_e_404(client, image_with_template):
+    assert client.get("/boot/v3/testes3/clionkey", headers=BK).status_code == 404
+
+
+def test_o_stuff_so_anuncia_o_clion_com_a_chave_instalada(client, image_with_template, data_root):
+    stuff = client.get("/boot/v3/testes3/stuff", headers=BK).text
+    # a linha de EMISSÃO, não qualquer menção: o módulo concatenado no corpo
+    # do stuff sempre contém a string NB_CLION_KEY (é a guarda dele)
+    assert "NB_CLION_KEY='t'" not in stuff
+
+    (data_root / "secret").mkdir(parents=True, exist_ok=True)
+    (data_root / "secret" / "clion.key").write_bytes(b"x")
+    stuff = client.get("/boot/v3/testes3/stuff", headers=BK).text
+    assert "NB_CLION_KEY='t'" in stuff
+    assert "NB_CLION_VERSION='CLion2026.1'" in stuff
+
+
+def test_a_versao_do_clion_vem_do_server_json(client, image_with_template, data_root):
+    (data_root / "secret").mkdir(parents=True, exist_ok=True)
+    (data_root / "secret" / "clion.key").write_bytes(b"x")
+    fsdb.write_json(data_root / "server.json", {"clion": {"version": "CLion2027.2"}})
+    stuff = client.get("/boot/v3/testes3/stuff", headers=BK).text
+    assert "NB_CLION_VERSION='CLion2027.2'" in stuff

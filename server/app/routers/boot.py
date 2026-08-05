@@ -240,6 +240,28 @@ async def usbfile(
     return FileResponse(caminho, media_type="application/octet-stream", filename=name)
 
 
+@router.get("/{image}/clionkey", name="clionkey")
+@router.post("/{image}/clionkey", name="clionkey_post")
+async def clionkey(
+    image: str,
+    request: Request,
+    x_nb_boot_key: str | None = Header(None),
+    key: str | None = Query(None),
+):
+    """A licença do CLion, com credencial de boot.
+
+    No nb2 ela ficava num /secret/ público — licença paga atrás de URL
+    obscura. Aqui só sai para quem tem a chave de boot de uma sede, pelo mesmo
+    caminho do wallpaper. O arquivo é DADO, não código: mora em
+    data/secret/clion.key (o repositório é público, a chave nunca entra nele).
+    """
+    await _autorizar(request, image, x_nb_boot_key, key)
+    caminho = settings.data_root / "secret" / "clion.key"
+    if not caminho.is_file():
+        raise HTTPException(404, "chave do CLion não instalada neste servidor")
+    return FileResponse(caminho, media_type="application/octet-stream")
+
+
 @router.get("/{image}/wallpaper", name="wallpaper")
 @router.post("/{image}/wallpaper", name="wallpaper_post")
 async def wallpaper(

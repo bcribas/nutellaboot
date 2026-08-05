@@ -87,6 +87,7 @@ mandar a chave no corpo; `aria2c` e `curl` usam o cabeçalho.
 | POST | `/boot/v3/{img}/seeders/heartbeat?ip=…` | B | `stuff` (a cada 60 s) | `ok` |
 | POST | `/boot/v3/{img}/seeders/leave?ip=…` | — | `stuff` | `ok` |
 | GET/POST | `/boot/v3/{img}/wallpaper` | B | `stuff` | PNG/JPEG, com `ETag` = md5 |
+| GET/POST | `/boot/v3/{img}/clionkey` | B | `stuff` | a licença do CLion (404 se não instalada no servidor) |
 | GET/POST | `/boot/v3/{img}/lockinfo/{mac}` | B | tela de bloqueio | JSON com time, organização, país e lugar |
 | GET/POST | `/boot/v3/{img}/machines/{mac}/lockstate` | B | tela de bloqueio (a cada 4 s) | `locked` ou `unlocked` |
 | GET/POST | `/boot/v3/{img}/roster/logos/{org}` | B | tela de bloqueio | SVG ou PNG do logotipo |

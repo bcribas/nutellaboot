@@ -13,6 +13,7 @@ import secrets
 import time
 from pathlib import Path
 
+from .. import fsdb
 from ..settings import REPO_ROOT, settings
 from . import config, store
 from . import wallpaper as wp_svc
@@ -118,6 +119,16 @@ def render(image_id: str) -> str:
     ]
     if wp_meta and wp_meta.get("md5"):
         lines.append(f"NB_WALLPAPER_MD5={_sh_quote(wp_meta['md5'])}")
+
+    # A licença do CLion: as variáveis só saem quando a chave está instalada
+    # no servidor (data/secret/clion.key). Antes NB_CLION_KEY não era emitido
+    # por NINGUÉM e o hook do cliente retornava na primeira linha — o CLion
+    # ficou sem licença em produção sem nenhum erro em lugar algum.
+    if (settings.data_root / "secret" / "clion.key").is_file():
+        server_conf = fsdb.read_json(settings.data_root / "server.json", {}) or {}
+        versao = (server_conf.get("clion") or {}).get("version", "CLion2026.1")
+        lines.append("NB_CLION_KEY='t'")
+        lines.append(f"NB_CLION_VERSION={_sh_quote(versao)}")
 
     # o separador é do CAMPO, não global: `60-polkit.sh` percorre
     # NB_HIDE_DOCS_APPS com o IFS padrão, então uma lista de aplicativos

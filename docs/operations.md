@@ -708,10 +708,38 @@ proposital em eventos, para todas as salas ficarem iguais.
 
 Definida no configureitor, guardada apenas como hash (`salt$sha256`) e enviada
 à máquina dentro do `/etc/.nb3`. Digitada na própria tela de bloqueio, ela
-destrava sem depender da rede — útil quando o wifi cai no meio da prova.
+destrava sem depender da rede — útil quando o wifi cai no meio da prova. Quem
+confere é o agente (root), nunca a tela: a senha desce por um FIFO e o hash
+não sai do arquivo de segredos.
 
 A senha é digitada às cegas: a tela não mostra campo de texto. Digite e tecle
-Enter.
+Enter — o teclado numérico também vale. O destravamento local FICA: o estado
+`locked` do servidor não retrava a máquina sozinho. Para retravar, mande o
+comando de travar de novo (hotconfig) — comando novo vale mais que o
+destravamento local.
+
+### A licença do CLion
+
+A chave de licença é DADO, não código: o repositório é público e ela nunca
+entra no git. Instale-a no servidor:
+
+```bash
+install -m 600 clion.key /opt/nutellaboot3/data/secret/clion.key
+```
+
+Com o arquivo presente, o stuff de toda sede passa a anunciar
+`NB_CLION_KEY`/`NB_CLION_VERSION`, e cada máquina baixa a chave no boot pela
+rota autenticada (`/boot/v3/<sede>/clionkey`, com a chave de boot — o
+`/secret/` público do NutellaBoot 2 acabou). A versão padrão é `CLion2026.1`;
+para trocar quando o CLion mudar, sem redeploy:
+
+```bash
+# em data/server.json
+{"clion": {"version": "CLion2027.1"}}
+```
+
+Sem o arquivo, nada quebra: o stuff não anuncia e as máquinas seguem sem
+licença — como qualquer instalação fora da maratona.
 
 ## 4. Durante a prova
 
