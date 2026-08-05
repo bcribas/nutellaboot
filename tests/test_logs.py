@@ -197,3 +197,63 @@ def test_telemetria_invalida_e_recusada(client, imagem):
     rota = f"/api/v1/site-images/sala1/machines/{MAC}/status"
     assert client.post(rota, content=b"nao e json", headers=h).status_code == 400
     assert client.post(rota, content=b"[1,2,3]", headers=h).status_code == 400
+
+
+# --- a série da máquina (os gráficos do duplo clique no hotconfig) ---
+
+
+ROTA_SAMPLES = f"/api/v1/site-images/sala1/machines/{MAC}/samples"
+
+
+def _planta_amostras(n, passo=45, base=None):
+    import json as _json
+    import time as _time
+
+    from server.app.services import samples
+
+    base = base or (_time.time() - n * passo)
+    for i in range(n):
+        linha = {"t": int(base + i * passo), "mem": 30 + (i % 40), "ld": round(0.5 + (i % 8) / 2, 2),
+                 "sw": 0 if i % 5 else 120, "hd": 20 + (i % 60)}
+        samples.append_capped(
+            samples.machine_dir("sala1", MAC) / samples.ARQUIVO,
+            _json.dumps(linha, separators=(",", ":")) + "\n",
+            cap=samples.POR_MAQUINA,
+        )
+
+
+def test_a_rota_devolve_a_janela(client, imagem, ha):
+    _planta_amostras(20)
+    r = client.get(ROTA_SAMPLES, headers=ha)
+    assert r.status_code == 200
+    corpo = r.json()
+    assert len(corpo["points"]) == 20
+    assert corpo["truncated"] is False
+    assert {"t", "mem", "ld", "sw", "hd"} <= set(corpo["points"][0])
+
+    meio = corpo["points"][10]["t"]
+    r = client.get(f"{ROTA_SAMPLES}?since={meio}", headers=ha)
+    assert all(p["t"] >= meio for p in r.json()["points"])
+    r = client.get(f"{ROTA_SAMPLES}?until={meio}", headers=ha)
+    assert all(p["t"] <= meio for p in r.json()["points"])
+
+
+def test_o_downsample_tem_teto(client, imagem, ha):
+    from server.app.routers.machines import MAX_AMOSTRAS
+
+    _planta_amostras(MAX_AMOSTRAS * 3)
+    corpo = client.get(ROTA_SAMPLES, headers=ha).json()
+    assert len(corpo["points"]) == MAX_AMOSTRAS
+    ts = [p["t"] for p in corpo["points"]]
+    assert ts == sorted(ts), "o downsample preserva a ordem"
+
+
+def test_o_dono_da_imagem_le_a_serie(client, imagem):
+    _planta_amostras(3)
+    tk = imagem["token"]
+    r = client.get(ROTA_SAMPLES, headers={"Authorization": f"Bearer {tk}"})
+    assert r.status_code == 200, "o token nb3i_ do hotconfig serve"
+
+
+def test_a_serie_exige_credencial(client, imagem):
+    assert client.get(ROTA_SAMPLES).status_code == 401

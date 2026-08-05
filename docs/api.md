@@ -400,6 +400,14 @@ acima de 256 kB a resposta é **413**.
 |---|---|---|---|---|
 | POST | `/api/v1/site-images/{img}/machines/{mac}/logs?origem=` | M | `text/plain`, até 1 MiB | `{ok, stored, at}` |
 | GET | `/api/v1/site-images/{img}/machines/{mac}/logs?tail=500` | C, I, S`machines:read` | — | `{bytes, journal, acks}` |
+| GET | `/api/v1/site-images/{img}/machines/{mac}/samples?since=&until=` | C, I, S`machines:read` | — | `{mac, points, truncated}` |
+
+Os `points` são a série que o `samples.jsonl` guarda por máquina (uma amostra
+por telemetria, ~45 s): `t` epoch, `mem` % de RAM, `ld` load1, `sw` MB de
+swap, `hd` % do `/home`. A resposta tem teto de 400 pontos (janela longa sai
+com passo maior); `truncated` avisa que o arquivo já chegou ao cap de 2 MiB e
+o começo mais antigo foi descartado. É o que alimenta os gráficos do duplo
+clique no hotconfig.
 
 O agente manda o journal do boot na partida e, a cada 5 minutos, só o que
 apareceu desde o envio anterior (usando `journalctl --cursor-file`, que não

@@ -124,6 +124,37 @@ async def get_logs(
     }
 
 
+# o teto do payload de série: 24 h a 45 s são ~1900 amostras, e ninguém
+# distingue isso numa tela — o mesmo passo-inteiro do labs_series
+MAX_AMOSTRAS = 400
+
+
+@router.get("/site-images/{image}/machines/{mac}/samples")
+async def get_samples(
+    image: str,
+    mac: str,
+    since: float = Query(0, ge=0),
+    until: float = Query(0, ge=0),
+    p=Depends(auth.require_image_access(service_scope="machines:read")),
+) -> dict:
+    """A série da máquina para os gráficos do console — o que o
+    `samples.jsonl` guarda (mem %, load1, swap MB, /home %)."""
+    from ..services import samples
+
+    mac = m.normalize_mac(mac)
+    pontos = samples.series(image, mac, since, until)
+    if len(pontos) > MAX_AMOSTRAS:
+        passo = len(pontos) / MAX_AMOSTRAS
+        pontos = [pontos[int(i * passo)] for i in range(MAX_AMOSTRAS)]
+    return {
+        "mac": mac,
+        "points": pontos,
+        # o cap por máquina já descartou a metade antiga pelo menos uma vez:
+        # a tela avisa que o começo do intervalo pode não existir mais
+        "truncated": samples.foi_truncado(image, mac),
+    }
+
+
 @router.post("/site-images/{image}/machines/{mac}/events")
 async def post_event(
     image: str, mac: str, body: dict, x_nb_machine_key: str | None = Header(None)

@@ -214,3 +214,13 @@
 }
 
 .confirma input { width: 8ch; font-size: 18px; text-align: center; }
+
+/* --- os gráficos do duplo clique ------------------------------------------ */
+.gtempo { margin: 10px 0 4px; }
+.gtempo svg { width: 100%; display: block; }
+.gtick { font-size: 10px; fill: var(--muted); }
+.gcab { display: flex; justify-content: space-between; font-size: 12px; }
+.gleg span { margin-right: 10px; }
+.gval b { margin-left: 8px; font-variant-numeric: tabular-nums; }
+.gperiodo { display: flex; gap: 6px; margin: 8px 0; }
+.gperiodo button.on { border-color: var(--accent); color: var(--accent); }

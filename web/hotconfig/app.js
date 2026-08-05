@@ -254,6 +254,76 @@ function render() {
   $("#actionbar").querySelectorAll("button").forEach((b) => (b.disabled = selected.size === 0));
 }
 
+// --- gráfico com eixo do tempo -----------------------------------------------
+//
+// Diferente do gráfico do dashboard (que desenha por índice), aqui o X mapeia
+// o TEMPO: um buraco de máquina desligada vira lacuna na linha (o traço quebra
+// quando duas amostras distam mais de 5 min), não um segmento esticado — e os
+// ticks de hora no eixo dizem de quando é cada trecho. SVG à mão, como tudo
+// aqui: as telas são autocontidas, sem CDN.
+function graficoTempo(pontos, series, maxY, refY, extra) {
+  if (pontos.length < 2) return `<p class="muted">${t("samples_none")}</p>`;
+  const W = 580;
+  const H = 130;
+  const PAD = 6;
+  const HX = 18; // a faixa dos rótulos de hora, abaixo do traçado
+  const t0 = pontos[0].t;
+  const t1 = pontos[pontos.length - 1].t;
+  const dur = Math.max(1, t1 - t0);
+  const x = (tt) => PAD + ((tt - t0) * (W - 2 * PAD)) / dur;
+  const y = (v) => H - PAD - (Math.min(v, maxY) * (H - 2 * PAD)) / maxY;
+  let corpo = "";
+  for (const frac of [0.25, 0.5, 0.75]) {
+    const yy = H - PAD - frac * (H - 2 * PAD);
+    corpo += `<line x1="${PAD}" y1="${yy}" x2="${W - PAD}" y2="${yy}"
+      stroke="var(--line)" stroke-width="1"/>`;
+  }
+  // 5 marcas de tempo; janela maior que um dia ganha o dia junto da hora
+  const comDia = dur > 86400;
+  for (let i = 0; i <= 4; i++) {
+    const tt = t0 + (dur * i) / 4;
+    const xx = PAD + ((W - 2 * PAD) * i) / 4;
+    corpo += `<line x1="${xx}" y1="${PAD}" x2="${xx}" y2="${H - PAD}"
+      stroke="var(--line)" stroke-width="1" stroke-dasharray="2 4"/>`;
+    const dt = new Date(tt * 1000);
+    const hh = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const rot = comDia ? `${dt.getDate()}/${dt.getMonth() + 1} ${hh}` : hh;
+    const anchor = i === 0 ? "start" : i === 4 ? "end" : "middle";
+    corpo += `<text x="${xx}" y="${H + HX - 6}" text-anchor="${anchor}" class="gtick">${rot}</text>`;
+  }
+  if (refY != null && refY > 0 && refY <= maxY) {
+    corpo += `<line x1="${PAD}" y1="${y(refY)}" x2="${W - PAD}" y2="${y(refY)}"
+      stroke="var(--warn)" stroke-width="1" stroke-dasharray="6 4"/>`;
+  }
+  for (const s of series) {
+    let tracado = "";
+    let caneta = false;
+    let tAnt = 0;
+    for (const p of pontos) {
+      const v = p[s.campo];
+      if (v == null) {
+        caneta = false;
+        continue;
+      }
+      const cmd = caneta && p.t - tAnt < 300 ? "L" : "M";
+      tracado += `${cmd}${x(p.t).toFixed(1)} ${y(v).toFixed(1)} `;
+      caneta = true;
+      tAnt = p.t;
+    }
+    corpo += `<path d="${tracado}" fill="none" stroke="${s.cor}"
+      stroke-width="2" stroke-linejoin="round"/>`;
+  }
+  const ult = pontos[pontos.length - 1];
+  const agora = series
+    .filter((s) => ult[s.campo] != null)
+    .map((s) => `<b style="color:${s.cor}">${ult[s.campo]}${s.suf || ""}</b>`)
+    .join(" ");
+  const leg = series.map((s) => `<span style="color:${s.cor}">● ${s.rot}</span>`).join(" ");
+  return `<div class="gtempo"><div class="gcab"><span class="gleg">${leg}${
+    extra ? ` <span class="muted">${extra}</span>` : ""}</span><span class="gval">${agora}</span></div>
+    <svg viewBox="0 0 ${W} ${H + HX}">${corpo}</svg></div>`;
+}
+
 function showDetail(m) {
   const box = document.createElement("div");
   box.className = "detail";
@@ -261,13 +331,59 @@ function showDetail(m) {
   inner.innerHTML = `
     <h2>${teamLabel(m) || t("no_team")} <span class="mono muted">${m.mac}</span></h2>`;
 
-  // Duas abas: o estado de agora (a telemetria) e o histórico (o journal que a
-  // máquina manda a cada 5 minutos). O journal só é buscado quando alguém
-  // clica — são centenas de kB por máquina.
+  // Três abas: os gráficos do período (a leitura útil abre primeiro), o estado
+  // cru de agora (a telemetria) e o histórico (o journal que a máquina manda a
+  // cada 5 minutos). O journal só é buscado quando alguém clica — são centenas
+  // de kB por máquina.
   const abas = document.createElement("div");
   abas.className = "tabs";
   abas.style.cssText = "display:flex;gap:8px;margin:10px 0";
   const painel = document.createElement("div");
+
+  let desdeGraf = 7200; // 0 = tudo o que o samples.jsonl guarda
+  const mostrarGraficos = async () => {
+    painel.innerHTML = `<p class="muted">${t("loading")}</p>`;
+    const since = desdeGraf ? Math.floor(Date.now() / 1000) - desdeGraf : 0;
+    let dd;
+    try {
+      dd = await api.get(
+        `/api/v1/site-images/${api.imageId}/machines/${m.mac}/samples?since=${since}`
+      );
+    } catch (e) {
+      painel.innerHTML = `<p class="muted">${t("error")}: ${e.message}</p>`;
+      return;
+    }
+    const pts = dd.points || [];
+    const cores = m.status?.hwinfo?.cores;
+    const maxLd = Math.max(0, ...pts.map((p) => p.ld ?? 0));
+    const maxSw = Math.max(0, ...pts.map((p) => p.sw ?? 0));
+    const periodos = [[1800, "30 min"], [7200, "2 h"], [18000, "5 h"], [86400, "24 h"], [0, t("period_all")]];
+    painel.innerHTML =
+      `<div class="gperiodo">${periodos
+        .map(([s, r]) =>
+          `<button type="button" class="small${s === desdeGraf ? " on" : ""}" data-desde="${s}">${r}</button>`)
+        .join("")}</div>` +
+      (dd.truncated ? `<p class="muted">${t("samples_truncated")}</p>` : "") +
+      graficoTempo(pts, [
+        { campo: "mem", cor: "#58a6ff", rot: "RAM", suf: "%" },
+        { campo: "hd", cor: "#b78aff", rot: "/home", suf: "%" },
+      ], 100) +
+      graficoTempo(
+        pts,
+        [{ campo: "ld", cor: "#ffa657", rot: "load" }],
+        Math.max(cores || 1, maxLd) * 1.1,
+        cores,
+        cores ? t("chart_cores", { n: cores }) : ""
+      ) +
+      graficoTempo(pts, [{ campo: "sw", cor: "#ff6b6b", rot: "swap", suf: " MB" }],
+        Math.max(64, maxSw));
+    painel.querySelectorAll(".gperiodo button").forEach((b) => {
+      b.onclick = () => {
+        desdeGraf = Number(b.dataset.desde);
+        mostrarGraficos();
+      };
+    });
+  };
 
   const mostrarEstado = () => {
     painel.innerHTML = `<pre>${JSON.stringify(m.status, null, 1)}</pre>`;
@@ -302,7 +418,11 @@ function showDetail(m) {
     }
   };
 
-  for (const [chave, acao] of [["tab_state", mostrarEstado], ["tab_logs", mostrarLogs]]) {
+  for (const [chave, acao] of [
+    ["tab_charts", mostrarGraficos],
+    ["tab_state", mostrarEstado],
+    ["tab_logs", mostrarLogs],
+  ]) {
     const b = document.createElement("button");
     b.className = "small";
     b.textContent =
@@ -317,7 +437,7 @@ function showDetail(m) {
     abas.appendChild(b);
   }
   abas.firstChild.classList.add("on");
-  mostrarEstado();
+  mostrarGraficos();
   inner.append(abas, painel);
 
   const close = document.createElement("button");
