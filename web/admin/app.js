@@ -1277,6 +1277,58 @@ async function retomarSessao() {
   }
 }
 
+// --- a chave compartilhável do dashboard -------------------------------------
+//
+// Uma nb3s_ com o escopo labs:read: lê os agregados da frota e NADA mais —
+// não abre hotconfig (machines:read não é concedido) nem roda comando
+// (require_console recusa serviço). A chave aparece UMA vez; depois só
+// revogar e criar outra.
+
+async function carregarChavesDash() {
+  const box = $("#sharelist");
+  if (!box) return;
+  try {
+    const d = await api.get("/api/v1/service-keys", A);
+    const dash = (d.service_keys || []).filter((k) => (k.scopes || []).includes("labs:read"));
+    box.innerHTML = "";
+    for (const k of dash) {
+      const linha = document.createElement("div");
+      linha.className = "muted";
+      linha.style.cssText = "display:flex;gap:10px;align-items:center;font-size:13px;margin-top:4px";
+      linha.innerHTML = `<span class="mono">${k.name}</span>`;
+      const rev = document.createElement("button");
+      rev.className = "small";
+      rev.textContent = t("dash_share_revoke");
+      rev.onclick = async () => {
+        await api.del(`/api/v1/service-keys/${encodeURIComponent(k.name)}`, A);
+        carregarChavesDash();
+      };
+      linha.appendChild(rev);
+      box.appendChild(linha);
+    }
+  } catch (e) {
+    /* sem a lista, o botão de criar continua funcionando */
+  }
+}
+
+async function criarChaveDash() {
+  const nome = `dashboard-${new Date().toISOString().slice(0, 10)}-${Math.random().toString(36).slice(2, 6)}`;
+  try {
+    const d = await api.post(
+      "/api/v1/service-keys",
+      { name: nome, scopes: ["labs:read"], images: [] },
+      A
+    );
+    const url = `${location.origin}/dashboard/?tk=${d.key}`;
+    $("#shareout").classList.remove("hidden");
+    $("#shareurl").value = url;
+    $("#shareurl").select();
+    carregarChavesDash();
+  } catch (e) {
+    toast(`${t("error")}: ${e.message}`, true);
+  }
+}
+
 async function main() {
   await init($("#lang"));
   $("#enter").onclick = enter;
@@ -1291,6 +1343,7 @@ async function main() {
   $("#lay_build").onclick = buildLayerFromTemplate;
   $("#layi_build").onclick = buildLayerForImage;
   $("#usb_build").onclick = buildGenericUsb;
+  $("#sharedash").onclick = criarChaveDash;
   $("#pub_retry").onclick = async () => {
     const r = await api.post("/api/v1/publish/retry", {}, A);
     toast(`${r.ok}/${r.retried}`);
@@ -1323,6 +1376,7 @@ async function main() {
     if (modelos.length) renderModels();
   });
   await retomarSessao();
+  if (eu && ehAdmin()) carregarChavesDash();
 }
 
 main();

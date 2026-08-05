@@ -41,7 +41,15 @@
       <p class="help muted" data-i18n="fleet_card_help"></p>
       <div class="actions">
         <a class="btn primary" href="/laboratorios/" data-i18n="fleet_card_go"></a>
+        <a class="btn" href="/dashboard/" target="_blank" rel="noopener" data-i18n="fleet_dashboard"></a>
+        <button type="button" class="btn" id="sharedash" data-i18n="dash_share_make"></button>
       </div>
+      <p class="help muted" data-i18n="dash_share_help"></p>
+      <div id="shareout" class="hidden">
+        <input type="text" id="shareurl" readonly style="width:100%;font-family:ui-monospace,monospace">
+        <p class="help muted" data-i18n="dash_share_once"></p>
+      </div>
+      <div id="sharelist"></div>
     </div>
 
     <div class="card">

@@ -426,4 +426,4 @@ def test_o_overlay_do_zoom_respeita_o_hidden():
     autor (o flex do overlay) ganha dele. O overlay nasceu visível em produção
     e o fechar não fechava — o JS setava hidden e o CSS mantinha a tela."""
     css = (REPO / "web" / "dashboard" / "dash.css").read_text(encoding="utf-8")
-    assert ".zoom[hidden]" in css
+    assert "[hidden]" in css and "!important" in css

@@ -11,15 +11,23 @@ import { init, t, apply } from "/common/i18n.js";
 const $ = (s) => document.querySelector(s);
 
 const RITMO_MS = 30000; // decisão de produto: telão ligado o dia inteiro
-const JANELA = 240; // pontos guardados = ~2 h a 30 s
 
 let sites = [];
-// cada ponto: {t, online, mem, cpu}
-const serie = [];
-// a mesma janela, POR SEDE: é o histórico que o zoom mostra — acumulado aqui,
-// enquanto a tela fica aberta, sem nenhum I/O de série no servidor
-const seriePorSede = new Map();
+// a série vem do SERVIDOR (/labs/series, um ponto por minuto): sobrevive ao
+// F5 e recorta por período — "só a competição importa"
+let serieFrota = [];
 let ultimaBusca = 0;
+// desde quando olhar: predefinição (segundos para trás) ou horário absoluto
+// (epoch). Vive na URL — recarregar ou compartilhar o link preserva o recorte.
+let desdeRel = 7200;
+let desdeAbs = 0;
+// modo compartilhado: com ?tk= na URL a tela é só-leitura de verdade — a
+// chave não tem machines:read (o zoom não busca máquinas) nem abre hotconfig
+const compartilhado = Boolean(new URLSearchParams(location.search).get("tk"));
+
+function desdeEpoch() {
+  return desdeAbs || Math.floor(Date.now() / 1000) - desdeRel;
+}
 let zoomAberto = null; // id da sede com o zoom aberto
 let zoomTimer = null;
 let vista = "geral";
@@ -138,12 +146,12 @@ function render() {
 
   // gráficos
   $("#g-online").innerHTML = grafico(
-    serie,
+    serieFrota,
     [{ campo: "online", cor: "var(--serie1)" }],
     Math.max(10, totais.m)
   );
   $("#g-res").innerHTML = grafico(
-    serie,
+    serieFrota,
     [
       { campo: "mem", cor: "var(--serie1)", suf: "%" },
       { campo: "cpu", cor: "var(--serie2)", suf: "%" },
@@ -211,37 +219,72 @@ function mediaFrota(campo) {
   return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
 }
 
+async function buscarSerie() {
+  try {
+    const d = await api.get(`/api/v1/labs/series?since=${desdeEpoch()}`);
+    serieFrota = d.points || [];
+  } catch (e) {
+    return;
+  }
+  render();
+}
+
 async function buscar() {
   try {
-    const d = await api.get("/api/v1/labs?dias=1", { kind: "admin" });
+    const d = await api.get("/api/v1/labs?dias=1");
     sites = d.sites || [];
   } catch (e) {
     $("#updated").textContent = `${t("error")}: ${e.message}`;
     return;
   }
   ultimaBusca = Date.now();
-  serie.push({
-    t: ultimaBusca,
-    online: sites.reduce((a, s) => a + s.online, 0),
-    mem: mediaFrota("mem_avg"),
-    cpu: mediaFrota("cpu_avg"),
-  });
-  if (serie.length > JANELA) serie.shift();
-  for (const s of sites) {
-    if (!seriePorSede.has(s.id)) seriePorSede.set(s.id, []);
-    const hist = seriePorSede.get(s.id);
-    hist.push({
-      t: ultimaBusca,
-      online: s.online,
-      mem: s.res?.mem_avg ?? null,
-      cpu: s.res?.cpu_avg ?? null,
-    });
-    if (hist.length > JANELA) hist.shift();
-  }
   render();
 }
 
 // --- as visões de inventário -------------------------------------------------
+
+// A rosca: a ÚNICA pizza do sistema, porque é o único caso onde ela é a
+// leitura certa — parte-de-um-todo com poucas fatias (≤5 faixas de RAM).
+// Ranking e comparação ficam em barras, que são mais precisas para ordenar.
+const CORES_ROSCA = ["var(--serie1)", "var(--serie2)", "var(--serie3)", "var(--ok)", "var(--warn)"];
+
+function rosca(fatias, totalRotulo) {
+  const total = fatias.reduce((a, [, n]) => a + n, 0);
+  if (!total) return `<p class="dsub">${t("dash_inv_none")}</p>`;
+  const R = 80;
+  const r = 52;
+  const C = 95;
+  let ang = -Math.PI / 2;
+  let paths = "";
+  for (const [i, [, n]] of fatias.entries()) {
+    const frac = n / total;
+    const a2 = ang + frac * 2 * Math.PI;
+    const grande = frac > 0.5 ? 1 : 0;
+    const x1 = C + R * Math.cos(ang);
+    const y1 = C + R * Math.sin(ang);
+    const x2 = C + R * Math.cos(a2);
+    const y2 = C + R * Math.sin(a2);
+    const xi2 = C + r * Math.cos(a2);
+    const yi2 = C + r * Math.sin(a2);
+    const xi1 = C + r * Math.cos(ang);
+    const yi1 = C + r * Math.sin(ang);
+    paths += `<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)}
+      A ${R} ${R} 0 ${grande} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}
+      L ${xi2.toFixed(1)} ${yi2.toFixed(1)}
+      A ${r} ${r} 0 ${grande} 0 ${xi1.toFixed(1)} ${yi1.toFixed(1)} Z"
+      fill="${CORES_ROSCA[i % CORES_ROSCA.length]}"/>`;
+    ang = a2;
+  }
+  const svg = `<svg viewBox="0 0 190 190">${paths}
+    <text x="${C}" y="${C - 2}" text-anchor="middle" class="rosca-centro">${total}</text>
+    <text x="${C}" y="${C + 16}" text-anchor="middle" class="rosca-centro-sub">${totalRotulo}</text></svg>`;
+  const leg = fatias
+    .map(([nome, n], i) =>
+      `<span><i class="quad" style="background:${CORES_ROSCA[i % CORES_ROSCA.length]}"></i>
+       ${nome} — <b>${n}</b> (${Math.round((100 * n) / total)}%)</span>`)
+    .join("");
+  return `${svg}<div class="rosca-leg">${leg}</div>`;
+}
 
 function hbarra(rotulo, valor, maximo, texto) {
   const pct = maximo > 0 ? Math.round((100 * valor) / maximo) : 0;
@@ -257,8 +300,18 @@ function renderInventario() {
   $("#inv-cpus").innerHTML = inv.processors
     .map(([nome, n]) => hbarra(nome, n, maxCpu))
     .join("") || `<p class="dsub">${t("dash_inv_none")}</p>`;
-  const maxRam = Math.max(1, ...inv.ram.map(([, n]) => n));
-  $("#inv-ram").innerHTML = inv.ram.map(([faixa, n]) => hbarra(faixa, n, maxRam)).join("");
+  $("#inv-ram").innerHTML = rosca(inv.ram, t("dash_hw_machines"));
+
+  const hw = inv.sites_hw || [];
+  const maxRamAvg = Math.max(1, ...hw.map((s) => s.ram_avg_mb));
+  const linhaHw = (s, cls) =>
+    `<div class="hbarra"><span class="hrot">${s.site}</span>
+      <span class="htrilho"><i class="${cls}" style="width:${Math.round((100 * s.ram_avg_mb) / maxRamAvg)}%"></i></span>
+      <span class="hval">${(s.ram_avg_mb / 1024).toFixed(1)}G${s.cores_avg ? ` · ${s.cores_avg}c` : ""}</span></div>`;
+  $("#inv-melhores").innerHTML = hw.slice(0, 5).map((s) => linhaHw(s, "top")).join("")
+    || `<p class="dsub">${t("dash_inv_none")}</p>`;
+  $("#inv-piores").innerHTML = hw.slice(-5).reverse().map((s) => linhaHw(s, "bottom")).join("")
+    || `<p class="dsub">${t("dash_inv_none")}</p>`;
 
   const maxEd = Math.max(1, ...inv.editors_now.map(([, n]) => n));
   $("#inv-ed-agora").innerHTML = inv.editors_now
@@ -286,7 +339,7 @@ function renderInventario() {
 
 async function buscarInventario() {
   try {
-    inventario = await api.get("/api/v1/labs/inventory", { kind: "admin" });
+    inventario = await api.get("/api/v1/labs/inventory");
   } catch (e) {
     return;
   }
@@ -322,6 +375,21 @@ function piorDe(m) {
   return Math.max(mem, cpu, hd, (res.swap_used_mb || 0) > 0 ? 90 : 0);
 }
 
+let serieZoom = [];
+
+async function buscarSerieZoom() {
+  if (!zoomAberto) return;
+  try {
+    const d = await api.get(
+      `/api/v1/labs/series?site=${encodeURIComponent(zoomAberto)}&since=${desdeEpoch()}`
+    );
+    serieZoom = d.points || [];
+  } catch (e) {
+    serieZoom = [];
+  }
+  renderZoomCabecalho();
+}
+
 function renderZoomCabecalho() {
   const s = sites.find((x) => x.id === zoomAberto);
   if (!s) return;
@@ -329,7 +397,7 @@ function renderZoomCabecalho() {
   $("#z-name").textContent = s.fullname || "";
   $("#z-counts").textContent = `${s.online}/${s.machines} · ${s.alerts} ${t("dash_alerts")}`;
   $("#z-graf").innerHTML = grafico(
-    seriePorSede.get(s.id) || [],
+    serieZoom,
     [
       { campo: "mem", cor: "var(--serie1)", suf: "%" },
       { campo: "cpu", cor: "var(--serie2)", suf: "%" },
@@ -391,10 +459,20 @@ async function renderZoomMaquinas() {
 
 function abrirZoom(id) {
   zoomAberto = id;
+  serieZoom = [];
   $("#zoom").hidden = false;
-  $("#z-hot").href = `/hotconfig/?id=${encodeURIComponent(id)}`;
   $("#z-maquinas").innerHTML = "";
   renderZoomCabecalho();
+  buscarSerieZoom();
+  if (compartilhado) {
+    // a chave compartilhada não tem machines:read (e é assim de propósito):
+    // o zoom mostra o gráfico e os alertas do resumo, e nada de hotconfig
+    $("#z-hot").hidden = true;
+    $("#z-maquinas").innerHTML = `<p class="dsharenote">${t("dash_shared_note")}</p>`;
+    return;
+  }
+  $("#z-hot").hidden = false;
+  $("#z-hot").href = `/hotconfig/?id=${encodeURIComponent(id)}`;
   renderZoomMaquinas();
   // mais fino que os 30 s da frota: para UMA sede a chamada é barata
   zoomTimer = setInterval(renderZoomMaquinas, 10000);
@@ -414,9 +492,50 @@ function relogio() {
   }
 }
 
+function aplicarDesdeNaUrl() {
+  const u = new URL(location.href);
+  if (desdeAbs) u.searchParams.set("since", String(desdeAbs));
+  else u.searchParams.delete("since");
+  history.replaceState(null, "", u);
+}
+
+function montarPeriodo() {
+  const abs = new URLSearchParams(location.search).get("since");
+  if (abs && Number(abs) > 0) {
+    desdeAbs = Number(abs);
+    const dt = new Date(desdeAbs * 1000);
+    dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
+    $("#desde-abs").value = dt.toISOString().slice(0, 16);
+    for (const b of document.querySelectorAll(".dtempo button")) b.classList.remove("on");
+  }
+  for (const b of document.querySelectorAll(".dtempo button")) {
+    b.onclick = () => {
+      desdeRel = Number(b.dataset.desde);
+      desdeAbs = 0;
+      $("#desde-abs").value = "";
+      for (const x of document.querySelectorAll(".dtempo button")) {
+        x.classList.toggle("on", x === b);
+      }
+      aplicarDesdeNaUrl();
+      buscarSerie();
+      buscarSerieZoom();
+    };
+  }
+  $("#desde-abs").onchange = () => {
+    const v = $("#desde-abs").value;
+    if (!v) return;
+    desdeAbs = Math.floor(new Date(v).getTime() / 1000);
+    for (const b of document.querySelectorAll(".dtempo button")) b.classList.remove("on");
+    aplicarDesdeNaUrl();
+    buscarSerie();
+    buscarSerieZoom();
+  };
+}
+
 async function main() {
   await init(null);
   apply(document);
+  montarPeriodo();
   $("#z-close").onclick = fecharZoom;
   $("#zoom").onclick = (e) => {
     if (e.target === $("#zoom")) fecharZoom();
@@ -428,8 +547,10 @@ async function main() {
     b.onclick = () => trocarVista(b.dataset.vista);
   }
   await buscar();
+  buscarSerie();
   buscarInventario();
   setInterval(buscar, RITMO_MS);
+  setInterval(buscarSerie, RITMO_MS);
   setInterval(buscarInventario, INV_MS);
   setInterval(relogio, 1000);
   relogio();

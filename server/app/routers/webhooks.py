@@ -39,6 +39,9 @@ ESCOPOS = [
     "roster:read",
     "roster:write",
     "config:write",
+    # leitura dos agregados da frota (/labs*): é a chave compartilhável do
+    # dashboard — não abre hotconfig (exige machines:read) nem comanda
+    "labs:read",
 ]
 
 

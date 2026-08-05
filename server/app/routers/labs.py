@@ -15,11 +15,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from .. import auth
-from ..services import fleet_report, labs, ownership, store
+from ..services import fleet_report, labs, labs_series, ownership, store
 from ..services import machines as m
 from .machines import comandos_bloqueados, publicar_evento
 
 router = APIRouter(prefix="/api/v1")
+
+
+def _principal_da_frota(request: Request, tk: str = ""):
+    """Quem pode LER a frota: console (admin/sub-admin) e a chave de serviço
+    com `labs:read` — a chave compartilhável do dashboard. Ela nunca chega a
+    comando (require_console recusa serviço) nem ao hotconfig (machines exige
+    `machines:read`, que não é concedido) — só leitura de agregados."""
+    p = auth.principal_de_link(request, tk)
+    if p is None:
+        raise HTTPException(401, "credencial ausente ou inválida")
+    if p.kind in ("admin", "subadmin"):
+        return p
+    if p.kind == "service" and "labs:read" in p.scopes:
+        return p
+    raise HTTPException(401, "credencial ausente ou inválida")
 
 
 @router.get("/labs")
@@ -27,6 +42,7 @@ async def visao_geral(
     request: Request,
     dias: float = Query(labs.DIAS_PADRAO, ge=0, le=3650),
     format: str = Query("json", pattern="^(json|csv)$"),
+    tk: str = Query(""),
 ):
     """Uma linha por sede: quantas máquinas, quantas ativas na janela, quantas
     apareceram nela, e o estado de agora.
@@ -45,9 +61,7 @@ async def visao_geral(
     de outro site não lê a resposta. O `POST /commands` continua exigindo o
     cabeçalho, e é o que importa: lá se desliga a frota.
     """
-    p = auth.principal_de_link(request)
-    if p is None or p.kind not in ("admin", "subadmin"):
-        raise HTTPException(401, "credencial ausente ou inválida")
+    p = _principal_da_frota(request, tk)
     linhas = labs.resumo(p, dias=dias)
     if format == "csv":
         return PlainTextResponse(
@@ -121,16 +135,37 @@ async def comandar_frota(body: dict, p=Depends(auth.require_console)) -> dict:
     }
 
 
+@router.get("/labs/series")
+async def serie_da_frota(
+    request: Request,
+    since: float = Query(0, ge=0),
+    until: float = Query(0, ge=0),
+    site: str = Query(""),
+    tk: str = Query(""),
+) -> dict:
+    """O histórico da frota (ou de uma sede, com `site=`), gravado pelo
+    servidor a um ponto por minuto. `since`/`until` recortam — "só o período
+    da competição importa". A resposta tem teto de pontos (downsample).
+
+    Aceita a chave compartilhada (`labs:read`) por `?tk=` ou Bearer, além do
+    console. A visibilidade filtra os pontos, e o total é recalculado do
+    subconjunto — o total bruto vazaria a contagem das sedes alheias.
+    """
+    p = _principal_da_frota(request, tk)
+    try:
+        pontos = labs_series.serie(p, since=since, until=until, site=site)
+    except KeyError:
+        raise HTTPException(404, "imagem não existe")
+    return {"points": pontos, "site": site or None}
+
+
 @router.get("/labs/inventory")
-async def inventario_da_frota(request: Request) -> dict:
+async def inventario_da_frota(request: Request, tk: str = Query("")) -> dict:
     """De que é feito o parque: processadores, RAM instalada, editores em uso
-    e os discos mais cheios. Console (sub-admin vê só as sedes dele); aceita o
-    cookie sem cabeçalho pela mesma razão do resumo — é GET de leitura para
-    telas que sondam."""
-    p = auth.principal_de_link(request)
-    if p is None or p.kind not in ("admin", "subadmin"):
-        raise HTTPException(401, "credencial ausente ou inválida")
-    return labs.inventario(p)
+    e os discos mais cheios. Console (sub-admin vê só as sedes dele) e a chave
+    compartilhada; aceita o cookie sem cabeçalho pela mesma razão do resumo —
+    é GET de leitura para telas que sondam."""
+    return labs.inventario(_principal_da_frota(request, tk))
 
 
 # --- o relatório da frota ----------------------------------------------------

@@ -443,11 +443,19 @@ que está acontecendo no conjunto, e como ajo num recorte dele".
 |---|---|---|---|---|
 | GET | `/api/v1/labs` | C | `?dias=7` e `?format=csv` | `{sites:[{id, fullname, machines, active, new, online, locked, alerts, unbound}], days}` |
 | POST | `/api/v1/commands` | C | `{command, targets, args?, delay?}` | `{results, machines, failed}` |
-| GET | `/api/v1/labs/inventory` | C | — | de que é feito o parque: `{machines, processors, ram, editors_now, editors_minutes, disks, disks_low}` |
+| GET | `/api/v1/labs/inventory` | C, S`labs:read` | — | de que é feito o parque: `{machines, processors, ram, sites_hw, editors_now, editors_minutes, disks, disks_low}` |
+| GET | `/api/v1/labs/series` | C, S`labs:read` | `?since=&until=&site=` | o histórico da frota (1 ponto/min, com teto de pontos): `{points:[{t, online, mem, cpu, alerts}]}` |
 
 `targets` é `{sede: "all"}` ou `{sede: [macs]}`, misturando os dois à vontade.
 Cada sede vira uma entrada em `results` — com `command_id` e `machines`, ou com
 `error` e `status`.
+
+As rotas de leitura da frota (`/labs`, `/labs/inventory`, `/labs/series`)
+aceitam também a **chave de serviço com escopo `labs:read`** — é a chave
+compartilhável do dashboard, por `?tk=` na URL ou Bearer. Ela só lê agregados:
+não abre hotconfig (o painel exige `machines:read`, que não é concedido) nem
+roda comando (as rotas de comando exigem console). A visibilidade respeita os
+globs da chave, e os totais são recalculados do subconjunto visível.
 
 `dias` responde **quantas máquinas de cada sede rodaram nos últimos X dias**, e
 são dois números porque a pergunta tem duas leituras: `active` é quem teve

@@ -741,6 +741,22 @@ para trocar quando o CLion mudar, sem redeploy:
 Sem o arquivo, nada quebra: o stuff não anuncia e as máquinas seguem sem
 licença — como qualquer instalação fora da maratona.
 
+### Compartilhar o dashboard
+
+O `/dashboard/` é a tela de transmissão: placar da frota, mapa de calor por
+região, histórico com recorte de período e as visões de hardware, editores e
+disco. Para pôr num telão ou entregar a um jornalista SEM entregar o console:
+
+1. no `/admin/`, cartão da frota, **Compartilhar dashboard** — sai uma URL
+   pronta (`/dashboard/?tk=nb3s_…`). A chave aparece UMA vez;
+2. a chave só LÊ os agregados: não abre hotconfig, não roda comando, não vê o
+   detalhe por máquina no zoom;
+3. para trocar, **Revogar** e criar outra — a URL antiga morre na hora.
+
+O seletor de período ("30 min · 2 h · 5 h · 24 h · desde…") fica na URL:
+`/dashboard/?since=<epoch>` abre já recortado — o link do telão pode apontar
+para o início da prova.
+
 ## 4. Durante a prova
 
 ### O painel do laboratório

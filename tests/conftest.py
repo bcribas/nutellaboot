@@ -1,5 +1,9 @@
+import os
 import sys
 from pathlib import Path
+
+# a suíte cria dezenas de apps; nenhum deles deve ligar o gravador de série
+os.environ.setdefault("NB3_SEM_SERIE", "1")
 
 import pytest
 

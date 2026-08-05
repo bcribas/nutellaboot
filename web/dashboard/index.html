@@ -20,6 +20,15 @@
   <span id="clock" class="dclock"></span>
 </header>
 
+<div class="dtempo">
+  <span class="dsub" data-i18n="dash_since"></span>
+  <button type="button" data-desde="1800">30 min</button>
+  <button type="button" data-desde="7200" class="on">2 h</button>
+  <button type="button" data-desde="18000">5 h</button>
+  <button type="button" data-desde="86400">24 h</button>
+  <input type="datetime-local" id="desde-abs">
+</div>
+
 <section class="placar">
   <div class="bignum"><b id="n-online">–</b><span data-i18n="dash_machines_on"></span></div>
   <div class="bignum"><b id="n-total">–</b><span data-i18n="dash_machines_total"></span></div>
@@ -57,7 +66,11 @@
   <div id="v-hw" hidden>
     <div class="duas">
       <div class="gbox"><h2 data-i18n="dash_hw_cpus"></h2><div id="inv-cpus"></div></div>
-      <div class="gbox"><h2 data-i18n="dash_hw_ram"></h2><div id="inv-ram"></div></div>
+      <div class="gbox"><h2 data-i18n="dash_hw_ram"></h2><div id="inv-ram" class="rosca-caixa"></div></div>
+    </div>
+    <div class="ranking">
+      <div class="gbox"><h2 data-i18n="dash_hw_best"></h2><div id="inv-melhores"></div></div>
+      <div class="gbox"><h2 data-i18n="dash_hw_worst"></h2><div id="inv-piores"></div></div>
     </div>
   </div>
   <div id="v-ed" hidden>

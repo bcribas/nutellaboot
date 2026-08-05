@@ -229,8 +229,11 @@ def inventario(p) -> dict:
     ed_minutos: Counter = Counter()
     discos: list[dict] = []
     maquinas = 0
+    sites_hw: list[dict] = []
     for img in ownership.visible_site_images(p):
         image_id = img["id"]
+        _rams: list[float] = []
+        _cores: list[float] = []
         for mac in m.list_macs(image_id):
             d = m.machine_dir(image_id, mac)
             status = fsdb.read_json(d / "status.json", {}) or {}
@@ -241,6 +244,9 @@ def inventario(p) -> dict:
             ram = hw.get("memtotal_mb")
             if isinstance(ram, (int, float)) and ram > 0:
                 rams[_faixa_ram(ram)] += 1
+                _rams.append(float(ram))
+            if isinstance(hw.get("cores"), (int, float)) and hw["cores"] > 0:
+                _cores.append(float(hw["cores"]))
             ops = status.get("operations") or {}
             for ed in ops.get("editors") or []:
                 ed_agora[str(ed)[:24]] += 1
@@ -263,6 +269,16 @@ def inventario(p) -> dict:
                     "free_mb": int(disco.get("home_free_mb") or 0),
                     "online": online,
                 })
+        if _rams:
+            sites_hw.append({
+                "site": image_id,
+                "machines": len(_rams),
+                "ram_avg_mb": round(sum(_rams) / len(_rams)),
+                "cores_avg": round(sum(_cores) / len(_cores), 1) if _cores else None,
+            })
+    # o ranking melhor × pior por RAM média por máquina — barras, não pizza:
+    # ranking se lê em barras (pizza é só para parte-de-um-todo com poucas fatias)
+    sites_hw.sort(key=lambda x: -x["ram_avg_mb"])
     discos.sort(key=lambda x: -x["pct"])
     inv = {
         "machines": maquinas,
@@ -270,6 +286,7 @@ def inventario(p) -> dict:
         "ram": sorted(rams.items(), key=lambda kv: kv[0]),
         "editors_now": ed_agora.most_common(12),
         "editors_minutes": ed_minutos.most_common(12),
+        "sites_hw": sites_hw,
         "disks": discos[:PIORES_DISCOS],
         "disks_low": sum(1 for x in discos if x["pct"] >= 85),
     }

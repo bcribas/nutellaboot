@@ -92,6 +92,11 @@ can_manage_site_image = can_see_site_image
 def visible_site_images(p: auth.Principal, prefix: str = "") -> list[dict]:
     if is_admin(p):
         return store.list_site_images(prefix)
+    if getattr(p, "kind", "") == "service":
+        # serviço filtra pelos GLOBS da chave, não por dono: o owner de
+        # serviço é "" e o filtro por dono daria tudo-ou-nada errado (a chave
+        # compartilhada do dashboard com images=["26br*"] veria zero sedes)
+        return [i for i in store.list_site_images(prefix) if p.can_see_image(i["id"])]
     return store.list_site_images(prefix, owner=p.owner)
 
 

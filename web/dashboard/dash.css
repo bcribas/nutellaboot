@@ -152,11 +152,12 @@ body.dash main { max-width: none; padding: 0; }
 .regiao .ral { color: var(--bad); }
 
 /* --- o zoom ------------------------------------------------------------- */
-/* O [hidden] precisa vencer o display:flex abaixo: o atributo hidden é só um
-   display:none de USER-AGENT, e qualquer display de autor ganha dele. Sem
-   esta linha o overlay nascia visível e o fechar "não fechava" — o JS setava
-   hidden e o CSS mantinha a tela (visto em produção). */
-.zoom[hidden] { display: none; }
+/* O [hidden] precisa vencer QUALQUER display de autor: o atributo é só um
+   display:none de USER-AGENT. Já mordeu duas vezes nesta página — o overlay
+   que nascia visível (produção) e o botão de hotconfig que o modo
+   compartilhado "escondia" e continuava na tela. Regra geral, com !important,
+   porque a terceira vez viria. */
+body.dash [hidden] { display: none !important; }
 
 .zoom {
   position: fixed;
@@ -259,4 +260,43 @@ body.dash main { max-width: none; padding: 0; }
 .disco-linha .dpct.bad { color: var(--bad); }
 .disco-linha.offline { opacity: 0.5; }
 .ral { color: var(--bad); }
+
+/* a barra de período, estilo painel de monitoramento: predefinições rápidas
+   e o horário absoluto ("a prova começou às 14:00") */
+.dtempo { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.dtempo button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.dtempo button.on { border-color: var(--accent); color: var(--fg); font-weight: 600; }
+.dtempo input {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 13px;
+  color-scheme: dark;
+}
+
+/* a rosca da memória instalada: parte-de-um-todo com poucas fatias — o único
+   lugar onde pizza é a leitura certa */
+.rosca-caixa { display: flex; align-items: center; gap: 22px; }
+.rosca-caixa svg { width: 190px; height: 190px; flex: none; }
+.rosca-centro { font-size: 26px; font-weight: 700; fill: var(--fg); }
+.rosca-centro-sub { font-size: 11px; fill: var(--muted); }
+.rosca-leg { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.rosca-leg .quad { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
+
+/* melhor × pior sede */
+.ranking { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+.ranking .hbarra .htrilho i.top { background: var(--ok); }
+.ranking .hbarra .htrilho i.bottom { background: var(--bad); }
+
+.dsharenote { color: var(--muted); font-size: 13px; }
 

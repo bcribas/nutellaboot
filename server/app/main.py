@@ -1,3 +1,6 @@
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
@@ -61,8 +64,21 @@ class LegacyImagePathMiddleware:
         await self.app(scope, receive, send)
 
 
+@asynccontextmanager
+async def _vida(app: FastAPI):
+    # o gravador da série da frota vive no worker único (invariante 2): um
+    # ponto por minuto para o histórico do dashboard. No lifespan e não no
+    # import: os testes criam apps aos montes e não querem tarefa de fundo.
+    if os.environ.get("NB3_SEM_SERIE") != "1":
+        from .services import labs_series
+
+        labs_series.iniciar()
+    yield
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
+        lifespan=_vida,
         title="NutellaBoot 3",
         version=VERSION,
         description="Sistema de boot em rede da Maratona SBC de Programação",
