@@ -419,3 +419,11 @@ def test_o_dashboard_e_so_leitura_e_o_zoom_abre_no_clique():
     assert "api.post" not in codigo, "comando numa tela de telão"
     assert "abrirZoom" in codigo
     assert 'e.key === "Escape"' in codigo, "Esc precisa fechar o zoom"
+
+
+def test_o_overlay_do_zoom_respeita_o_hidden():
+    """O atributo hidden é um display:none de USER-AGENT: qualquer display de
+    autor (o flex do overlay) ganha dele. O overlay nasceu visível em produção
+    e o fechar não fechava — o JS setava hidden e o CSS mantinha a tela."""
+    css = (REPO / "web" / "dashboard" / "dash.css").read_text(encoding="utf-8")
+    assert ".zoom[hidden]" in css

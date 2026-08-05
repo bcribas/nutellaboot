@@ -152,6 +152,12 @@ body.dash main { max-width: none; padding: 0; }
 .regiao .ral { color: var(--bad); }
 
 /* --- o zoom ------------------------------------------------------------- */
+/* O [hidden] precisa vencer o display:flex abaixo: o atributo hidden é só um
+   display:none de USER-AGENT, e qualquer display de autor ganha dele. Sem
+   esta linha o overlay nascia visível e o fechar "não fechava" — o JS setava
+   hidden e o CSS mantinha a tela (visto em produção). */
+.zoom[hidden] { display: none; }
+
 .zoom {
   position: fixed;
   inset: 0;
