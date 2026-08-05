@@ -52,6 +52,8 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
     `sysresources` e o `cores`, nunca o dict — o payload da sondagem não pode
     crescer com o que o agente resolver mandar. Hoje ele tem ~500 B e a
     leitura custa ~25 ms na frota inteira, dentro do cache de 3 s."""
+    from collections import Counter
+
     agora = time.time()
     total = ativas = novas = online = travadas = alertas = sem_time = 0
     lista_alertas: list[dict] = []
@@ -59,6 +61,7 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
     cpus: list[int] = []
     discos: list[int] = []
     swap_mb = swap_on = 0
+    editores: Counter = Counter()
     for mac in m.list_macs(image_id):
         d = m.machine_dir(image_id, mac)
         info = fsdb.read_json(d / "machine.json", {}) or {}
@@ -97,6 +100,10 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
             hd = (status.get("sysdisk") or {}).get("home_pct")
             if isinstance(hd, (int, float)):
                 discos.append(int(hd))
+            # editores abertos AGORA, só das ligadas: o de uma desligada é o
+            # retrato de antes de morrer, e "agora" não pode contar fantasma
+            for ed in (status.get("operations") or {}).get("editors") or []:
+                editores[str(ed)[:24]] += 1
         if (fsdb.read_json(d / "lockstate.json", {}) or {}).get("locked"):
             travadas += 1
         # o arquivo sempre foi lido INTEIRO e só o len() era aproveitado — foi
@@ -126,6 +133,8 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
         "alerts": alertas,
         "unbound": sem_time,
         "alert_list": lista_alertas[:ALERTAS_NA_LINHA],
+        # teto: o status é livre, mas a linha da sondagem de 5 s não é
+        "editors_now": dict(editores.most_common(10)),
         # agregados O(1) por sede — é o que o dashboard desenha
         "res": {
             "mem_avg": round(sum(mems) / len(mems)) if mems else None,
@@ -208,6 +217,7 @@ def site_existe(image_id: str) -> bool:
 CACHE_INV_SEG = 15.0
 _cache_inv: dict[tuple, tuple[float, dict]] = {}
 PIORES_DISCOS = 20
+AMOSTRA_MULTI = 10
 
 
 def limpar_cache_inventario() -> None:
@@ -227,6 +237,9 @@ def inventario(p) -> dict:
     rams: Counter = Counter()
     ed_agora: Counter = Counter()
     ed_minutos: Counter = Counter()
+    combos: Counter = Counter()
+    multi_amostra: list[dict] = []
+    multi_maquinas = 0
     discos: list[dict] = []
     maquinas = 0
     sites_hw: list[dict] = []
@@ -238,6 +251,8 @@ def inventario(p) -> dict:
             d = m.machine_dir(image_id, mac)
             status = fsdb.read_json(d / "status.json", {}) or {}
             hw = status.get("hwinfo") or {}
+            info = fsdb.read_json(d / "machine.json", {}) or {}
+            online = (agora - info.get("last_seen", 0)) < m.ONLINE_WINDOW
             maquinas += 1
             if hw.get("processor"):
                 cpus[str(hw["processor"])[:60]] += 1
@@ -248,8 +263,26 @@ def inventario(p) -> dict:
             if isinstance(hw.get("cores"), (int, float)) and hw["cores"] > 0:
                 _cores.append(float(hw["cores"]))
             ops = status.get("operations") or {}
-            for ed in ops.get("editors") or []:
-                ed_agora[str(ed)[:24]] += 1
+            # "aberto AGORA" só vale de máquina ligada: o status de uma
+            # desligada é o retrato de antes de morrer
+            abertos = (
+                sorted({str(ed)[:24] for ed in ops.get("editors") or []}) if online else []
+            )
+            for ed in abertos:
+                ed_agora[ed] += 1
+            if len(abertos) > 1:
+                # a chave é o conjunto ORDENADO: ["vim","code"] e
+                # ["code","vim"] são a mesma dupla, não duas
+                multi_maquinas += 1
+                combos[" + ".join(abertos)] += 1
+                if len(multi_amostra) < AMOSTRA_MULTI:
+                    binding = fsdb.read_json(d / "binding.json") or {}
+                    multi_amostra.append({
+                        "site": image_id,
+                        "mac": mac,
+                        "team": binding.get("name", ""),
+                        "editors": abertos,
+                    })
             tempos = ops.get("editors_time")
             if isinstance(tempos, dict):
                 for ed, mins in tempos.items():
@@ -258,9 +291,7 @@ def inventario(p) -> dict:
             disco = status.get("sysdisk") or {}
             hd = disco.get("home_pct")
             if isinstance(hd, (int, float)):
-                info = fsdb.read_json(d / "machine.json", {}) or {}
                 binding = fsdb.read_json(d / "binding.json") or {}
-                online = (agora - info.get("last_seen", 0)) < m.ONLINE_WINDOW
                 discos.append({
                     "site": image_id,
                     "mac": mac,
@@ -286,6 +317,11 @@ def inventario(p) -> dict:
         "ram": sorted(rams.items(), key=lambda kv: kv[0]),
         "editors_now": ed_agora.most_common(12),
         "editors_minutes": ed_minutos.most_common(12),
+        "multi": {
+            "machines": multi_maquinas,
+            "combos": combos.most_common(8),
+            "sample": multi_amostra,
+        },
         "sites_hw": sites_hw,
         "disks": discos[:PIORES_DISCOS],
         "disks_low": sum(1 for x in discos if x["pct"] >= 85),

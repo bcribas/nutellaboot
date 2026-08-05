@@ -3,8 +3,8 @@
 O dashboard precisa responder "como estava desde as 14:00" — e a série
 acumulada no navegador morre no F5 e só existe desde que a tela abriu. Ler os
 samples.jsonl da frota a cada requisição seria O(máquinas) × 2 MiB. Então o
-servidor grava UM ponto por minuto com os agregados por sede: ~2 kB/min na
-frota real, cap de 16 MiB ≈ meses de prova.
+servidor grava UM ponto por minuto com os agregados por sede: ~3,5 kB/min na
+frota real, cap de 32 MiB ≈ uma semana de prova em passo de minuto.
 
 O gravador é uma tarefa asyncio no worker único (invariante 2 é o que torna
 isso simples): um laço, um ponto por vez, sem concorrência de escrita.
@@ -21,7 +21,9 @@ from . import labs, store
 from .logcap import append_capped
 
 ARQUIVO = "serie-frota.jsonl"
-CAP = 16 * 1024 * 1024
+# 32 MiB: o ponto ganhou os editores por sede (~3,5 kB/min na frota real),
+# e o teto guarda ~1 semana de prova em passo de minuto
+CAP = 32 * 1024 * 1024
 INTERVALO = 60
 # a resposta tem teto de pontos: janela longa sai com passo maior (a prática
 # dos painéis de monitoramento — ninguém distingue 5000 pontos numa tela)
@@ -33,19 +35,28 @@ def _path():
 
 
 def gravar_ponto(agora: float | None = None) -> dict:
-    """Um ponto: {t, sites: {id: [online, mem_avg, cpu_avg, alerts]}}."""
+    """Um ponto: {t, sites: {id: [online, mem_avg, cpu_avg, alerts, {ed: n}]}}.
+
+    Os editores ficam POR SEDE, não no total: é o que permite ao `serie()`
+    recortar pela visibilidade de quem pergunta — um total da frota gravado
+    pronto vazaria para sub-admin e chave com glob. Pontos antigos têm a
+    lista com 4 elementos; o 5º é opcional na leitura."""
     agora = agora or time.time()
     desde = agora - 86400  # a janela de "ativas" não importa aqui
     sites = {}
     for img in store.list_site_images():
         r = labs.resumo_de(img["id"], desde=desde)
         # compacto de propósito: 55 sedes × 1440 pontos/dia somam rápido
-        sites[img["id"]] = [
+        v = [
             r["online"],
             r["res"]["mem_avg"],
             r["res"]["cpu_avg"],
             r["alerts"],
         ]
+        ed = dict(sorted(r.get("editors_now", {}).items(), key=lambda kv: -kv[1])[:4])
+        if ed:
+            v.append(ed)
+        sites[img["id"]] = v
     ponto = {"t": int(agora), "sites": sites}
     append_capped(_path(), json.dumps(ponto, separators=(",", ":")), cap=CAP)
     return ponto
@@ -121,11 +132,15 @@ def serie(p, *, since: float = 0, until: float = 0, site: str = "") -> list[dict
                 v = sites.get(site)
                 if v is None:
                     continue
-                pontos.append({"t": t, "online": v[0], "mem": v[1], "cpu": v[2], "alerts": v[3]})
+                p_ = {"t": t, "online": v[0], "mem": v[1], "cpu": v[2], "alerts": v[3]}
+                if len(v) > 4 and v[4]:
+                    p_["ed"] = v[4]
+                pontos.append(p_)
                 continue
             on = al = 0
             mems = []
             cpus = []
+            eds: dict[str, int] = {}
             for sid, v in sites.items():
                 if not ve(sid):
                     continue
@@ -135,13 +150,19 @@ def serie(p, *, since: float = 0, until: float = 0, site: str = "") -> list[dict
                     mems.append(v[1])
                 if v[2] is not None:
                     cpus.append(v[2])
-            pontos.append({
+                if len(v) > 4 and isinstance(v[4], dict):
+                    for ed, n in v[4].items():
+                        eds[ed] = eds.get(ed, 0) + (n or 0)
+            p_ = {
                 "t": t,
                 "online": on,
                 "mem": round(sum(mems) / len(mems)) if mems else None,
                 "cpu": round(sum(cpus) / len(cpus)) if cpus else None,
                 "alerts": al,
-            })
+            }
+            if eds:
+                p_["ed"] = eds
+            pontos.append(p_)
     if len(pontos) > MAX_PONTOS:
         passo = len(pontos) / MAX_PONTOS
         pontos = [pontos[int(i * passo)] for i in range(MAX_PONTOS)]

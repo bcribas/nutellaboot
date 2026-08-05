@@ -104,6 +104,50 @@ def test_o_total_e_recalculado_da_visibilidade(frota):
     assert labs_series.serie(p_admin)[0]["online"] == 8
 
 
+def test_o_ponto_leva_os_editores_por_sede(frota):
+    """O 5º elemento é opcional e POR SEDE — gravado por sede justamente para
+    o recorte de visibilidade poder somar só o que cada um pode ver."""
+    planta_maquina("sala1", "52-54-00-00-00-01")
+    d = m.machine_dir("sala1", "52-54-00-00-00-01")
+    st = fsdb.read_json(d / "status.json", {})
+    st["operations"] = {"editors": ["code", "vim"]}
+    fsdb.write_json(d / "status.json", st)
+    labs.limpar_cache()
+    ponto = labs_series.gravar_ponto()
+    assert ponto["sites"]["sala1"][4] == {"code": 1, "vim": 1}
+    # sede sem editor não paga o campo
+    assert len(ponto["sites"]["dooutro"]) == 4
+
+
+def test_a_serie_soma_editores_so_das_sedes_visiveis(frota):
+    agora = int(time.time())
+    # um ponto antigo (4 elementos, de antes dos editores) no meio: não quebra
+    labs_series.append_capped(
+        labs_series._path(),
+        json.dumps({"t": agora - 60, "sites": {"sala1": [1, 40, 20, 0]}}),
+        cap=labs_series.CAP,
+    )
+    labs_series.append_capped(
+        labs_series._path(),
+        json.dumps({"t": agora, "sites": {
+            "sala1": [3, 40, 20, 0, {"code": 2, "vim": 1}],
+            "dooutro": [5, 90, 80, 0, {"code": 4, "emacs": 2}],
+        }}),
+        cap=labs_series.CAP,
+    )
+    p_admin = auth.Principal("admin", "test")
+    pontos = labs_series.serie(p_admin)
+    assert "ed" not in pontos[0], "ponto antigo segue valendo, sem inventar zero"
+    assert pontos[1]["ed"] == {"code": 6, "vim": 1, "emacs": 2}
+
+    p_sub = auth.Principal(kind="subadmin", name="invite:NB3-AAAA-BBBB")
+    assert labs_series.serie(p_sub)[1]["ed"] == {"code": 4, "emacs": 2}, "só a sede dele"
+
+    # e o modo de UMA sede também entrega
+    pontos = labs_series.serie(p_admin, site="sala1")
+    assert pontos[1]["ed"] == {"code": 2, "vim": 1}
+
+
 def test_site_de_outro_dono_e_404(cliente, frota, ha, admin_key):
     labs_series.append_capped(
         labs_series._path(),

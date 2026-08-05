@@ -10,8 +10,8 @@
 </head>
 <body class="dash">
 <!-- A tela de transmissão: só leitura, nenhum comando — segura para deixar
-     aberta num telão. Os gráficos acumulam na própria tela enquanto ela fica
-     aberta (o servidor não guarda série para isto). -->
+     aberta num telão. Os gráficos vêm da série que o servidor grava por
+     minuto (labs_series), recortada pelo seletor de período. -->
 
 <header class="dhead">
   <h1>Maratona Linux <span class="dsub" data-i18n="dash_title"></span></h1>
@@ -75,8 +75,24 @@
   </div>
   <div id="v-ed" hidden>
     <div class="duas">
-      <div class="gbox"><h2 data-i18n="dash_ed_now"></h2><div id="inv-ed-agora"></div></div>
+      <div class="gbox"><h2 data-i18n="dash_ed_share"></h2><div id="inv-ed-share" class="rosca-caixa"></div></div>
+      <div class="gbox">
+        <h2 data-i18n="dash_ed_serie"></h2>
+        <div id="g-ed"></div>
+        <div class="legenda" id="g-ed-leg"></div>
+      </div>
+    </div>
+    <div class="duas">
+      <div class="gbox"><h2 data-i18n="dash_ed_by_site"></h2><div id="inv-ed-sede"></div></div>
       <div class="gbox"><h2 data-i18n="dash_ed_minutes"></h2><div id="inv-ed-min"></div></div>
+    </div>
+    <div class="duas">
+      <div class="gbox">
+        <h2 data-i18n="dash_ed_multi"></h2>
+        <div class="bignum edmulti"><b id="inv-ed-multi-n">–</b><span data-i18n="dash_ed_multi_machines"></span></div>
+        <div id="inv-ed-combos"></div>
+      </div>
+      <div class="gbox"><h2 data-i18n="dash_ed_multi_sample"></h2><div id="inv-ed-amostra"></div></div>
     </div>
   </div>
   <div id="v-disco" hidden>

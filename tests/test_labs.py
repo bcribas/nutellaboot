@@ -429,6 +429,43 @@ def test_o_inventario_respeita_o_dono(client, frota, ha, data_root):
     assert dict(map(tuple, inv["processors"])) == {"Celeron": 1}
 
 
+def test_o_resumo_conta_editores_so_das_ligadas(client, frota, ha):
+    """O `editors_now` da linha alimenta o "mais usado por sede" do dashboard —
+    e "agora" não pode contar o retrato de uma máquina que já desligou."""
+    planta("sala1", "52-54-00-00-00-01", visto_ha=5)
+    planta("sala1", "52-54-00-00-00-02", visto_ha=5)
+    planta("sala1", "52-54-00-00-00-03", visto_ha=9999)  # offline
+    _status_inv("sala1", "52-54-00-00-00-01", ed=["code"])
+    _status_inv("sala1", "52-54-00-00-00-02", ed=["code", "vim"])
+    _status_inv("sala1", "52-54-00-00-00-03", ed=["emacs"])  # fantasma
+    labs.limpar_cache()
+    linha = next(s for s in client.get("/api/v1/labs", headers=ha).json()["sites"]
+                 if s["id"] == "sala1")
+    assert linha["editors_now"] == {"code": 2, "vim": 1}
+
+
+def test_o_inventario_acha_quem_tem_dois_editores(client, frota, ha):
+    planta("sala1", "52-54-00-00-00-01", visto_ha=5)
+    planta("sala1", "52-54-00-00-00-02", visto_ha=5)
+    planta("sala2", "52-54-00-00-01-01", visto_ha=5)
+    planta("sala2", "52-54-00-00-01-02", visto_ha=9999)  # offline
+    _status_inv("sala1", "52-54-00-00-00-01", ed=["vim", "code"])
+    _status_inv("sala1", "52-54-00-00-00-02", ed=["code", "vim"])  # a MESMA dupla
+    _status_inv("sala2", "52-54-00-00-01-01", ed=["code"])
+    _status_inv("sala2", "52-54-00-00-01-02", ed=["code", "emacs"])  # não conta
+    fsdb.write_json(m.machine_dir("sala1", "52-54-00-00-00-01") / "binding.json",
+                    {"name": "Time 7"})
+    labs.limpar_cache_inventario()
+
+    inv = client.get("/api/v1/labs/inventory", headers=ha).json()
+    mu = inv["multi"]
+    assert mu["machines"] == 2, "a dupla é a mesma nas duas ordens; a desligada fica fora"
+    assert dict(map(tuple, mu["combos"])) == {"code + vim": 2}
+    amostra = {(a["site"], a["mac"]): a for a in mu["sample"]}
+    assert amostra[("sala1", "52-54-00-00-00-01")]["team"] == "Time 7"
+    assert amostra[("sala1", "52-54-00-00-00-02")]["editors"] == ["code", "vim"]
+
+
 def test_o_resumo_agrega_o_disco_das_ligadas(client, frota, ha):
     planta("sala1", "52-54-00-00-00-01", visto_ha=5)
     planta("sala1", "52-54-00-00-00-02", visto_ha=9999)  # offline

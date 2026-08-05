@@ -300,3 +300,9 @@ body.dash [hidden] { display: none !important; }
 
 .dsharenote { color: var(--muted); font-size: 13px; }
 
+
+/* a aba de editores */
+.bignum.edmulti { padding: 4px 0 12px; }
+.bignum.edmulti b { font-size: 40px; }
+#g-ed-leg .quad { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+#g-ed-leg { flex-wrap: wrap; }

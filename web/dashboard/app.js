@@ -1,10 +1,8 @@
 // Dashboard de transmissão: o sistema em funcionamento, para telão.
 //
 // Nenhum comando sai desta tela — só leitura, segura para deixar aberta numa
-// entrevista. A série temporal é acumulada AQUI, enquanto a tela fica aberta:
-// o servidor não guarda histórico para isto (o resumo é um instantâneo
-// cacheado por 3 s), então o gráfico recomeça no F5 — troca justa por zero
-// I/O de série no servidor que atende o boot.
+// entrevista. A série temporal vem do SERVIDOR (services/labs_series.py, um
+// ponto por minuto): sobrevive ao F5 e recorta por período.
 import * as api from "/common/api.js";
 import { init, t, apply } from "/common/i18n.js";
 
@@ -211,7 +209,55 @@ function render() {
   }
   $("#dvazio").hidden = sites.length > 0;
   $("#dvazio").textContent = t("dash_empty");
+  renderSerieEditores();
+  renderEditoresPorSede();
   if (zoomAberto) renderZoomCabecalho();
+}
+
+// --- a aba de editores: o que muda a cada sondagem --------------------------
+
+// uma linha por editor, os 5 mais vistos na JANELA (não só agora: o editor
+// que dominou a manhã aparece mesmo que todos o tenham fechado)
+function renderSerieEditores() {
+  const tot = {};
+  for (const p of serieFrota) {
+    for (const [ed, n] of Object.entries(p.ed || {})) tot[ed] = (tot[ed] || 0) + n;
+  }
+  const top = Object.entries(tot).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([ed]) => ed);
+  if (!top.length) {
+    $("#g-ed").innerHTML = `<p class="dsub">${t("dash_inv_none")}</p>`;
+    $("#g-ed-leg").innerHTML = "";
+    return;
+  }
+  // ponto com série mas sem o editor = ZERO abertos (o dict grava só quem tem
+  // contagem); ponto antigo sem "ed" nenhum = sem dado, e a linha não inventa
+  const pontos = serieFrota.map((p) => {
+    const o = {};
+    for (const ed of top) o["e" + ed] = p.ed ? p.ed[ed] || 0 : null;
+    return o;
+  });
+  const series = top.map((ed, i) => ({ campo: "e" + ed, cor: CORES_ROSCA[i % CORES_ROSCA.length] }));
+  const maxY = Math.max(5, ...pontos.flatMap((p) => series.map((s) => p[s.campo] || 0)));
+  $("#g-ed").innerHTML = grafico(pontos, series, maxY);
+  $("#g-ed-leg").innerHTML = top
+    .map((ed, i) =>
+      `<span><i class="quad" style="background:${CORES_ROSCA[i % CORES_ROSCA.length]}"></i> ${esc(ed)}</span>`)
+    .join(" ");
+}
+
+// o campeão de cada sede, das linhas que a sondagem de 30 s já traz
+function renderEditoresPorSede() {
+  const linhas = sites
+    .map((s) => {
+      const ent = Object.entries(s.editors_now || {}).sort((a, b) => b[1] - a[1]);
+      return ent.length ? { id: s.id, ed: ent[0][0], n: ent[0][1] } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.n - a.n);
+  const max = Math.max(1, ...linhas.map((l) => l.n));
+  $("#inv-ed-sede").innerHTML =
+    linhas.slice(0, 14).map((l) => hbarra(`${l.id} · ${l.ed}`, l.n, max)).join("") ||
+    `<p class="dsub">${t("dash_inv_none")}</p>`;
 }
 
 function mediaFrota(campo) {
@@ -281,16 +327,25 @@ function rosca(fatias, totalRotulo) {
   const leg = fatias
     .map(([nome, n], i) =>
       `<span><i class="quad" style="background:${CORES_ROSCA[i % CORES_ROSCA.length]}"></i>
-       ${nome} — <b>${n}</b> (${Math.round((100 * n) / total)}%)</span>`)
+       ${esc(nome)} — <b>${n}</b> (${Math.round((100 * n) / total)}%)</span>`)
     .join("");
   return `${svg}<div class="rosca-leg">${leg}</div>`;
 }
 
+// os nomes de editor e de time vêm da TELEMETRIA: quem tem a chave de máquina
+// escreve o que quiser ali, e isto aqui é a tela do admin — nada disso entra
+// no innerHTML sem passar por aqui
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 function hbarra(rotulo, valor, maximo, texto) {
   const pct = maximo > 0 ? Math.round((100 * valor) / maximo) : 0;
-  return `<div class="hbarra"><span class="hrot" title="${rotulo}">${rotulo}</span>
+  const rot = esc(rotulo);
+  return `<div class="hbarra"><span class="hrot" title="${rot}">${rot}</span>
     <span class="htrilho"><i style="width:${pct}%"></i></span>
-    <span class="hval">${texto ?? valor}</span></div>`;
+    <span class="hval">${esc(texto ?? valor)}</span></div>`;
 }
 
 function renderInventario() {
@@ -313,10 +368,28 @@ function renderInventario() {
   $("#inv-piores").innerHTML = hw.slice(-5).reverse().map((s) => linhaHw(s, "bottom")).join("")
     || `<p class="dsub">${t("dash_inv_none")}</p>`;
 
-  const maxEd = Math.max(1, ...inv.editors_now.map(([, n]) => n));
-  $("#inv-ed-agora").innerHTML = inv.editors_now
-    .map(([ed, n]) => hbarra(ed, n, maxEd))
-    .join("") || `<p class="dsub">${t("dash_inv_none")}</p>`;
+  // o share em rosca: parte-de-um-todo (editores abertos AGORA) com o teto de
+  // 5 fatias — top 4 + "outros", o mesmo critério da rosca de RAM
+  let fatias = inv.editors_now.slice(0, 4);
+  const resto = inv.editors_now.slice(4).reduce((a, [, n]) => a + n, 0);
+  if (resto > 0) fatias = [...fatias, [t("dash_ed_others"), resto]];
+  $("#inv-ed-share").innerHTML = rosca(fatias, t("dash_ed_open"));
+
+  const mu = inv.multi || { machines: 0, combos: [], sample: [] };
+  $("#inv-ed-multi-n").textContent = mu.machines;
+  const maxCombo = Math.max(1, ...mu.combos.map(([, n]) => n));
+  $("#inv-ed-combos").innerHTML = mu.combos
+    .map(([c, n]) => hbarra(c, n, maxCombo))
+    .join("") || `<p class="dsub">${t("dash_ed_multi_none")}</p>`;
+  $("#inv-ed-amostra").innerHTML = mu.sample.length
+    ? mu.sample
+        .map((m) => `<div class="disco-linha">
+            <span class="dsede">${esc(m.site)}</span>
+            <span class="dquem">${esc(m.team || m.mac)}</span>
+            <span class="dsub">${esc((m.editors || []).join(" + "))}</span></div>`)
+        .join("")
+    : `<p class="dsub">${t("dash_ed_multi_none")}</p>`;
+
   const maxMin = Math.max(1, ...inv.editors_minutes.map(([, n]) => n));
   $("#inv-ed-min").innerHTML = inv.editors_minutes
     .map(([ed, n]) => hbarra(ed, n, maxMin, `${n} min`))
@@ -346,7 +419,10 @@ async function buscarInventario() {
   renderInventario();
 }
 
+const VISTAS = ["geral", "hw", "ed", "disco"];
+
 function trocarVista(nova) {
+  if (!VISTAS.includes(nova)) return;
   vista = nova;
   for (const b of document.querySelectorAll(".dabas button")) {
     b.classList.toggle("on", b.dataset.vista === nova);
@@ -356,6 +432,12 @@ function trocarVista(nova) {
   $("#v-ed").hidden = nova !== "ed";
   $("#v-disco").hidden = nova !== "disco";
   if (nova !== "geral" && !inventario) buscarInventario();
+  // a aba na URL: um telão abre direto na vista certa, e o F5 não volta
+  // para a geral
+  const u = new URL(location.href);
+  if (nova === "geral") u.searchParams.delete("vista");
+  else u.searchParams.set("vista", nova);
+  history.replaceState(null, "", u);
 }
 
 // --- o zoom de uma sede ------------------------------------------------------
@@ -546,6 +628,8 @@ async function main() {
   for (const b of document.querySelectorAll(".dabas button")) {
     b.onclick = () => trocarVista(b.dataset.vista);
   }
+  const vistaUrl = new URLSearchParams(location.search).get("vista");
+  if (vistaUrl) trocarVista(vistaUrl);
   await buscar();
   buscarSerie();
   buscarInventario();
