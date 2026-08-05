@@ -338,10 +338,17 @@ nb_wifi_report() {
     nb_warn "wifi state: $NB_WIFI_STATE"
     [ -n "$_nbr_log" ] && echo "$_nbr_log"
 
+    # O TAMANHO da senha, nunca a senha. É o que denuncia a classe de erro mais
+    # difícil de ver: espaço invisível no fim do campo, ou um caractere a mais
+    # vindo de um copiar-e-colar. Quem está na sala sabe quantos digitou.
+    while IFS="$(printf '\t')" read -r _nbr_s _nbr_p _nbr_f; do
+        [ -n "$_nbr_s" ] || continue
+        nb_warn "wifi.conf asks for '$_nbr_s' (password: ${#_nbr_p} characters)"
+    done < "$NB_RUN/wifi.conf"
+
     # o scan responde a pergunta seguinte sem nenhuma ferramenta extra: o nome
     # aparece? com que segurança? ([WPA2-PSK-CCMP], [WPA3-SAE], [MFPR])
     _nbr_ssids=$(cut -f1 "$NB_RUN/wifi.conf" 2> /dev/null | tr '\n' ' ')
-    nb_warn "wifi.conf asks for: $_nbr_ssids"
     for _nbr_s in $_nbr_ssids; do
         _nbr_seen=$(nb_wpa_cli scan_results | grep -F "	$_nbr_s" | tail -n 1)
         [ -n "$_nbr_seen" ] && nb_warn "seen: $_nbr_seen"

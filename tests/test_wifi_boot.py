@@ -341,6 +341,8 @@ def test_o_relatorio_nunca_imprime_a_senha(sh):
     )
     assert "senha-secretissima" not in out
     assert "Rede" in out, "o NOME da rede ajuda quem está na sala"
+    # o TAMANHO vai, e é o que denuncia espaço invisível no fim do campo
+    assert "password: 18 characters" in out
 
 
 def test_supplicant_que_recusa_o_config_tenta_o_modo_basico(sh):

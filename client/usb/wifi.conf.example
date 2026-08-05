@@ -3,7 +3,7 @@
 # Uma rede por linha, campos separados por TAB:
 #     ssid <TAB> senha <TAB> [hidden]
 #
-# Rede aberta: deixe a senha vazia (dois TABs seguidos).
+# Rede aberta: deixe só o nome da rede na linha.
 # Rede oculta: escreva "hidden" no terceiro campo.
 #
 # A senha do WPA tem de 8 a 63 caracteres (ou 64 hexadecimais, se você tiver a
