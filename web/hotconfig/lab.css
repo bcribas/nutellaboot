@@ -181,3 +181,36 @@
   right: 30px;
   font-size: 14px;
 }
+
+/* o botão que faz o warmup virar prova: destacado, mas não vermelho — vermelho
+   é dos irreversíveis de máquina (reboot/poweroff) */
+.actionbar button.precontest {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+.actionbar button.precontest:hover:not(:disabled) {
+  background: rgba(244, 121, 31, 0.15);
+}
+
+/* a confirmação de dedo pesado do pre-contest: digitar o número de máquinas
+   (mesmo desenho do painel da frota) */
+.confirma {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.confirma .cbox {
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 20px;
+  max-width: 460px;
+}
+
+.confirma input { width: 8ch; font-size: 18px; text-align: center; }

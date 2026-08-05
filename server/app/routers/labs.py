@@ -101,6 +101,12 @@ async def comandar_frota(body: dict, p=Depends(auth.require_console)) -> dict:
             continue
 
         cid = m.enqueue(image, macs, command, str(body.get("args", "")), int(body.get("delay", 0)))
+        # a mesma regra da rota por sede: a trava do precontest só dura se o
+        # servidor gravar o estado — o agente obedece o lockstate do long-poll
+        if command == "precontest":
+            for mac in macs:
+                m.set_lock(image, mac, True, p.name)
+            publicar_evento(image, "machine.locked", {"machines": macs})
         for mac in macs:
             from ..services.notify import notify
 

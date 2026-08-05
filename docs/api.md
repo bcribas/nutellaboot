@@ -537,6 +537,13 @@ Comandos aceitos: `donottouch`, `cantouch`, `cleanhomenow`, `mlreboot`,
 `mlpoweroff`, `disablefirewall`, `enablefirewall`, `resetcontaeditores`,
 `precontest`. Qualquer outro valor é recusado com `400`.
 
+`precontest` é a macro do fim do warmup: numa tacada, limpa as homes, trava as
+telas, zera a contagem de editores e liga o firewall das máquinas alvo. Além de
+enfileirar o comando, o servidor **grava o estado de trava** dessas máquinas —
+sem isso a trava que o agente aplica localmente cairia no ciclo seguinte do
+long-poll, que obedece o lockstate do servidor. Vale também pela rota da frota
+(`POST /api/v1/commands`). Destravar depois é o `unlock` de sempre.
+
 **O cadeado do modelo vale aqui.** Um comando que contradiz um campo `locked`
 do formulário é recusado com **403**, dizendo qual campo — `disablefirewall`
 com `DISABLE_FIREWALL` travado é o caso que existe hoje. A regra é a mesma do

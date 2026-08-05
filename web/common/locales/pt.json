@@ -204,6 +204,8 @@
   "packages": "Pacotes",
   "personal_namespace": "Pessoal",
   "poweroff": "Desligar",
+  "pre_contest": "Pre-contest",
+  "pre_contest_confirm": "Isto prepara {n} máquina(s) para a prova de uma vez: limpa as homes (apaga o trabalho dos times!), trava as telas, zera a contagem de editores e liga o firewall. Para confirmar, digite o número de máquinas:",
   "profile": "Perfil",
   "profile_free": "Livre (o dono edita tudo)",
   "profile_free_short": "Livre",

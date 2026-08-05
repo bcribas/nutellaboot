@@ -204,6 +204,8 @@
   "packages": "Packages",
   "personal_namespace": "Personal",
   "poweroff": "Power off",
+  "pre_contest": "Pre-contest",
+  "pre_contest_confirm": "This prepares {n} machine(s) for the contest in one shot: cleans the home directories (erases the teams' work!), locks the screens, resets the editor counters and enables the firewall. To confirm, type the number of machines:",
   "profile": "Profile",
   "profile_free": "Free (the owner edits everything)",
   "profile_free_short": "Free",

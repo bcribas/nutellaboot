@@ -351,11 +351,48 @@ async function desabilitarComandosBloqueados() {
   }
 }
 
+// A confirmação forte do pre-contest: digitar o número de máquinas, como no
+// painel da frota. Um confirm() de um clique não está à altura de uma ação que
+// apaga o trabalho de todos os times da seleção.
+function confirmarPrecontest(n) {
+  return new Promise((resolve) => {
+    const fundo = document.createElement("div");
+    fundo.className = "confirma";
+    fundo.innerHTML = `<div class="cbox">
+      <h3>${t("pre_contest")}</h3>
+      <p>${t("pre_contest_confirm", { n })}</p>
+      <p><input type="text" inputmode="numeric" id="cnum" autocomplete="off"></p>
+      <div class="actions">
+        <button type="button" class="danger" id="cok" disabled>${t("fleet_confirm_go")}</button>
+        <button type="button" id="ccancel">${t("cancel")}</button>
+      </div></div>`;
+    document.body.appendChild(fundo);
+    const campo = fundo.querySelector("#cnum");
+    const ok = fundo.querySelector("#cok");
+    campo.focus();
+    campo.oninput = () => {
+      ok.disabled = campo.value.trim() !== String(n);
+    };
+    ok.onclick = () => {
+      fundo.remove();
+      resolve(true);
+    };
+    fundo.querySelector("#ccancel").onclick = () => {
+      fundo.remove();
+      resolve(false);
+    };
+  });
+}
+
 async function sendCommand(cmd) {
   const macs = [...selected];
   if (!macs.length) return;
   const label = $(`[data-cmd="${cmd}"]`).textContent;
-  if (!confirm(t("confirm_command", { cmd: label, n: macs.length }))) return;
+  if (cmd === "precontest") {
+    if (!(await confirmarPrecontest(macs.length))) return;
+  } else if (!confirm(t("confirm_command", { cmd: label, n: macs.length }))) {
+    return;
+  }
   try {
     if (cmd === "lock" || cmd === "unlock") {
       await Promise.all(

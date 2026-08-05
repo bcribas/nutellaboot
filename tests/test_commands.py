@@ -207,6 +207,39 @@ def test_lock_sets_state_and_command(client, img, hm, hi):
     assert client.get(f"/boot/v3/testes3/machines/{MAC}/lockstate").text.strip() == "unlocked"
 
 
+def test_precontest_grava_a_trava_no_servidor(client, img, hm, hi):
+    """A macro do fim do warmup inclui travar a tela, e a trava só dura se o
+    SERVIDOR souber dela: o agente obedece o lockstate do long-poll, então o
+    ensure_locked que o comando faz na máquina seria desfeito no ciclo seguinte
+    — travava por segundos e caía, sem ninguém entender."""
+    outro = "52-54-00-99-99-99"
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    client.post(f"/api/v1/site-images/testes3/machines/{outro}/status", json={}, headers=hm)
+
+    r = client.post(
+        "/api/v1/site-images/testes3/commands",
+        json={"command": "precontest", "target": [MAC]},
+        headers=hi,
+    )
+    assert r.status_code == 200, r.text
+    # o alvo trava DE VERDADE (estado no servidor), e só ele
+    assert client.get(f"/boot/v3/testes3/machines/{MAC}/lockstate").text.strip() == "locked"
+    assert client.get(f"/boot/v3/testes3/machines/{outro}/lockstate").text.strip() == "unlocked"
+    # e o comando segue na fila para o agente executar o resto da macro
+    cmds = client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm).json()
+    assert [c["command"] for c in cmds["commands"]] == ["precontest"]
+
+
+def test_comando_comum_nao_mexe_na_trava(client, img, hm, hi):
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    client.post(
+        "/api/v1/site-images/testes3/commands",
+        json={"command": "cleanhomenow", "target": [MAC]},
+        headers=hi,
+    )
+    assert client.get(f"/boot/v3/testes3/machines/{MAC}/lockstate").text.strip() == "unlocked"
+
+
 def test_acks_log_is_capped(data_root, img):
     from server.app.services.logcap import append_capped
 

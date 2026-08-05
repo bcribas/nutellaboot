@@ -369,3 +369,16 @@ def test_todo_arquivo_do_relatorio_tem_rotulo():
         (REPO / "web" / "common" / "locales" / "pt.json").read_text(encoding="utf-8")
     )
     assert not (set(mapa.values()) - set(pt)), "rótulo sem tradução"
+
+
+def test_o_precontest_tem_confirmacao_forte():
+    """A macro apaga o trabalho de todos os times da seleção: um confirm() de
+    um clique não está à altura. O botão existe, e a confirmação exige digitar
+    o número de máquinas — se alguém "simplificar" de volta para o confirm,
+    este teste cai."""
+    html = (REPO / "web" / "hotconfig" / "index.html").read_text(encoding="utf-8")
+    assert 'data-cmd="precontest"' in html
+    js = (REPO / "web" / "hotconfig" / "app.js").read_text(encoding="utf-8")
+    assert "confirmarPrecontest" in js
+    trecho = js.split("async function sendCommand")[1].split("try {")[0]
+    assert 'cmd === "precontest"' in trecho, "o precontest caiu no confirm() simples"

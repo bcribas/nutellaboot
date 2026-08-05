@@ -196,6 +196,18 @@ def test_uma_sede_recusada_nao_para_as_outras(client, frota, ha):
     assert d["failed"] == ["naoexiste"]
 
 
+def test_precontest_pela_frota_tambem_grava_a_trava(client, frota, ha):
+    """A mesma regra da rota por sede: sem o lockstate no servidor, a trava do
+    precontest cai no ciclo seguinte do long-poll."""
+    planta("sala1", "52-54-00-00-00-01", visto_ha=5)
+    planta("sala2", "52-54-00-00-01-01", visto_ha=5)
+    r = _manda(client, ha, command="precontest",
+               targets={"sala1": "all"})
+    assert r.status_code == 200, r.text
+    assert m.get_lock("sala1", "52-54-00-00-00-01")["locked"] is True
+    assert m.get_lock("sala2", "52-54-00-00-01-01")["locked"] is False
+
+
 def test_o_cadeado_do_modelo_vale_aqui_tambem(client, frota, ha, data_root):
     """A mesma regra do painel por sede: reimplementá-la seria a porta ficando
     diferente de novo."""

@@ -300,6 +300,14 @@ async def create_command(
         raise HTTPException(400, "nenhuma máquina alvo")
 
     cid = m.enqueue(image, macs, command, body.get("args", ""), int(body.get("delay", 0)))
+    # `precontest` inclui travar a tela, e a trava só dura se o SERVIDOR souber
+    # dela: o agente obedece o lockstate que vem no long-poll, então o
+    # ensure_locked que o comando faz na máquina seria desfeito no ciclo
+    # seguinte — travava por segundos e caía, sem ninguém entender.
+    if command == "precontest":
+        for mac in macs:
+            m.set_lock(image, mac, True, p.name)
+        publicar_evento(image, "machine.locked", {"machines": macs})
     for mac in macs:
         notify.wake_machine(image, mac)
     publicar_evento(image, "command.sent", {"id": cid, "command": command, "machines": len(macs)})
