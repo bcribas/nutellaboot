@@ -338,13 +338,21 @@ nb_wifi_report() {
     nb_warn "wifi state: $NB_WIFI_STATE"
     [ -n "$_nbr_log" ] && echo "$_nbr_log"
 
-    # O TAMANHO da senha, nunca a senha. É o que denuncia a classe de erro mais
-    # difícil de ver: espaço invisível no fim do campo, ou um caractere a mais
-    # vindo de um copiar-e-colar. Quem está na sala sabe quantos digitou.
+    # O TAMANHO e a IMPRESSÃO DIGITAL da senha, nunca a senha. O tamanho
+    # denuncia caractere a mais; o md5 curto fecha a questão dos BYTES de vez:
+    # quem está na sala roda `printf '%s' 'senha' | md5sum` em qualquer Linux
+    # e compara os 8 primeiros dígitos. Iguais e o AP recusando = a senha que
+    # chegou é a que se queria, e o problema é adiante (driver, firmware, AP).
+    # 8 hex de um md5 não ajudam a quebrar nada.
     while IFS="$(printf '\t')" read -r _nbr_s _nbr_p _nbr_f; do
         [ -n "$_nbr_s" ] || continue
-        nb_warn "wifi.conf asks for '$_nbr_s' (password: ${#_nbr_p} characters)"
+        _nbr_fp=$(printf '%s' "$_nbr_p" | md5sum | cut -c1-8)
+        nb_warn "wifi.conf asks for '$_nbr_s' (password: ${#_nbr_p} chars, fingerprint $_nbr_fp)"
     done < "$NB_RUN/wifi.conf"
+
+    # qual rádio e qual firmware — cada foto de falha passa a dizer o hardware
+    dmesg 2> /dev/null | grep -iE 'mt79|mt76|iwlwifi|ath[0-9]+k|rtw8|brcmfmac|wifi.*firmware' |
+        tail -n 3
 
     # o scan responde a pergunta seguinte sem nenhuma ferramenta extra: o nome
     # aparece? com que segurança? ([WPA2-PSK-CCMP], [WPA3-SAE], [MFPR])
@@ -369,6 +377,41 @@ nb_wifi_report() {
     esac
 }
 
+# Espera a associação completar. Devolve 0 no COMPLETED, 1 no estouro.
+nb_wifi_wait() {
+    _nbw_n=0
+    while [ "$_nbw_n" -lt "${NB_WIFI_TIMEOUT:-30}" ]; do
+        if nb_wpa_cli status | grep -q '^wpa_state=COMPLETED'; then
+            return 0
+        fi
+        sleep 1
+        _nbw_n=$((_nbw_n + 1))
+    done
+    return 1
+}
+
+# Power-save DESLIGADO antes de conectar. Não é otimização: a família MediaTek
+# mt792x (mt7921/mt7922/mt7925) tem histórico documentado de firmware cochilando
+# no meio do 4-way handshake — o AP recusa/reenvia, o cliente desiste, e o
+# supplicant carimba WRONG_KEY com a senha CERTA, em qualquer rede. Foi
+# exatamente o visto numa MT7922 de sala: WRONG_KEY em duas redes WPA2, uma
+# delas um hotspot lançado só para o teste. Upstream chegou a desligar o
+# power-save por padrão no mt7921. Para os demais chips é inócuo.
+nb_wifi_power_off() {
+    iw dev "$NB_WIFI_IFACE" set power_save off 2> /dev/null
+    # runtime-PM do dispositivo, sem depender de ferramenta nenhuma
+    [ -w "$NB_SYS_NET/$NB_WIFI_IFACE/device/power/control" ] &&
+        echo on > "$NB_SYS_NET/$NB_WIFI_IFACE/device/power/control" 2> /dev/null
+    return 0
+}
+
+# nbwifidebug=y na linha de comando do kernel: supplicant em -dd e, na falha,
+# o fim do log no console. Para a sessão de depuração na máquina física,
+# editando a linha do GRUB — sem regravar nada.
+nb_wifi_debug() {
+    grep -q 'nbwifidebug=y' "${NB_CMDLINE:-/proc/cmdline}" 2> /dev/null
+}
+
 # Sobe o wifi e ESPERA a associação completar. O nb2 dava um `sleep 3` cego —
 # tempo insuficiente para handshake WPA2 + DHCP, e o stuff servido ainda por
 # cima deixava de chamar esta função.
@@ -380,6 +423,7 @@ configure_wifi() {
     log_begin_msg "Connecting to wifi on $NB_WIFI_IFACE"
     rfkill unblock all 2> /dev/null
     ip link set "$NB_WIFI_IFACE" up
+    nb_wifi_power_off
     mkdir -p "$NB_WPA_CTRL"
 
     # Um supplicant por interface. A partir da segunda rodada de
@@ -388,34 +432,52 @@ configure_wifi() {
     if nb_wifi_supplicant_vivo; then
         nb_wpa_cli reconfigure > /dev/null
         nb_wpa_cli reassociate > /dev/null
-    elif ! wpa_supplicant -i"$NB_WIFI_IFACE" -c"$NB_WPA_CONF" \
-        -P"$NB_WPA_PID" -B -f "$NB_WPA_LOG"; then
-        # Não subiu: quase sempre é o arquivo que ele não entendeu (um
-        # key_mgmt que este binário não tem compilado invalida o arquivo
-        # INTEIRO). Uma tentativa com o mínimo, e só uma.
-        if [ "$1" != basico ]; then
-            nb_warn "wpa_supplicant refused the config; retrying without WPA3"
-            configure_wifi basico
-            return $?
+    else
+        _nbw_dbg=""
+        nb_wifi_debug && _nbw_dbg="-dd"
+        # shellcheck disable=SC2086
+        if ! wpa_supplicant -i"$NB_WIFI_IFACE" -c"$NB_WPA_CONF" \
+            -P"$NB_WPA_PID" -B -f "$NB_WPA_LOG" $_nbw_dbg; then
+            # Não subiu: quase sempre é o arquivo que ele não entendeu (um
+            # key_mgmt que este binário não tem compilado invalida o arquivo
+            # INTEIRO). Uma tentativa com o mínimo, e só uma.
+            if [ "$1" != basico ]; then
+                nb_warn "wpa_supplicant refused the config; retrying without WPA3"
+                configure_wifi basico
+                return $?
+            fi
+            log_failure_msg "wpa_supplicant did not start"
+            return 1
         fi
-        log_failure_msg "wpa_supplicant did not start"
-        return 1
     fi
 
-    _nbw_n=0
-    while [ "$_nbw_n" -lt "${NB_WIFI_TIMEOUT:-30}" ]; do
-        if nb_wpa_cli status | grep -q '^wpa_state=COMPLETED'; then
-            log_end_msg
-            nb_log "wifi associated on $NB_WIFI_IFACE"
-            DEVICE=$NB_WIFI_IFACE
-            export DEVICE
-            return 0
-        fi
-        sleep 1
-        _nbw_n=$((_nbw_n + 1))
-    done
+    if ! nb_wifi_wait && [ "$1" != basico ]; then
+        # Subiu mas o handshake não fechou. Antes de desistir, o mesmo
+        # supplicant tenta com o bloco mínimo (só WPA-PSK, sem PMF): há driver
+        # e AP que tropeçam nos AKMs extras ou no bit de proteção de quadro, e
+        # a diferença entre os dois modos é ela mesma um diagnóstico — o
+        # relatório diz em qual deles conectou ou falhou.
+        nb_warn "handshake did not finish with the WPA3-capable config; retrying with plain WPA2"
+        nb_write_wpaconf basico
+        nb_wpa_cli reconfigure > /dev/null
+        nb_wpa_cli reassociate > /dev/null
+        set -- basico
+        nb_wifi_wait
+    fi
+    if nb_wpa_cli status | grep -q '^wpa_state=COMPLETED'; then
+        log_end_msg
+        nb_log "wifi associated on $NB_WIFI_IFACE (${1:-full} config)"
+        DEVICE=$NB_WIFI_IFACE
+        export DEVICE
+        return 0
+    fi
+
     log_failure_msg "wifi did not associate within ${NB_WIFI_TIMEOUT:-30}s"
     nb_wifi_report
+    if nb_wifi_debug; then
+        nb_warn "nbwifidebug: last lines of the wpa_supplicant log"
+        tail -n 40 "$NB_WPA_LOG" 2> /dev/null
+    fi
     return 1
 }
 

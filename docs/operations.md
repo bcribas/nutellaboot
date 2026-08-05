@@ -1039,6 +1039,28 @@ Sem cabo conectado, o rádio é tentado **antes** da rede cabeada: com cabo
 espetado num switch morto, a espera do DHCP cabeado é de cinco minutos por
 rodada.
 
+**A escada, quando "refused the password" insiste.** Um aviso importante:
+`WRONG_KEY` no log **não prova senha errada** — o supplicant carimba isso em
+qualquer desconexão no meio da troca de chaves, inclusive quando o firmware do
+rádio cochila (a família MediaTek mt792x é useira nisso; o boot já desliga o
+power-save dela por conta própria). A ordem de ataque:
+
+1. **Confira o tamanho e a impressão digital na tela.** Cada rede aparece como
+   `'nome' (password: N chars, fingerprint xxxxxxxx)`. Em qualquer Linux:
+   `printf '%s' 'sua-senha' | md5sum` — os 8 primeiros dígitos têm que bater.
+   Batem = a senha que chegou é a que você digitou; o problema é adiante.
+2. **Troque a senha pela chave derivada.** `wpa_passphrase NOME 'senha'` mostra
+   um `psk=` de 64 dígitos hexadecimais; coloque OS 64 DÍGITOS no lugar da
+   senha no `wifi.conf` (o boot entende). Se ainda recusar, não é a senha nem a
+   derivação — é o rádio ou o AP.
+3. **Teste a mesma rede no sistema completo.** Boote por cabo; o NetworkManager
+   usa os perfis gerados do MESMO `wifi.conf`, com o mesmo kernel e firmware.
+   Conectou lá e não no boot = problema da configuração do initrd; falhou nos
+   dois = driver/firmware ou o AP.
+4. **`nbwifidebug=y`.** No menu do GRUB, `e` na entrada, acrescente
+   `nbwifidebug=y` ao fim da linha do kernel e Ctrl-X. O supplicant roda
+   verboso e, na falha, o fim do log sai no console — fotografe.
+
 ### Seeder aparece e some da lista
 
 É o comportamento correto. O seeder renova o registro a cada 60 segundos, e o

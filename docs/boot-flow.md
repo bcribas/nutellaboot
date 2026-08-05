@@ -154,9 +154,10 @@ ICPC-BR-EMG
 minha-rede-oculta	senha123	hidden
 ```
 
-Rede aberta: deixe a senha vazia (dois TABs seguidos). Rede oculta: escreva
-`hidden` no terceiro campo — vira `scan_ssid=1`, sem o qual a rede não é
-encontrada.
+Rede aberta: deixe só o nome na linha. Rede oculta: escreva `hidden` no
+terceiro campo — vira `scan_ssid=1`, sem o qual a rede não é encontrada. A
+senha do WPA tem de 8 a 63 caracteres, ou 64 hexadecimais para a chave já
+derivada (`wpa_passphrase` mostra); fora disso o boot avisa e pula a rede.
 
 Este arquivo alimenta **duas** coisas, a partir de uma fonte só:
 
@@ -248,15 +249,34 @@ descartaria o bloco em silêncio, e o sintoma seria "não associou". Chave já
 derivada (64 hexadecimais) vai sem aspas, que é como ele a distingue de uma
 senha de 64 caracteres.
 
+### Power-save desligado, de propósito
+
+Antes de conectar, o boot desliga o power-save do rádio (`iw ... set
+power_save off` e o runtime-PM via sysfs). Não é otimização: a família
+MediaTek mt792x tem histórico documentado de firmware cochilando no meio da
+troca de chaves — o AP reenvia, o cliente desiste, e o log mostra `WRONG_KEY`
+com a senha certa, em qualquer rede. Upstream chegou a desligar o power-save
+por padrão no mt7921. Nos demais chips o efeito é nulo; a economia de energia
+volta quando o sistema montado assume a rede.
+
+Pela mesma família de tropeços, um handshake que não fecha com o bloco
+WPA3-capaz ganha UMA segunda tentativa com o bloco mínimo (`WPA-PSK` puro, sem
+PMF) — pelo mesmo supplicant, via `reconfigure`. O relatório diz em qual modo
+conectou ou falhou, e essa diferença é ela mesma um diagnóstico.
+
 ### Quando não conecta, a tela diz por quê
 
 O log do `wpa_supplicant` vai para um arquivo (`-f`) e morre com o initrd: o
 console mostrava a associação e a queda, e isso não distingue senha errada de
 PMF exigido pelo AP. `nb_wifi_report` lê esse log, o `wpa_cli status` e o
 `scan_results` e escreve na tela o estado, as linhas que importam, os SSIDs
-pedidos e os que aparecem no ar — **nunca a senha**. Daí sai a tela `NO WIFI`,
-com o motivo já traduzido em ação: senha recusada, PMF/WPA3, nome não
-encontrado no ar, ou associado sem DHCP.
+pedidos — com o tamanho e a impressão digital (md5 curto) de cada senha, nunca
+a senha — os que aparecem no ar, e as últimas linhas do dmesg do driver, para
+a foto dizer qual rádio e qual firmware. Daí sai a tela `NO WIFI`, com o motivo
+já traduzido em ação: senha recusada, PMF/WPA3, nome não encontrado no ar, ou
+associado sem DHCP. `WRONG_KEY` não prova senha errada — é o carimbo de
+qualquer desconexão no meio do 4-way. Com `nbwifidebug=y` na linha do kernel,
+o supplicant roda em `-dd` e o fim do log sai no console.
 
 ## TLS: validação de verdade
 

@@ -274,6 +274,13 @@ O ambiente de teste tem um nginx externo que faz proxy de
   senha recusada, ou AP em WPA2/WPA3 misto exigindo PMF contra um bloco só com
   `key_mgmt=WPA-PSK`. O log do `wpa_supplicant` (`-f`) morre com o initrd, por
   isso `nb_wifi_report` o leva para a tela — sem a senha.
+- **`WRONG_KEY` não prova senha errada.** O supplicant carimba isso em
+  QUALQUER desconexão durante o 4-way — inclusive firmware cochilando no meio
+  (MediaTek mt792x, caso documentado upstream; uma MT7922 de sala falhou em
+  duas redes WPA2 com a senha certa). Por isso o boot desliga o power-save
+  antes de conectar, tenta o bloco mínimo quando o rico não fecha, e imprime o
+  tamanho + md5 curto de cada senha para fechar a dúvida dos bytes sem
+  expô-los.
 
 ## Estilo
 

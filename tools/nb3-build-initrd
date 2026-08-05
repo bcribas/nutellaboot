@@ -111,6 +111,11 @@ for f in usr/bin/aria2c usr/bin/wget.good usr/bin/md5sum usr/bin/tail \
     lib/firmware/regulatory.db net/wireless/cfg80211 net/mac80211/mac80211; do
     grep -Fq "$f" "$LISTA" || FALTOU="$FALTOU $f"
 done
+# `iw` é aviso, não erro: o hook o copia SE a imagem-mestre o tiver, e a falta
+# não derruba o boot (o desligamento de power-save tem o caminho do sysfs).
+# Mas sem ele não há como depurar rádio no console de uma sala.
+grep -Fq "sbin/iw" "$LISTA" ||
+    echo "AVISO: iw não está na imagem-mestre; o initrd sai sem diagnóstico de rádio" >&2
 rm -f "$LISTA"
 if [ -n "$FALTOU" ]; then
     echo "ERRO: o hook não pôs no initrd:$FALTOU" >&2

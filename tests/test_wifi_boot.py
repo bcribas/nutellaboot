@@ -95,6 +95,13 @@ exit 0
 echo "rfkill $*" >> "$FAKE_LOG"
 exit 0
 """,
+    "iw": """#!/bin/sh
+echo "iw $*" >> "$FAKE_LOG"
+exit 0
+""",
+    "dmesg": """#!/bin/sh
+echo "[    5.1] mt7921e 0000:03:00.0: WM Firmware Version: ____010000, Build Time: 20240826"
+""",
 }
 
 
@@ -115,6 +122,9 @@ def sh(tmp_path):
     (sysnet / "eth0").mkdir(parents=True)
     (sysnet / "eth0" / "carrier").write_text("0\n")
     (sysnet / "wlan0" / "wireless").mkdir(parents=True)
+    (sysnet / "wlan0" / "device" / "power").mkdir(parents=True)
+    (sysnet / "wlan0" / "device" / "power" / "control").write_text("auto\n")
+    (tmp_path / "cmdline").write_text("boot=nutellaboot quiet\n")
 
     def _run(script: str, **env):
         e = {
@@ -135,6 +145,7 @@ def sh(tmp_path):
             "FAKE_LOG": str(tmp_path / "chamadas.log"),
             "FAKE_ONLINE": str(tmp_path / "online"),
             "FAKE_DHCP_OK": "",
+            "NB_CMDLINE": str(tmp_path / "cmdline"),
             "NB_WIFI_TIMEOUT": "2",
             "NB_NET_TRIES": "1",
             "NB_FATAL_WAIT": "0",
@@ -342,7 +353,7 @@ def test_o_relatorio_nunca_imprime_a_senha(sh):
     assert "senha-secretissima" not in out
     assert "Rede" in out, "o NOME da rede ajuda quem está na sala"
     # o TAMANHO vai, e é o que denuncia espaço invisível no fim do campo
-    assert "password: 18 characters" in out
+    assert "password: 18 chars" in out
 
 
 def test_supplicant_que_recusa_o_config_tenta_o_modo_basico(sh):
@@ -498,3 +509,93 @@ def test_um_wpa_supplicant_de_verdade_aceita_o_arquivo_gerado(sh):
     assert "Failed to initialize driver interface" in saida, (
         "parou antes de chegar na interface — o arquivo não foi aceito:\n" + saida
     )
+
+
+# --- as mitigações do mt792x -------------------------------------------------
+#
+# Uma MT7922 de sala falhou o 4-way em DUAS redes WPA2 — uma delas um hotspot
+# lançado só para o teste, com o tamanho da senha confirmado na tela. A família
+# mt792x tem histórico documentado de firmware cochilando no meio do handshake
+# (upstream chegou a desligar o power-save por padrão no mt7921), e o
+# supplicant carimba WRONG_KEY com a senha certa.
+
+
+def test_power_save_e_desligado_antes_do_supplicant(sh):
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    sh("configure_wifi", FAKE_WPA_STATE="COMPLETED")
+    chamadas = sh.chamadas()
+    assert "iw dev wlan0 set power_save off" in chamadas
+    assert chamadas.index("set power_save off") < chamadas.index("wpa_supplicant"), (
+        "desligar depois de conectar não salva o handshake"
+    )
+    # e o runtime-PM do dispositivo, que não depende do iw existir
+    assert (sh.sysnet / "wlan0" / "device" / "power" / "control").read_text() == "on\n"
+
+
+def test_sem_iw_o_wifi_segue(sh):
+    """O iw entra no initrd SE a imagem-mestre o tiver. A falta dele não pode
+    derrubar o rádio — o caminho do sysfs continua."""
+    (sh.tmp / "bin" / "iw").unlink()
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh("configure_wifi && echo SUBIU", FAKE_WPA_STATE="COMPLETED")
+    assert "SUBIU" in out
+    assert (sh.sysnet / "wlan0" / "device" / "power" / "control").read_text() == "on\n"
+
+
+def test_handshake_que_nao_fecha_tenta_o_modo_basico(sh):
+    """Não só quando o supplicant nem sobe: há driver e AP que tropeçam nos
+    AKMs extras ou no bit de PMF DEPOIS de associar. A segunda tentativa usa o
+    mesmo supplicant (reconfigure), com o bloco mínimo — e só uma vez."""
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh("configure_wifi; echo FIM")  # nunca chega a COMPLETED
+    assert "retrying with plain WPA2" in out
+    chamadas = sh.chamadas()
+    assert "reconfigure" in chamadas
+    assert chamadas.count("reconfigure") == 1, "uma tentativa extra, não um laço"
+    # a segunda escrita do arquivo é a básica
+    conf = sh.wpaconf()
+    assert "SAE" not in conf and "ieee80211w" not in conf
+
+
+def test_o_relatorio_traz_a_impressao_digital_da_senha(sh):
+    """Nunca a senha — o md5 curto dos bytes exatos. Quem está na sala compara
+    com `printf '%s' 'senha' | md5sum` e fecha a dúvida de uma vez."""
+    import hashlib
+
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh("nb_wifi_report")
+    fp = hashlib.md5(b"senha-boa").hexdigest()[:8]
+    assert f"fingerprint {fp}" in out
+    assert "senha-boa" not in out
+
+
+def test_o_relatorio_diz_o_hardware(sh):
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh("nb_wifi_report")
+    assert "mt7921e" in out, "a foto da falha precisa dizer qual rádio e firmware"
+
+
+def test_nbwifidebug_liga_o_dd_e_despeja_o_log(sh):
+    (sh.tmp / "cmdline").write_text("boot=nutellaboot nbwifidebug=y\n")
+    (sh.tmp / "wpa.log").write_text("linha-um\nlinha-final-do-log\n")
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh("configure_wifi; echo FIM")
+    assert "-dd" in sh.chamadas().splitlines()[
+        [i for i, l in enumerate(sh.chamadas().splitlines()) if l.startswith("wpa_supplicant")][0]
+    ]
+    assert "linha-final-do-log" in out
+
+
+def test_sem_a_flag_nao_ha_dd_nem_despejo(sh):
+    (sh.tmp / "wpa.log").write_text("linha-que-nao-deve-aparecer\n")
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh("configure_wifi; echo FIM")
+    primeira = [l for l in sh.chamadas().splitlines() if l.startswith("wpa_supplicant")][0]
+    assert "-dd" not in primeira
+    assert "linha-que-nao-deve-aparecer" not in out
+
+
+def test_conectou_diz_em_qual_modo(sh):
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh("configure_wifi", FAKE_WPA_STATE="COMPLETED")
+    assert "(full config)" in out
