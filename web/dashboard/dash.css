@@ -1,0 +1,137 @@
+/* A tela de transmissão: fontes grandes, contraste alto, nada clicável de
+   comando. As cores de SÉRIE são variáveis próprias — usar --warn como cor de
+   série colidiria com a semântica de severidade do resto do sistema. */
+
+:root {
+  --serie1: #4ea3f2;
+  --serie2: #f4791f;
+  --serie3: #b78af7;
+}
+
+body.dash { padding: 0 24px 24px; }
+
+.dhead {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 18px 0 6px;
+}
+
+.dhead h1 { font-size: 26px; margin: 0; }
+.dhead .dsub { color: var(--muted); font-size: 15px; font-weight: 400; }
+.dhead .spacer { flex: 1; }
+.dclock { font-size: 26px; font-variant-numeric: tabular-nums; color: var(--fg); }
+
+/* --- o placar --- */
+.placar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin: 10px 0 16px;
+}
+
+.bignum {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.bignum b { font-size: 54px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.bignum span { color: var(--muted); font-size: 14px; }
+.bignum.alerta b { color: var(--bad); }
+.bignum.alerta.zero b { color: var(--ok); }
+
+/* --- os gráficos --- */
+.graficos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.gbox {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+
+.gbox h2 { font-size: 14px; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+.gbox svg { width: 100%; height: 150px; display: block; }
+.legenda { display: flex; gap: 16px; font-size: 12px; margin-top: 4px; }
+.legenda .l1::before,
+.legenda .l2::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.legenda .l1::before { background: var(--serie1); }
+.legenda .l2::before { background: var(--serie2); }
+
+/* --- o mapa de calor --- */
+.mapa {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.sede {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--ok);
+  border-radius: 8px;
+  padding: 10px 12px;
+  position: relative;
+}
+
+.sede.warn { border-left-color: var(--warn); }
+.sede.bad { border-left-color: var(--bad); }
+.sede.off { opacity: 0.45; }
+
+.sede .sid { font-weight: 700; font-size: 15px; }
+.sede .son { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sede .son b { color: var(--fg); }
+
+.sede .badge {
+  position: absolute;
+  top: -7px;
+  right: -6px;
+  background: var(--bad);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+}
+
+.medidor { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; }
+.medidor .rot { width: 34px; color: var(--muted); }
+.medidor .trilho { flex: 1; height: 7px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
+.medidor .trilho i { display: block; height: 100%; background: var(--ok); }
+.medidor .trilho i.warn { background: var(--warn); }
+.medidor .trilho i.bad { background: var(--bad); }
+.medidor .val { width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) {
+  .placar { grid-template-columns: repeat(2, 1fr); }
+  .graficos { grid-template-columns: 1fr; }
+}
+
+/* o mapa usa a largura inteira — o max-width do main comum é para formulário */
+body.dash main { max-width: none; padding: 0; }
+
+.gbox { position: relative; }
+.gbox .gagora {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  font-size: 17px;
+  display: flex;
+  gap: 12px;
+}

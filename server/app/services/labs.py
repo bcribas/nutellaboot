@@ -46,11 +46,18 @@ ALERTAS_NA_LINHA = 15
 
 
 def resumo_de(image_id: str, *, desde: float) -> dict:
-    """As contas de uma sede. Quatro leituras por máquina, e nenhuma delas é o
-    `status.json` — que é livre, pode ter 256 kB e não cabe num resumo."""
+    """As contas de uma sede. Cinco leituras por máquina — a quinta é o
+    `status.json`, e ela tem regra própria: o arquivo é LIVRE (um parts.d novo
+    no agente pode inflá-lo até 256 kB), então daqui saem só campos fixos de
+    `sysresources` e o `cores`, nunca o dict — o payload da sondagem não pode
+    crescer com o que o agente resolver mandar. Hoje ele tem ~500 B e a
+    leitura custa ~25 ms na frota inteira, dentro do cache de 3 s."""
     agora = time.time()
     total = ativas = novas = online = travadas = alertas = sem_time = 0
     lista_alertas: list[dict] = []
+    mems: list[int] = []
+    cpus: list[int] = []
+    swap_mb = swap_on = 0
     for mac in m.list_macs(image_id):
         d = m.machine_dir(image_id, mac)
         info = fsdb.read_json(d / "machine.json", {}) or {}
@@ -61,8 +68,31 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
             ativas += 1
         if info.get("first_seen", 0) >= desde:
             novas += 1
-        if (agora - visto) < m.ONLINE_WINDOW:
+        esta_online = (agora - visto) < m.ONLINE_WINDOW
+        if esta_online:
             online += 1
+            # recursos SÓ das ligadas: o mem_pct de uma máquina desligada é o
+            # último valor antes de morrer, e entraria na média como se fosse
+            # de agora
+            status = fsdb.read_json(d / "status.json", {}) or {}
+            res = status.get("sysresources") or {}
+            hw = status.get("hwinfo") or {}
+            if isinstance(res.get("mem_pct"), (int, float)):
+                mems.append(int(res["mem_pct"]))
+            load = res.get("loadavg")
+            cores = hw.get("cores")
+            if (
+                isinstance(load, list) and load
+                and isinstance(load[0], (int, float))
+                and isinstance(cores, (int, float)) and cores
+            ):
+                # CPU% não existe na telemetria; o proxy honesto é load1 por
+                # núcleo, saturado em 100
+                cpus.append(min(100, round(100 * load[0] / cores)))
+            sw = res.get("swap_used_mb")
+            if isinstance(sw, (int, float)) and sw > 0:
+                swap_mb += int(sw)
+                swap_on += 1
         if (fsdb.read_json(d / "lockstate.json", {}) or {}).get("locked"):
             travadas += 1
         # o arquivo sempre foi lido INTEIRO e só o len() era aproveitado — foi
@@ -92,6 +122,15 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
         "alerts": alertas,
         "unbound": sem_time,
         "alert_list": lista_alertas[:ALERTAS_NA_LINHA],
+        # agregados O(1) por sede — é o que o dashboard desenha
+        "res": {
+            "mem_avg": round(sum(mems) / len(mems)) if mems else None,
+            "mem_max": max(mems) if mems else None,
+            "cpu_avg": round(sum(cpus) / len(cpus)) if cpus else None,
+            "cpu_max": max(cpus) if cpus else None,
+            "swap_mb": swap_mb,
+            "swap_on": swap_on,
+        },
     }
 
 

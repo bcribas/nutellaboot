@@ -242,3 +242,21 @@ code, .mono { font-family: ui-monospace, monospace; font-size: 13px; }
   main { padding: 14px; }
   .card { padding: 14px; }
 }
+
+/* A identidade da sede: a primeira coisa que se lê na barra. Duas telas de
+   sedes diferentes abertas lado a lado precisam se distinguir num relance —
+   o id em destaque na cor de acento, o nome por extenso ao lado. */
+header.topbar .siteident { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+header.topbar .siteident .sid {
+  font-family: ui-monospace, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+}
+header.topbar .siteident .sname {
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

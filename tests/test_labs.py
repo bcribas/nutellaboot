@@ -141,6 +141,42 @@ def test_a_lista_de_alertas_tem_teto_mas_a_conta_nao(client, frota, ha):
     assert len(linha["alert_list"]) == labs.ALERTAS_NA_LINHA
 
 
+def test_os_recursos_agregados_saem_so_das_ligadas(client, frota, ha):
+    """RAM/CPU/swap por sede para o dashboard. Máquina desligada fica FORA: o
+    mem_pct dela é o último valor antes de morrer, e entraria na média como se
+    fosse de agora. CPU é load1 por núcleo (CPU% não existe na telemetria)."""
+    planta("sala1", "52-54-00-00-00-01", visto_ha=5)
+    planta("sala1", "52-54-00-00-00-02", visto_ha=5)
+    planta("sala1", "52-54-00-00-00-03", visto_ha=9999)  # offline
+    def status(mac, mem, load, sw):
+        fsdb.write_json(m.machine_dir("sala1", mac) / "status.json", {
+            "hwinfo": {"cores": 4},
+            "sysresources": {"mem_pct": mem, "loadavg": [load, 0, 0],
+                             "swap_used_mb": sw, "swap_total_mb": 4096},
+        })
+    status("52-54-00-00-00-01", 40, 2.0, 0)
+    status("52-54-00-00-00-02", 80, 4.0, 300)
+    status("52-54-00-00-00-03", 99, 8.0, 900)  # offline: não conta
+    labs.limpar_cache()
+
+    linha = next(s for s in client.get("/api/v1/labs", headers=ha).json()["sites"]
+                 if s["id"] == "sala1")
+    r = linha["res"]
+    assert r["mem_avg"] == 60 and r["mem_max"] == 80
+    # load 2.0 / 4 cores = 50%; load 4.0 / 4 = 100%
+    assert r["cpu_avg"] == 75 and r["cpu_max"] == 100
+    assert r["swap_mb"] == 300 and r["swap_on"] == 1
+
+
+def test_sem_status_json_o_resumo_nao_quebra(client, frota, ha):
+    planta("sala1", "52-54-00-00-00-01", visto_ha=5)
+    labs.limpar_cache()
+    linha = next(s for s in client.get("/api/v1/labs", headers=ha).json()["sites"]
+                 if s["id"] == "sala1")
+    assert linha["res"]["mem_avg"] is None
+    assert linha["res"]["swap_mb"] == 0
+
+
 def test_o_csv_traz_as_mesmas_contas(client, frota, ha):
     planta("sala1", "52-54-00-00-00-01", visto_ha=2 * DIA, apareceu_ha=40 * DIA)
     labs.limpar_cache()

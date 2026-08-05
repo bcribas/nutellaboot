@@ -392,3 +392,19 @@ def test_virar_livre_solta_tambem_a_trava_propria_do_wallpaper():
     js = (REPO / "web" / "admin" / "app.js").read_text(encoding="utf-8")
     trecho = js.split('t("make_official")')[1].split("load()")[0]
     assert '{ unlocked: true, wallpaper_locked: false }' in trecho
+
+
+def test_a_identidade_da_sede_e_evidente_nas_duas_telas():
+    """O hotconfig não mostrava o FULLNAME (nenhuma resposta que ele buscava o
+    trazia) e o id vivia num .sub apagado. Quem opera várias abas precisa saber
+    em qual sala está mandando comando — a identidade é a primeira coisa da
+    barra, e o title distingue as abas."""
+    for tela in ("hotconfig", "configureitor"):
+        html = (REPO / "web" / tela / "index.html").read_text(encoding="utf-8")
+        assert 'class="siteident"' in html, f"{tela}: sem o bloco de identidade"
+        js = (REPO / "web" / tela / "app.js").read_text(encoding="utf-8")
+        assert "identname" in js, f"{tela}: o fullname não é preenchido"
+        assert "document.title" in js, f"{tela}: o title não identifica a aba"
+    # o hotconfig busca a identidade (é a tela que não a tinha)
+    js = (REPO / "web" / "hotconfig" / "app.js").read_text(encoding="utf-8")
+    assert "/api/v1/site-images/${api.imageId}`" in js

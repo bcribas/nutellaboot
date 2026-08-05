@@ -308,7 +308,9 @@ async function main() {
     values = data.values;
     canEditLocked = data.can_edit_locked;
     canEditWallpaper = data.can_edit_wallpaper !== false;
-    $("#imginfo").textContent = `${data.image.fullname || data.image.id} · ${data.image.id}`;
+    $("#identid").textContent = data.image.id;
+  $("#identname").textContent = data.image.fullname || "";
+  document.title = `${data.image.id}${data.image.fullname ? ` · ${data.image.fullname}` : ""} — configureitor`;
     renderForm();
     renderWallpaper(data.wallpaper);
     renderUsb();

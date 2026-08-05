@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NutellaBoot 3 — Dashboard</title>
+<link rel="icon" href="/common/favicon.png">
+<link rel="stylesheet" href="/common/style.css">
+<link rel="stylesheet" href="./dash.css">
+</head>
+<body class="dash">
+<!-- A tela de transmissão: só leitura, nenhum comando — segura para deixar
+     aberta num telão. Os gráficos acumulam na própria tela enquanto ela fica
+     aberta (o servidor não guarda série para isto). -->
+
+<header class="dhead">
+  <h1>Maratona Linux <span class="dsub" data-i18n="dash_title"></span></h1>
+  <span class="spacer"></span>
+  <span id="updated" class="dsub"></span>
+  <span id="clock" class="dclock"></span>
+</header>
+
+<section class="placar">
+  <div class="bignum"><b id="n-online">–</b><span data-i18n="dash_machines_on"></span></div>
+  <div class="bignum"><b id="n-total">–</b><span data-i18n="dash_machines_total"></span></div>
+  <div class="bignum"><b id="n-sites">–</b><span data-i18n="dash_sites_active"></span></div>
+  <div class="bignum alerta"><b id="n-alerts">–</b><span data-i18n="dash_alerts"></span></div>
+</section>
+
+<section class="graficos">
+  <div class="gbox">
+    <h2 data-i18n="dash_chart_online"></h2>
+    <div id="g-online"></div>
+  </div>
+  <div class="gbox">
+    <h2 data-i18n="dash_chart_res"></h2>
+    <div id="g-res"></div>
+    <div class="legenda">
+      <span class="l1" data-i18n="dash_mem"></span>
+      <span class="l2" data-i18n="dash_cpu"></span>
+    </div>
+  </div>
+</section>
+
+<main>
+  <div id="mapa" class="mapa"></div>
+  <p id="dvazio" class="dsub" hidden></p>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

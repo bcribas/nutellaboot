@@ -505,7 +505,15 @@ async function main() {
     $("#goconfig").remove();
     return;
   }
-  $("#imginfo").textContent = api.imageId;
+  // a identidade da sede, evidente: quem opera várias abas precisa saber em
+  // qual sala está mandando comando. O fullname não vem em nenhuma resposta
+  // que a tela já busca — um GET no image.json resolve (o token autentica).
+  $("#identid").textContent = api.imageId;
+  document.title = `${api.imageId} — hotconfig`;
+  api.get(`/api/v1/site-images/${api.imageId}`).then((info) => {
+    $("#identname").textContent = info.fullname || "";
+    if (info.fullname) document.title = `${api.imageId} · ${info.fullname} — hotconfig`;
+  }).catch(() => {});
   $("#goconfig").href = api.telaIrma("configureitor");
   await desabilitarComandosBloqueados();
   renderFilters();
