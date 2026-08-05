@@ -104,6 +104,43 @@ def test_quantas_rodaram_nos_ultimos_x_dias(client, frota, ha):
     assert conta(60) == (3, 3)
 
 
+def test_o_resumo_traz_a_lista_de_alertas(client, frota, ha):
+    """O painel dizia "3 alertas" sem conseguir dizer QUAIS — o arquivo sempre
+    foi lido inteiro e só o len() era aproveitado. A lista sai com teto
+    (ALERTAS_NA_LINHA) e a contagem continua sendo o TOTAL."""
+    import time as _t
+
+    planta("sala1", "52-54-00-00-00-01", visto_ha=5, alertas=0)
+    d = m.machine_dir("sala1", "52-54-00-00-00-01")
+    fsdb.write_json(d / "alerts.json", [
+        {"id": "a1", "kind": "usb.storage", "detail": "Cruzer 16GB",
+         "vendor": "SanDisk", "at": _t.time() - 60},
+        {"id": "a2", "kind": "usb.phone", "detail": "Galaxy", "at": _t.time() - 10},
+    ])
+    fsdb.write_json(d / "binding.json", {"user_id": "t1", "name": "Time 01"})
+    labs.limpar_cache()
+
+    linha = next(s for s in client.get("/api/v1/labs", headers=ha).json()["sites"]
+                 if s["id"] == "sala1")
+    assert linha["alerts"] == 2
+    lista = linha["alert_list"]
+    assert [a["kind"] for a in lista] == ["usb.phone", "usb.storage"], "mais recente primeiro"
+    assert lista[1]["vendor"] == "SanDisk"
+    assert lista[0]["team"] == "Time 01"
+    assert lista[0]["mac"] == "52-54-00-00-00-01"
+
+
+def test_a_lista_de_alertas_tem_teto_mas_a_conta_nao(client, frota, ha):
+    planta("sala1", "52-54-00-00-00-01", visto_ha=5)
+    d = m.machine_dir("sala1", "52-54-00-00-00-01")
+    fsdb.write_json(d / "alerts.json", [{"id": f"a{i}", "at": i} for i in range(40)])
+    labs.limpar_cache()
+    linha = next(s for s in client.get("/api/v1/labs", headers=ha).json()["sites"]
+                 if s["id"] == "sala1")
+    assert linha["alerts"] == 40
+    assert len(linha["alert_list"]) == labs.ALERTAS_NA_LINHA
+
+
 def test_o_csv_traz_as_mesmas_contas(client, frota, ha):
     planta("sala1", "52-54-00-00-00-01", visto_ha=2 * DIA, apareceu_ha=40 * DIA)
     labs.limpar_cache()

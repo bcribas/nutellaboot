@@ -8,12 +8,16 @@ const $ = (s) => document.querySelector(s);
 let machines = [];
 let rejeitadas = [];
 let selected = new Set();
-let filter = "all";
+// o padrão é ver as LIGADAS: listar máquina desligada por padrão é ruído numa
+// sala — quem quiser o cemitério marca "Todas". `stale` (piscou há pouco)
+// conta como ligada: sumir com ela esconderia problema.
+let filter = "on";
 let source = null;
 let refreshTimer = null;
 
-const FILTERS = ["all", "usb", "locked", "alert", "unbound", "offline"];
+const FILTERS = ["on", "all", "usb", "locked", "alert", "unbound", "offline"];
 const FILTER_LABEL = {
+  on: "filter_on",
   all: "filter_all",
   usb: "filter_usb",
   locked: "filter_locked",
@@ -169,6 +173,7 @@ function matches(m) {
   if (filter === "alert") return isAlert(m) || usbAlerts(m).length > 0;
   if (filter === "unbound") return !m.binding;
   if (filter === "offline") return !m.online;
+  if (filter === "on") return state(m) !== "offline";
   return true;
 }
 

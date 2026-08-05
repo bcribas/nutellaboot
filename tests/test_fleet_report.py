@@ -182,6 +182,63 @@ def test_um_de_cada_vez(data_root, gerador):
     assert fleet_report.estado()["status"] == "done"
 
 
+# --- exclusão de sedes --------------------------------------------------------
+
+
+def test_excluir_chega_na_ferramenta_e_fica_no_estado(cliente, ha, gerador, data_root):
+    """A sede de teste inflaria o perfil nacional. A exclusão vai como
+    `--excluir` para a ferramenta e fica gravada no estado — é a memória entre
+    gerações: a tela pré-marca as mesmas sedes na próxima."""
+    from server.app.services import store as st
+    from server.app.services.default_schema import build_default_schema
+
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "t" / "schema.json", build_default_schema())
+    st.create_site_image("sedeteste", "Teste", "t")
+
+    r = cliente.post(
+        "/api/v1/labs/report",
+        json={"dias": 3, "excluir": ["sedeteste"]},
+        headers=ha,
+    )
+    assert r.status_code == 202, r.text
+    assert r.json()["excluded"] == ["sedeteste"]
+
+    agora = time.time()
+    asyncio.run(fleet_report.gerar(agora - 86400, agora, ("sedeteste",)))
+    args = gerador.read_text().split()
+    assert args[args.index("--excluir") + 1] == "sedeteste"
+
+
+def test_excluir_sede_inexistente_e_400(cliente, ha, gerador):
+    """Os ids viram argumento de subprocesso: só entram os que existem."""
+    r = cliente.post(
+        "/api/v1/labs/report",
+        json={"excluir": ["naoexiste"]},
+        headers=ha,
+    )
+    assert r.status_code == 400
+    assert "naoexiste" in r.json()["detail"]
+
+
+def test_a_ferramenta_de_verdade_exclui_a_sede(data_root, tmp_path):
+    agora = planta_frota(data_root)
+    saida = tmp_path / "saida"
+    r = subprocess.run(
+        [
+            sys.executable, str(REPO_ROOT / "tools" / "nb3-relatorio-frota"),
+            "--desde", f"{agora - 7200:.3f}", "--ate", f"{agora + 60:.3f}",
+            "--saida", str(saida), "--excluir", "sede1",
+        ],
+        capture_output=True, text=True, cwd=str(REPO_ROOT),
+        env={**os.environ, "NB3_DATA_ROOT": str(data_root)},
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    inv = linhas_de(saida / "inventario.csv")
+    assert {l["sede"] for l in inv} == {"sede0", "sede2"}
+    assert "pronto: 2 sedes" in r.stdout
+
+
 # --- quem pode ---------------------------------------------------------------
 
 

@@ -311,6 +311,10 @@ def main() -> int:
     ap.add_argument("--desde", type=float, default=0, help="epoch; padrão: 7 dias atrás")
     ap.add_argument("--ate", type=float, default=0, help="epoch; padrão: agora")
     ap.add_argument("--saida", required=True)
+    # sedes fora do relatório (ex.: a de teste): ids separados por vírgula.
+    # Excluir aqui, e não depois, poupa a leitura — a sede de teste pode ter
+    # tanta amostra quanto uma real.
+    ap.add_argument("--excluir", default="", help="ids de sedes fora do relatório, separados por vírgula")
     a = ap.parse_args()
     a.ate = a.ate or time.time()
     a.desde = a.desde or (a.ate - 7 * 86400)
@@ -319,7 +323,12 @@ def main() -> int:
     saidas = Saidas(destino)
     t0 = time.time()
     try:
-        sedes = [uma_sede(i["id"], a.desde, a.ate, saidas) for i in store.list_site_images()]
+        fora = {x.strip() for x in a.excluir.split(",") if x.strip()}
+        sedes = [
+            uma_sede(i["id"], a.desde, a.ate, saidas)
+            for i in store.list_site_images()
+            if i["id"] not in fora
+        ]
     finally:
         saidas.fechar()
 

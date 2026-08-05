@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from .. import auth
-from ..services import fleet_report, labs, ownership
+from ..services import fleet_report, labs, ownership, store
 from ..services import machines as m
 from .machines import comandos_bloqueados, publicar_evento
 
@@ -136,7 +136,9 @@ async def estado_do_relatorio(p=Depends(auth.require_admin)) -> dict:
 
 @router.post("/labs/report", status_code=202)
 async def gerar_relatorio(
-    dias: float = Query(7, gt=0, le=3650), p=Depends(auth.require_admin)
+    body: dict | None = None,
+    dias: float = Query(7, gt=0, le=3650),
+    p=Depends(auth.require_admin),
 ) -> dict:
     """Dispara a passada. Responde 202 e o estado — quem pergunta se ficou
     pronto é a tela, na sondagem de 5 s que ela já faz.
@@ -144,9 +146,26 @@ async def gerar_relatorio(
     Pedir de novo enquanto uma anda NÃO é erro: a tela sonda, e duas abas
     abertas fariam a segunda receber um 409 que ninguém pediu. `started` diz
     qual das duas foi a que disparou.
+
+    `excluir` (no corpo) tira sedes do relatório — a de teste inflaria o
+    perfil nacional. Os ids são validados ANTES de virarem argumento de
+    subprocesso, e a escolha fica gravada no estado: a próxima geração vem
+    pré-marcada igual.
     """
+    corpo = body or {}
+    excluir = corpo.get("excluir") or []
+    if not isinstance(excluir, list):
+        raise HTTPException(400, "excluir deve ser uma lista de ids")
+    ruins = [x for x in excluir if not store.site_image_exists(str(x))]
+    if ruins:
+        raise HTTPException(400, f"sedes desconhecidas: {', '.join(map(str, ruins))}")
+    if "dias" in corpo:
+        dias = float(corpo["dias"])
+        if not (0 < dias <= 3650):
+            raise HTTPException(400, "dias fora do intervalo")
+
     ate = time.time()
-    iniciou = fleet_report.agendar(ate - dias * 86400, ate)
+    iniciou = fleet_report.agendar(ate - dias * 86400, ate, tuple(str(x) for x in excluir))
     return {**fleet_report.estado(), "started": iniciou}
 
 

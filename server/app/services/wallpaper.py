@@ -105,9 +105,22 @@ def travado(image_id: str) -> bool:
     O do modelo vale para todas e não se contorna sede a sede — é o que
     "o modelo manda" quer dizer. O da sede continua existindo porque os
     convites já o emitem por imagem.
+
+    A ordem das três checagens é o contrato inteiro:
+
+    1. trava DA PRÓPRIA imagem vale sempre — é fixada de propósito pelo
+       convite em sedes Livres (wallpaper de patrocinador numa imagem que no
+       resto é `unlocked`), então o `unlocked` NÃO a desliga;
+    2. imagem `unlocked` escapa da trava DO MODELO — a mesma cláusula dos
+       campos de schema (`config.pode_editar`: locked e não admin e não
+       unlocked). Era o que faltava: a sede liberada continuava presa à trava
+       do modelo, com a tela obedecendo o servidor errado;
+    3. senão, vale o modelo.
     """
     info = store.get_site_image(image_id) or {}
     if info.get("wallpaper_locked"):
         return True
+    if info.get("unlocked"):
+        return False
     modelo = fsdb.read_json(store.model_dir(info.get("model", "")) / "model.json", {}) or {}
     return bool(modelo.get("wallpaper_locked"))

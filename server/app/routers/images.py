@@ -142,6 +142,12 @@ async def patch_image(image: str, body: SiteImagePatch, p=Depends(auth.require_c
         # cota que o próprio dono aumenta não é cota
         raise HTTPException(403, "só a administração muda a cota de builds")
 
+    if campos.get("wallpaper_locked") is not None and p.kind != "admin":
+        # o mesmo portão do `unlocked`: a trava do wallpaper é decisão da
+        # organização (o convite a fixa na criação), e o dono podia desligá-la
+        # por aqui — o único campo de cadeado sem portão
+        raise HTTPException(403, "só a administração muda a trava do wallpaper")
+
     try:
         return store.patch_site_image(image, campos)
     except store.ImageError as e:

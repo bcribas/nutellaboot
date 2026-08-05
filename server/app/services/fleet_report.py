@@ -106,9 +106,11 @@ def _obter_lock() -> asyncio.Lock:
     return _lock
 
 
-async def gerar(desde: float, ate: float) -> dict:
+async def gerar(desde: float, ate: float, excluir: tuple[str, ...] = ()) -> dict:
     base = os.environ.get("NB3_RELATORIO_CMD")
     args = ["--desde", f"{desde:.3f}", "--ate", f"{ate:.3f}", "--saida", str(_dir())]
+    if excluir:
+        args += ["--excluir", ",".join(excluir)]
     # `sys.executable` e não o shebang: a ferramenta importa `server.app`, e o
     # `#!/usr/bin/env python3` acharia o Python do SISTEMA, sem o venv — falha
     # com "No module named 'fastapi'" só em produção, onde ninguém está olhando.
@@ -139,7 +141,7 @@ async def gerar(desde: float, ate: float) -> dict:
 _tarefas: set[asyncio.Task] = set()
 
 
-def agendar(desde: float, ate: float) -> bool:
+def agendar(desde: float, ate: float, excluir: tuple[str, ...] = ()) -> bool:
     """Dispara em segundo plano. Devolve False se já há uma geração andando —
     duas ao mesmo tempo leriam os mesmos 1,5 GB em paralelo, e é o disco que
     atende o boot.
@@ -156,8 +158,11 @@ def agendar(desde: float, ate: float) -> bool:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return False
-    _marcar(status="building", error="", since=desde, until=ate, started_at=time.time())
-    tarefa = loop.create_task(gerar(desde, ate))
+    # `excluded` fica no estado: é a memória entre gerações — a tela pré-marca
+    # as mesmas sedes na próxima
+    _marcar(status="building", error="", since=desde, until=ate,
+            excluded=sorted(excluir), started_at=time.time())
+    tarefa = loop.create_task(gerar(desde, ate, excluir))
     _tarefas.add(tarefa)
     tarefa.add_done_callback(_tarefas.discard)
     return True

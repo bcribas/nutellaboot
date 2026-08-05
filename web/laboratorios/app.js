@@ -34,6 +34,48 @@ const FILTRO_LABEL = {
   offline: "filter_offline",
 };
 
+const KIND_LABEL = {
+  "usb.storage": "usb_storage",
+  "usb.phone": "usb_phone",
+  "usb.network": "usb_network",
+  "usb.other": "usb_other",
+  "media.cd": "media_cd",
+};
+
+function hora(ts) {
+  return ts ? new Date(ts * 1000).toLocaleTimeString() : "";
+}
+
+function hotconfigUrl(sede) {
+  return `/hotconfig/?id=${encodeURIComponent(sede)}`;
+}
+
+// A faixa global: sala de controle. Cada alerta diz sede, máquina, time, tipo
+// e hora; clicar abre o hotconfig da sede, onde se dispensa com registro.
+function renderAlertas() {
+  const caixa = $("#fleetalerts");
+  const lista = $("#falist");
+  const todos = sites.flatMap((s) =>
+    (s.alert_list || []).map((a) => ({ ...a, sede: s.id }))
+  );
+  todos.sort((a, b) => (b.at || 0) - (a.at || 0));
+  caixa.hidden = !todos.length;
+  lista.innerHTML = "";
+  for (const a of todos) {
+    const row = document.createElement("a");
+    row.className = "farow";
+    row.href = hotconfigUrl(a.sede);
+    row.target = "_blank";
+    row.rel = "noopener";
+    row.innerHTML = `<b class="fasede">${a.sede}</b>
+      <span class="awhat">${t(KIND_LABEL[a.kind] || "usb_other")}</span>
+      <span class="amac">${a.team ? `${a.team} · ` : ""}${a.mac || ""}</span>
+      <span class="fadet">${a.vendor || a.detail || ""}</span>
+      <span class="awhen">${hora(a.at)}</span>`;
+    lista.appendChild(row);
+  }
+}
+
 function toast(msg, isErro = false) {
   const el = document.createElement("div");
   el.className = "toast" + (isErro ? " err" : "");
@@ -99,6 +141,8 @@ function render() {
     tr.innerHTML =
       `<td class="expandir"><button type="button">${expandidas.has(s.id) ? "▾" : "▸"}</button></td>
        <td class="nome"><span class="sedeid">${s.id}</span>
+         <a class="gohot" href="${hotconfigUrl(s.id)}" target="_blank" rel="noopener"
+            title="${t("fleet_open_hotconfig")}">\u2197</a>
          ${marcadas ? `<span class="sedenome"> · ${marcadas} ${t("fleet_picked")}</span>` : ""}
          <br><span class="sedenome">${s.fullname || ""}</span></td>` +
       num(s.machines) + num(s.active) + num(s.new) + num(s.online) +
@@ -109,6 +153,7 @@ function render() {
       expandidas.has(s.id) ? expandidas.delete(s.id) : carregarMaquinas(s.id);
       render();
     };
+    tr.querySelector(".gohot").onclick = (e) => e.stopPropagation();
     tr.onclick = () => {
       if (sedesSel.has(s.id)) sedesSel.delete(s.id);
       else {
@@ -122,6 +167,7 @@ function render() {
     if (expandidas.has(s.id)) tabela.appendChild(linhaMaquinas(s));
   }
 
+  renderAlertas();
   $("#empty").textContent = lista.length ? "" : t("fleet_empty");
   const n = contaSelecionadas();
   $("#selcount").textContent = n ? t("selected_n", { n }) : t("select_hint");
@@ -145,6 +191,22 @@ function linhaMaquinas(s) {
     td.innerHTML = `<span class="muted small">${t("loading")}</span>`;
     tr.appendChild(td);
     return tr;
+  }
+  // os alertas da sede, acima das máquinas — o detalhe que a linha não cabe
+  const comAlerta = lista.flatMap((mq) => (mq.alerts || []).map((a) => ({ ...a, mq })));
+  if (comAlerta.length) {
+    const bloco = document.createElement("div");
+    bloco.className = "sedealertas";
+    for (const a of comAlerta) {
+      const linha = document.createElement("div");
+      linha.className = "farow";
+      linha.innerHTML = `<span class="awhat">${t(KIND_LABEL[a.kind] || "usb_other")}</span>
+        <span class="amac">${a.mq.binding?.name ? `${a.mq.binding.name} · ` : ""}${a.mq.mac}</span>
+        <span class="fadet">${a.vendor || a.detail || ""}</span>
+        <span class="awhen">${hora(a.at)}</span>`;
+      bloco.appendChild(linha);
+    }
+    td.appendChild(bloco);
   }
   const caixa = document.createElement("div");
   caixa.className = "mlist";
@@ -295,6 +357,10 @@ const ARQ_LABEL = {
 
 let relatorio = null;
 let podeRelatorio = true;
+// sedes fora do relatório — pré-carregada do estado da última geração; o
+// usuário mexe nas caixas e o POST leva a lista nova
+let excluidas = new Set();
+let excluidasCarregadas = false;
 
 function tamanho(bytes) {
   if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(1)} MB`;
@@ -302,11 +368,36 @@ function tamanho(bytes) {
   return `${bytes} B`;
 }
 
+function renderExcluidas() {
+  const caixa = $("#rexlist");
+  caixa.innerHTML = "";
+  for (const s of sites) {
+    const lab = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = excluidas.has(s.id);
+    cb.onchange = () => {
+      cb.checked ? excluidas.add(s.id) : excluidas.delete(s.id);
+      $("#rexn").textContent = excluidas.size ? `(${excluidas.size})` : "";
+    };
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(` ${s.id}`));
+    caixa.appendChild(lab);
+  }
+  $("#rexn").textContent = excluidas.size ? `(${excluidas.size})` : "";
+}
+
 function renderRelatorio() {
   const sec = $("#relatorio");
   sec.hidden = !podeRelatorio;
   if (!podeRelatorio) return;
   const r = relatorio || {};
+  // a memória entre gerações: o estado guarda quem ficou fora da última
+  if (!excluidasCarregadas && Array.isArray(r.excluded)) {
+    excluidas = new Set(r.excluded);
+    excluidasCarregadas = true;
+  }
+  renderExcluidas();
   const estado = $("#restado");
   const arquivos = $("#rfiles");
   estado.classList.toggle("err", r.status === "failed");
@@ -318,10 +409,14 @@ function renderRelatorio() {
     estado.textContent = t("report_fleet_failed", { erro: r.error || "" });
   } else if (r.status === "done") {
     const janela = Math.round(((r.until || 0) - (r.since || 0)) / 86400);
-    estado.textContent = t("report_fleet_ready", {
-      when: new Date((r.built_at || 0) * 1000).toLocaleString(),
-      dias: janela,
-    });
+    estado.textContent =
+      t("report_fleet_ready", {
+        when: new Date((r.built_at || 0) * 1000).toLocaleString(),
+        dias: janela,
+      }) +
+      ((r.excluded || []).length
+        ? ` · ${t("report_fleet_excluded_n", { n: r.excluded.length })}`
+        : "");
   } else {
     estado.textContent = t("report_fleet_none");
   }
@@ -361,7 +456,11 @@ async function carregarRelatorio() {
 async function pedirRelatorio() {
   $("#rgerar").disabled = true;
   try {
-    relatorio = await api.post(`/api/v1/labs/report?dias=${dias}`, {}, { kind: "admin" });
+    relatorio = await api.post(
+      "/api/v1/labs/report",
+      { dias, excluir: [...excluidas] },
+      { kind: "admin" }
+    );
   } catch (e) {
     toast(`${t("error")}: ${e.message}`, true);
   }

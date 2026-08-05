@@ -348,10 +348,13 @@ chega a todas as sedes já criadas, no boot seguinte. O `wallpaper` do
 `GET /config` traz `origin` (`"image"` ou `"model"`) para a tela poder dizer de
 onde veio.
 
-`PATCH /api/v1/models/{nome}` aceita `wallpaper_locked`. Travado é
-`modelo.wallpaper_locked` **ou** `imagem.wallpaper_locked`: o do modelo vale
-para todas e não se contorna sede a sede; o da imagem continua existindo porque
-os convites o emitem por sede. Só a administração troca um wallpaper travado.
+`PATCH /api/v1/models/{nome}` aceita `wallpaper_locked`. A ordem das três
+regras é o contrato: a trava **da própria imagem** vale sempre (o convite a
+fixa de propósito em sedes Livres — wallpaper de patrocinador); a imagem
+`unlocked` escapa da trava **do modelo**, como escapa dos campos `locked` do
+formulário; senão vale o modelo. Só a administração troca um wallpaper travado
+— e só ela liga/desliga o `wallpaper_locked` de uma imagem pelo `PATCH` (o
+mesmo portão do `unlocked`).
 
 ### Roster e vínculos
 
@@ -473,7 +476,7 @@ do modelo vale igual, com `403` e o nome do campo.
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| POST | `/api/v1/labs/report` | A | `?dias=7` | `202` `{status, since, until, started}` |
+| POST | `/api/v1/labs/report` | A | `{dias?, excluir?: [ids]}` | `202` `{status, since, until, excluded, started}` |
 | GET | `/api/v1/labs/report` | A | — | `{status, since, until, built_at?, error?, files:[{name,size}]}` |
 | GET | `/api/v1/labs/report/{nome}` | A (também por link) | — | o arquivo |
 
@@ -495,6 +498,10 @@ novo enquanto uma anda **não é erro**: responde `202` com `started: false`, pa
 que duas abas abertas não recebam um 409 que ninguém pediu. Um `building` mais
 velho que meia hora é tratado como geração morta — se o worker reinicia no meio,
 a tarefa vai junto e o estado ficaria travado para sempre.
+
+`excluir` tira sedes do relatório (a de teste inflaria o perfil nacional). Os
+ids são validados antes de virarem argumento de subprocesso, e a lista fica em
+`excluded` no estado — a tela pré-marca as mesmas sedes na geração seguinte.
 
 Os arquivos, todos de uma passada só (ler 1,5 GB duas vezes seria pagar duas
 vezes):

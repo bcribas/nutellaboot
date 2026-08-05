@@ -125,3 +125,66 @@ tr.maquinas > td { padding: 0 0 10px 34px; background: var(--panel); }
 }
 
 .confirma input { width: 8ch; font-size: 18px; text-align: center; }
+
+/* a faixa de alertas da frota: sala de controle. As classes awhat/amac/awhen
+   vêm do lab.css do hotconfig, que esta tela já importa. */
+.fleetalerts {
+  margin: 0 16px 12px;
+  border: 1px solid var(--bad);
+  border-radius: 10px;
+  background: rgba(220, 60, 60, 0.08);
+  padding: 8px 14px;
+}
+
+.fleetalerts .fahead {
+  font-weight: 700;
+  color: var(--bad);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.farow {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 13px;
+  text-decoration: none;
+  color: inherit;
+}
+
+a.farow:hover .fasede { text-decoration: underline; }
+.farow .fasede { color: var(--accent); }
+.farow .fadet { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.farow .awhen { margin-left: auto; }
+
+/* os alertas de uma sede expandida, acima dos chips */
+.sedealertas {
+  border-left: 3px solid var(--bad);
+  padding: 4px 10px;
+  margin: 6px 0;
+}
+
+/* o pulo para o hotconfig da sede */
+td.nome .gohot {
+  margin-left: 6px;
+  text-decoration: none;
+  color: var(--accent);
+  font-size: 13px;
+}
+td.nome .gohot:hover { text-decoration: underline; }
+
+/* o seletor de sedes fora do relatório */
+.rexcluir { margin-top: 10px; font-size: 13px; }
+.rexcluir summary { cursor: pointer; color: var(--muted); }
+.rexcluir #rexn { color: var(--accent); }
+.rexlist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 2px 12px;
+  margin-top: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.rexlist label { cursor: pointer; color: var(--muted); }
+.rexlist label:hover { color: inherit; }

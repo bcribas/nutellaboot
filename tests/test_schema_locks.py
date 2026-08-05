@@ -201,3 +201,55 @@ def test_a_rota_do_esquema_devolve_as_opcoes(client, ha, base):
     assert len(campos["LANGUAGE"]["options"]) == 3
     # campo que não é select não inventa opções
     assert campos["FORCE_CLEAN_HOME_ON_BOOT"].get("options") in (None, [])
+
+
+def test_imagem_livre_troca_o_wallpaper_mesmo_com_trava(client, base, ha, data_root):
+    """O caso 26tete: sede liberada (`unlocked`) com trava de wallpaper no
+    MODELO. A regra é a mesma dos campos — locked e não admin e não unlocked —
+    e o wallpaper era a única trava com regra própria, sem o `unlocked`: a
+    sede liberada continuava sem poder trocar, com a tela obedecendo o
+    servidor errado."""
+    fsdb.write_json(
+        data_root / "models" / "t" / "model.json",
+        {"layers": [], "public": True, "wallpaper_locked": True},
+    )
+    img = _cria(client, ha, "livre1", unlocked=True)
+    howner = {"Authorization": f"Bearer {img['token']}"}
+
+    cfg = client.get("/api/v1/site-images/livre1/config", headers=howner).json()
+    assert cfg["can_edit_wallpaper"] is True
+
+    assert client.put(
+        "/api/v1/site-images/livre1/wallpaper",
+        files={"file": ("f.png", PNG, "image/png")},
+        headers=howner,
+    ).status_code == 200
+
+    # a trava do modelo continua valendo para quem NÃO é livre
+    presa = _cria(client, ha, "presa1")
+    assert client.put(
+        "/api/v1/site-images/presa1/wallpaper",
+        files={"file": ("f.png", PNG, "image/png")},
+        headers={"Authorization": f"Bearer {presa['token']}"},
+    ).status_code == 400
+
+
+def test_sub_admin_nao_desliga_a_propria_trava_de_wallpaper(client, base, ha):
+    """O único campo de cadeado sem portão no PATCH: o dono podia desligar a
+    trava que o convite fixou. Agora é o mesmo portão do `unlocked`."""
+    code = client.post(
+        "/api/v1/invites", json={"model": "t", "wallpaper_locked": True}, headers=ha
+    ).json()["invites"][0]["code"]
+    client.post("/api/v1/public/site-images", json={"code": code, "id": "dosub1"})
+    hs = {"Authorization": f"Bearer {code}", "X-NB-Console": "1"}
+
+    r = client.patch(
+        "/api/v1/site-images/dosub1", json={"wallpaper_locked": False}, headers=hs
+    )
+    assert r.status_code == 403, r.text
+    assert store.get_site_image("dosub1")["wallpaper_locked"] is True
+    # e a administração continua podendo
+    assert client.patch(
+        "/api/v1/site-images/dosub1", json={"wallpaper_locked": False}, headers=ha
+    ).status_code == 200
+

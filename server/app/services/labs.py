@@ -38,14 +38,23 @@ def _janela(dias: float) -> float:
     return time.time() - max(0.0, dias) * 86400
 
 
+# A lista de alertas por sede tem teto: o payload da sondagem de 5 s não pode
+# crescer sem limite (35 máquinas × 50 alertas abertos — o teto por máquina —
+# seriam 1750 entradas numa linha). A contagem `alerts` continua sendo o
+# TOTAL: a coluna não pode mentir quando a lista trunca.
+ALERTAS_NA_LINHA = 15
+
+
 def resumo_de(image_id: str, *, desde: float) -> dict:
-    """As contas de uma sede. Três leituras por máquina, e nenhuma delas é o
+    """As contas de uma sede. Quatro leituras por máquina, e nenhuma delas é o
     `status.json` — que é livre, pode ter 256 kB e não cabe num resumo."""
     agora = time.time()
     total = ativas = novas = online = travadas = alertas = sem_time = 0
+    lista_alertas: list[dict] = []
     for mac in m.list_macs(image_id):
         d = m.machine_dir(image_id, mac)
         info = fsdb.read_json(d / "machine.json", {}) or {}
+        binding = fsdb.read_json(d / "binding.json")
         total += 1
         visto = info.get("last_seen", 0)
         if visto >= desde:
@@ -56,9 +65,24 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
             online += 1
         if (fsdb.read_json(d / "lockstate.json", {}) or {}).get("locked"):
             travadas += 1
-        alertas += len(fsdb.read_json(d / "alerts.json", []) or [])
-        if not fsdb.read_json(d / "binding.json"):
+        # o arquivo sempre foi lido INTEIRO e só o len() era aproveitado — foi
+        # assim que o painel dizia "3 alertas" sem conseguir dizer quais
+        abertos = fsdb.read_json(d / "alerts.json", []) or []
+        alertas += len(abertos)
+        for a in abertos:
+            if not isinstance(a, dict):
+                continue
+            lista_alertas.append({
+                "mac": mac,
+                "kind": a.get("kind", ""),
+                "detail": a.get("detail", ""),
+                "vendor": a.get("vendor", ""),
+                "at": a.get("at", 0),
+                "team": (binding or {}).get("name", ""),
+            })
+        if not binding:
             sem_time += 1
+    lista_alertas.sort(key=lambda a: a.get("at") or 0, reverse=True)
     return {
         "machines": total,
         "active": ativas,
@@ -67,6 +91,7 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
         "locked": travadas,
         "alerts": alertas,
         "unbound": sem_time,
+        "alert_list": lista_alertas[:ALERTAS_NA_LINHA],
     }
 
 

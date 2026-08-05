@@ -32,6 +32,14 @@
   <input type="text" id="search" data-i18n-placeholder="search">
 </div>
 
+<!-- Todos os alertas abertos da frota, das linhas do resumo. Sem botão de
+     dispensar: o registro de quem dispensou pertence ao hotconfig da sede, e
+     o link leva direto lá. -->
+<div class="fleetalerts" id="fleetalerts" hidden>
+  <div class="fahead"><span data-i18n="fleet_alert_strip"></span></div>
+  <div id="falist"></div>
+</div>
+
 <!-- A seleção mistura os dois níveis: sede inteira e máquina solta. -->
 <div class="actionbar" id="actionbar">
   <span id="selcount"></span>
@@ -56,6 +64,10 @@
     <span class="spacer"></span>
     <button type="button" class="small primary" id="rgerar" data-i18n="report_fleet_build"></button>
   </div>
+  <details class="rexcluir">
+    <summary><span data-i18n="report_fleet_exclude"></span> <span id="rexn"></span></summary>
+    <div id="rexlist" class="rexlist"></div>
+  </details>
   <div class="rfiles" id="rfiles"></div>
 </section>
 
