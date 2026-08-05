@@ -166,6 +166,10 @@ def test_bootstrap_tem_tela_para_cada_falha_de_rede():
     assert 'nb_fatal_screen "NO NETWORK"' in texto
     assert 'nb_fatal_screen "NO SERVER"' in texto
     assert 'nb_fatal_screen "NO IMAGE"' in texto
+    # e wifi é um terceiro problema: mandar conferir cabo e switch quem está
+    # tentando por rádio é mandar procurar no lugar errado
+    assert 'nb_fatal_screen "NO WIFI"' in texto
+    assert "$NB_WIFI_REASON" in texto
     # a de servidor menciona o relógio: bateria de CMOS morta dá exatamente
     # este sintoma e é diagnóstico que ninguém adivinha
     assert "CMOS" in texto

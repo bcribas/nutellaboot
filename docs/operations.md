@@ -1020,11 +1020,24 @@ wifi), `NO SERVER` (nome do servidor, portal cativo, relógio da BIOS errado),
 
 ### O wifi não conecta
 
-Verifique o `wifi.conf`: os campos são separados por **TAB**, não por espaço.
-Rede oculta precisa da palavra `hidden` no terceiro campo. A máquina tenta a
-rede cabeada primeiro; a mensagem "wifi não associou em 30s" significa que o
-`wpa_supplicant` subiu mas não completou o handshake — senha errada, sinal
-fraco ou rede fora do ar.
+**A tela `NO WIFI` já diz o motivo.** Ela aparece quando a máquina tentou pelo
+rádio e não foi, e traz a razão apurada do próprio `wpa_supplicant`:
+
+| Motivo na tela | O que fazer |
+|---|---|
+| `refused the password` | a senha no `wifi.conf` foi recusada pelo AP — confira maiúsculas e minúsculas, e o TAB entre nome e senha |
+| `requires WPA3 protection (PMF)` | o AP está em modo WPA3/misto exigente; use a rede WPA2 do mesmo roteador ou acrescente uma |
+| `was not found on the air` | o nome não apareceu no scan: erro de digitação, rede oculta sem `hidden` no terceiro campo, ou fora de alcance |
+| `no address came from DHCP` | conectou, mas o roteador não deu endereço — é problema do DHCP daquela rede, não do pendrive |
+
+Sobre o arquivo: os campos são separados por **TAB**, e a senha do WPA tem de 8
+a 63 caracteres (o boot avisa e pula a rede quando não tem). Rede oculta precisa
+de `hidden` no terceiro campo. Editar no Windows é seguro — fim de linha, BOM e
+espaço sobrando são limpos no boot.
+
+Sem cabo conectado, o rádio é tentado **antes** da rede cabeada: com cabo
+espetado num switch morto, a espera do DHCP cabeado é de cinco minutos por
+rodada.
 
 ### Seeder aparece e some da lista
 

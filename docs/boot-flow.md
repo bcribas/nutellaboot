@@ -206,6 +206,58 @@ o servidor responde; se não, tenta o wifi e checa de novo. Até 10 rodadas
 (`NB_NET_TRIES`); esgotadas, a máquina avisa e reinicia — nunca fica parada
 esperando alguém.
 
+**Sem carrier na porta cabeada, o rádio vem primeiro.** O `dhcpcd` do
+initramfs-tools tenta em quatro rodadas de 30, 60, 90 e 120 s: são cinco
+minutos antes de o `wpa_supplicant` sequer subir, e foi o que uma sala mediu no
+console. Se nenhuma interface cabeada reporta carrier e o `wifi.conf` tem
+redes, o wifi é tentado antes. Placa que não reporta carrier continua no
+caminho cabeado — só quem responde `0` explicitamente é considerada sem link.
+
+### O arquivo é limpo uma vez, na entrada
+
+O `wifi.conf` é digitado à mão pela sede, no computador que ela tiver. O initrd
+**normaliza a cópia que vai para a RAM** (`nb_wifi_normalize`): tira o CR do
+fim de linha do Windows, o BOM e os espaços das pontas de cada campo, e grava
+os três campos separados por um TAB. O arquivo do pendrive não é tocado.
+
+A limpeza é feita aqui, e não em cada consumidor, porque são dois — este script
+e o `80-nm-wifi.sh` do NetworkManager — e duas limpezas seriam duas verdades
+sobre o mesmo arquivo. Um `\r` grudado na senha faz o handshake falhar com a
+senha certa digitada, e nada na tela diz isso.
+
+Linha sem TAB é **avisada, não adivinhada**: cortar no espaço quebraria quem
+tem SSID com espaço ("sala de aula"), que é legítimo.
+
+### WPA2, WPA2+PMF e WPA3
+
+O bloco gerado declara `key_mgmt=WPA-PSK WPA-PSK-SHA256 SAE` com
+`ieee80211w=1`. Roteador atual costuma vir em modo WPA2/WPA3 misto, que **exige
+proteção de quadro de gerência**; um cliente que só oferece `WPA-PSK` associa e
+se desconecta sozinho um segundo depois — no console aparece `associated`
+seguido de `deauthenticating ... by local choice`, nas duas bandas do mesmo
+roteador, e mais nada. O `ieee80211w=1` é opcional, não obrigatório: AP velho
+sem PMF continua conectando.
+
+Um `wpa_supplicant` compilado sem SAE rejeita o **arquivo inteiro**, não a
+linha. Por isso `configure_wifi` tem um caminho de volta: se ele não subir,
+regrava em modo básico (`nb_write_wpaconf basico`, só `WPA-PSK`) e tenta mais
+uma vez — uma, não em laço.
+
+Senha fora de 8..63 caracteres é avisada e a rede é pulada. O wpa_supplicant
+descartaria o bloco em silêncio, e o sintoma seria "não associou". Chave já
+derivada (64 hexadecimais) vai sem aspas, que é como ele a distingue de uma
+senha de 64 caracteres.
+
+### Quando não conecta, a tela diz por quê
+
+O log do `wpa_supplicant` vai para um arquivo (`-f`) e morre com o initrd: o
+console mostrava a associação e a queda, e isso não distingue senha errada de
+PMF exigido pelo AP. `nb_wifi_report` lê esse log, o `wpa_cli status` e o
+`scan_results` e escreve na tela o estado, as linhas que importam, os SSIDs
+pedidos e os que aparecem no ar — **nunca a senha**. Daí sai a tela `NO WIFI`,
+com o motivo já traduzido em ação: senha recusada, PMF/WPA3, nome não
+encontrado no ar, ou associado sem DHCP.
+
 ## TLS: validação de verdade
 
 O hook do initrd copia o **bundle completo de CAs do sistema** para dentro da

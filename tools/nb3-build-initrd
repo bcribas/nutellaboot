@@ -100,10 +100,15 @@ echo ">> conferindo o que entrou no initrd"
 LISTA=$(mktemp)
 chroot "$MNT" lsinitramfs "/boot/initrd.img-$KVER" > "$LISTA"
 FALTOU=""
-for f in usr/bin/aria2c usr/bin/wget.good usr/bin/md5sum \
+# A lista cobria só o caminho de download e TLS. Perder o wifi inteiro —
+# supplicant, rádio, firmware, cliente de DHCP — passava por aqui sem um pio, e
+# só aparecia numa sala sem cabo.
+for f in usr/bin/aria2c usr/bin/wget.good usr/bin/md5sum usr/bin/tail \
     usr/bin/stdbuf usr/libexec/coreutils/libstdbuf.so \
     scripts/nutellaboot scripts/nb3-ui \
-    etc/nutellaboot-build etc/ssl/certs/ca-certificates.crt; do
+    etc/nutellaboot-build etc/ssl/certs/ca-certificates.crt \
+    sbin/wpa_supplicant sbin/wpa_cli sbin/rfkill sbin/dhcpcd \
+    lib/firmware/regulatory.db net/wireless/cfg80211 net/mac80211/mac80211; do
     grep -Fq "$f" "$LISTA" || FALTOU="$FALTOU $f"
 done
 rm -f "$LISTA"

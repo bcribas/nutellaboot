@@ -6,6 +6,15 @@
 # Rede aberta: deixe a senha vazia (dois TABs seguidos).
 # Rede oculta: escreva "hidden" no terceiro campo.
 #
+# A senha do WPA tem de 8 a 63 caracteres (ou 64 hexadecimais, se você tiver a
+# chave já derivada). Fora disso o boot avisa e pula a rede — o wpa_supplicant
+# descartaria o bloco em silêncio, e o sintoma seria "não associou".
+#
+# O TAB entre os campos é obrigatório: nome de rede com espaço é comum ("sala
+# de aula"), então o boot não tem como adivinhar onde o nome termina. Editar
+# este arquivo no Windows é seguro — o fim de linha do Windows, o BOM e espaço
+# sobrando são limpos no boot.
+#
 # Este mesmo arquivo alimenta DUAS coisas, sem duplicação:
 #   1. o wpa_supplicant do initrd, que conecta antes de baixar o sistema;
 #   2. os perfis do NetworkManager do sistema já instalado.

@@ -14,6 +14,14 @@ nb3_post_nm_wifi() {
     _dir=${rootmnt?}/etc/NetworkManager/system-connections
     mkdir -p "$_dir"
 
+    # A limpeza do arquivo (CR do Windows, BOM, espaço nas pontas) é feita uma
+    # vez só, pelo initrd, ao copiar do pendrive para a RAM — `nb_wifi_normalize`.
+    # O `tr` aqui é para o pendrive que ainda tem initrd ANTIGO: o stuff é
+    # servido novo a cada boot, o initrd não. Um `\r` no fim vira senha errada
+    # gravada no perfil, e o NetworkManager não diz que a senha está errada:
+    # ele só não conecta.
+    tr -d '\r' < "$_conf" > "$_conf.nm" || return 0
+
     while IFS="$(printf '\t')" read -r _ssid _psk _flags; do
         case "$_ssid" in '' | '#'*) continue ;; esac
         # O SSID vira NOME DE ARQUIVO. Um SSID com barra escreveria fora de
@@ -53,7 +61,8 @@ nb3_post_nm_wifi() {
             echo "method=auto"
         } > "$_file"
         chmod 600 "$_file"
-    done < "$_conf"
+    done < "$_conf.nm"
+    rm -f "$_conf.nm"
     nb_log "wifi profiles generated for NetworkManager"
 }
 

@@ -36,6 +36,10 @@ copy_exec /bin/bash /bin
 # voltava em branco. Os scripts deixaram de usá-lo; ele vem junto para que a
 # próxima linha que o use não repita a história.
 copy_exec /usr/bin/head /usr/bin
+# `tail` pela mesma razão: o diagnóstico de wifi mostra as últimas linhas do
+# log do wpa_supplicant. Ele HOJE aparece no initrd sem ninguém pedir, e é
+# exatamente esse tipo de sorte que some numa versão nova do initramfs-tools.
+copy_exec /usr/bin/tail /usr/bin
 # `stat` é o tamanho do arquivo para a barra de progresso do download
 copy_exec /usr/bin/stat /usr/bin
 # `stdbuf` desliga a bufferização da saída do aria2. Sem ele, os números do
@@ -77,10 +81,17 @@ copy_exec /sbin/wpa_supplicant /sbin
 copy_exec /sbin/wpa_cli /sbin
 copy_exec /usr/bin/wpa_passphrase /bin
 copy_exec /sbin/rfkill /sbin
-# Credenciais de fallback: o normal é vir do wifi.conf da partição do pendrive.
-if [ -f /etc/initramfs-tools/wifi.conf ]; then
-    copy_file config /etc/initramfs-tools/wifi.conf /etc/nutellaboot-wifi.conf
-fi
+# `iw` não é usado por script nenhum — o wpa_cli responde tudo que o boot
+# precisa. Vai junto porque, quando o wifi de uma sede não sobe, é a única
+# forma de olhar o rádio pelo console: `iw dev wlan0 scan`, `iw reg get`.
+# Condicional porque nem toda imagem-mestre o tem instalado, e a falta dele
+# não pode derrubar a construção do initrd.
+for _nb_iw in /usr/sbin/iw /sbin/iw /usr/bin/iw; do
+    if [ -x "$_nb_iw" ]; then
+        copy_exec "$_nb_iw" /usr/sbin/iw
+        break
+    fi
+done
 
 # --- identidade da construção ---
 # Carimbada por tools/nb3-build-initrd logo antes do update-initramfs. É o que

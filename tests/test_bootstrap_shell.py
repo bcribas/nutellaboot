@@ -285,8 +285,12 @@ def test_nenhum_script_de_boot_depende_de_head():
 
 
 def test_wpaconf_from_wifi_conf(sh):
+    # as senhas têm 8 caracteres ou mais porque é o que o WPA aceita: abaixo
+    # disso o wpa_supplicant descarta o bloco, e agora o gerador avisa e pula
+    # (tests/test_wifi_boot.py). O "outra" de antes nunca teria funcionado numa
+    # sala.
     (sh.run_dir / "wifi.conf").write_text(
-        "# comentário\nICPC-BR\tsenha-secreta\nICPC-BR-EMG\noculta\toutra\thidden\n"
+        "# comentário\nICPC-BR\tsenha-secreta\nICPC-BR-EMG\noculta\toutra-senha\thidden\n"
     )
     out = sh('nb_write_wpaconf; cat "$NB_WPA_CONF"')
     assert 'ssid="ICPC-BR"' in out

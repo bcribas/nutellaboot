@@ -17,6 +17,12 @@ NB_RUN=${NB_RUN:-/run/nutellaboot}
 # exercitada fora do initramfs (tests/test_bootstrap_shell.py).
 NB_CFGMNT=${NB_CFGMNT:-/mnt/nb3cfg}
 NB_WPA_CONF=${NB_WPA_CONF:-/etc/wpa_supplicant.conf}
+NB_WPA_CTRL=${NB_WPA_CTRL:-/run/wpa_supplicant}
+NB_WPA_PID=${NB_WPA_PID:-/run/initram-wpa_supplicant.pid}
+NB_WPA_LOG=${NB_WPA_LOG:-/tmp/wpa_supplicant.log}
+NB_SYS_NET=${NB_SYS_NET:-/sys/class/net}
+# onde o dhcpcd do initramfs-tools deixa net-<iface>.conf
+NB_NETCONF_DIR=${NB_NETCONF_DIR:-/run}
 NB_HOSTS_FILE=${NB_HOSTS_FILE:-/etc/hosts}
 NB_RESOLV_FILE=${NB_RESOLV_FILE:-/etc/resolv.conf}
 NB_DEFAULTS_FILE=${NB_DEFAULTS_FILE:-/etc/nutellaboot.defaults}
@@ -104,7 +110,9 @@ nb_read_usbconfig() {
     done
     if [ -n "$_dev" ] && mount -o ro "$_dev" "$NB_CFGMNT" 2> /dev/null; then
         [ -f "$NB_CFGMNT/nutellaboot.conf" ] && cp "$NB_CFGMNT/nutellaboot.conf" "$NB_RUN/"
-        [ -f "$NB_CFGMNT/wifi.conf" ] && cp "$NB_CFGMNT/wifi.conf" "$NB_RUN/"
+        # a cópia na RAM já sai limpa; o arquivo do pendrive não se toca
+        [ -f "$NB_CFGMNT/wifi.conf" ] &&
+            nb_wifi_normalize "$NB_CFGMNT/wifi.conf" "$NB_RUN/wifi.conf"
         sync
         umount "$NB_CFGMNT"
         nb_log "configuration read from the USB drive ($_dev)"
@@ -155,20 +163,131 @@ nb_read_usbconfig() {
 
 # --- 2. rede ----------------------------------------------------------------
 
-# Gera wpa_supplicant.conf a partir do wifi.conf do pendrive (ssid<TAB>psk[<TAB>hidden]).
+# Tira espaços das pontas de um campo. Sem `local` em sh POSIX, e por isso o
+# prefixo próprio: `_iface` compartilhado entre duas funções desta seção já
+# custou uma sala (a mesma classe do `sleep RAM` do 05-ui.sh).
+nb_trim() {
+    _nbt_v=$1
+    while :; do
+        case "$_nbt_v" in
+            ' '* ) _nbt_v=${_nbt_v# } ;;
+            *' ' ) _nbt_v=${_nbt_v% } ;;
+            *) break ;;
+        esac
+    done
+    printf '%s' "$_nbt_v"
+}
+
+# Deixa o wifi.conf num formato só: sem CR, sem BOM, campos separados por UM
+# tab e sem espaço nas pontas.
+#
+# A limpeza é feita UMA VEZ, aqui, sobre a cópia que vai para a RAM — e não em
+# cada consumidor. São dois (o wpa_supplicant deste script e os perfis do
+# NetworkManager em 60-postmount.d/80-nm-wifi.sh) e duas limpezas seriam duas
+# verdades sobre o mesmo arquivo, que é como uma delas fica para trás.
+#
+# O arquivo é digitado à mão pela sede, no computador que ela tiver: chega com
+# CRLF do Windows (o `\r` gruda na senha e o handshake falha com a senha certa
+# na tela), com BOM, e com espaço sobrando depois do último campo. Nada disso
+# dá erro — dá "não associou".
+nb_wifi_normalize() {
+    [ -s "$1" ] || return 1
+    _nbz_tmp=$2.raw
+    tr -d '\r' < "$1" | sed "1s/^$(printf '\357\273\277')//" > "$_nbz_tmp"
+    : > "$2"
+    _nbz_num=0
+    while IFS= read -r _nbz_line || [ -n "$_nbz_line" ]; do
+        _nbz_num=$((_nbz_num + 1))
+        # comentário indentado continua sendo comentário; linha de rede
+        # indentada continua sendo rede
+        case "$(nb_trim "$_nbz_line")" in '' | '#'*) continue ;; esac
+        # Sem TAB não dá para adivinhar onde acaba o nome: "minha rede" é um
+        # SSID legítimo, e cortar no espaço quebraria quem está certo. Avisa —
+        # e o relatório de falha mostra o nome que foi tentado, o que torna o
+        # engano óbvio para quem está na sala.
+        case "$_nbz_line" in
+            *"$(printf '\t')"*) ;;
+            *)
+                nb_warn "wifi.conf line $_nbz_num: no TAB between network name and password"
+                ;;
+        esac
+        # `read` num bloco depois do pipe, e não num heredoc: heredoc sem aspas
+        # trata `\` como escape, e senha com barra invertida sairia diferente
+        # do que a sede digitou.
+        printf '%s\n' "$_nbz_line" | {
+            IFS="$(printf '\t')" read -r _nbz_ssid _nbz_psk _nbz_flags
+            _nbz_ssid=$(nb_trim "$_nbz_ssid")
+            _nbz_psk=$(nb_trim "$_nbz_psk")
+            _nbz_flags=$(nb_trim "$_nbz_flags")
+            [ -n "$_nbz_ssid" ] &&
+                printf '%s\t%s\t%s\n' "$_nbz_ssid" "$_nbz_psk" "$_nbz_flags"
+        } >> "$2"
+    done < "$_nbz_tmp"
+    rm -f "$_nbz_tmp"
+    return 0
+}
+
+# Escapa o que quebraria o arquivo do wpa_supplicant. Senha com aspas existe.
+nb_wpa_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# Gera wpa_supplicant.conf a partir do wifi.conf já normalizado.
+#
+# `nb_write_wpaconf basico` escreve o key_mgmt mínimo. O padrão declara também
+# WPA-PSK-SHA256 e SAE, com `ieee80211w=1`: roteador atual costuma vir em modo
+# WPA2/WPA3 misto, que exige proteção de quadro de gerência, e o cliente que só
+# oferece WPA-PSK **associa e é desconectado por ele mesmo** um segundo depois
+# — foi exatamente o que a sala viu no console ("deauthenticating by local
+# choice" logo após "associated", nas duas bandas do mesmo roteador).
+#
+# O `ieee80211w=1` é opcional, não obrigatório: AP velho sem PMF continua
+# conectando. E um wpa_supplicant compilado sem SAE rejeita o ARQUIVO INTEIRO,
+# não só a linha — é por isso que existe o modo básico, para o qual o
+# configure_wifi regrava e tenta de novo.
 nb_write_wpaconf() {
     [ -s "$NB_RUN/wifi.conf" ] || return 1
+    _nbc_km="WPA-PSK WPA-PSK-SHA256 SAE"
+    _nbc_pmf=1
+    if [ "$1" = basico ]; then
+        _nbc_km="WPA-PSK"
+        _nbc_pmf=""
+    fi
     {
-        echo "ctrl_interface=/run/wpa_supplicant"
+        echo "ctrl_interface=$NB_WPA_CTRL"
         echo "update_config=0"
-        while IFS="$(printf '\t')" read -r _ssid _psk _flags; do
-            case "$_ssid" in '' | '#'*) continue ;; esac
+        while IFS="$(printf '\t')" read -r _nbc_ssid _nbc_psk _nbc_flags; do
+            case "$_nbc_ssid" in '' | '#'*) continue ;; esac
+            # 64 caracteres hexadecimais são a chave já derivada (PMK), e vão
+            # SEM aspas. Fora disso, a senha tem que ter de 8 a 63: o
+            # wpa_supplicant descarta o bloco EM SILÊNCIO, e o sintoma vira
+            # "não associou" — sem nada dizendo que o tamanho é o problema.
+            _nbc_raw=""
+            if [ ${#_nbc_psk} -eq 64 ]; then
+                case "$_nbc_psk" in
+                    *[!0-9a-fA-F]*) ;;
+                    *) _nbc_raw=1 ;;
+                esac
+            fi
+            if [ -n "$_nbc_psk" ] && [ -z "$_nbc_raw" ] &&
+                { [ ${#_nbc_psk} -lt 8 ] || [ ${#_nbc_psk} -gt 63 ]; }; then
+                # >&2 porque o bloco inteiro tem a saída redirecionada para o
+                # arquivo gerado: sem isso o aviso vira uma linha de
+                # configuração inválida dentro do wpa_supplicant.conf
+                nb_warn "wifi.conf: password for $_nbc_ssid has ${#_nbc_psk} characters (WPA needs 8 to 63)" >&2
+                continue
+            fi
             echo "network={"
-            echo "	ssid=\"$_ssid\""
-            case "$_flags" in *hidden*) echo "	scan_ssid=1" ;; esac
-            if [ -n "$_psk" ]; then
-                echo "	psk=\"$_psk\""
-                echo "	key_mgmt=WPA-PSK"
+            echo "	ssid=\"$(nb_wpa_escape "$_nbc_ssid")\""
+            case "$_nbc_flags" in *hidden*) echo "	scan_ssid=1" ;; esac
+            if [ -n "$_nbc_psk" ]; then
+                if [ -n "$_nbc_raw" ]; then
+                    echo "	psk=$_nbc_psk"
+                else
+                    echo "	psk=\"$(nb_wpa_escape "$_nbc_psk")\""
+                fi
+                echo "	key_mgmt=$_nbc_km"
+                [ -n "$_nbc_pmf" ] && echo "	ieee80211w=1"
             else
                 echo "	key_mgmt=NONE"
             fi
@@ -178,41 +297,128 @@ nb_write_wpaconf() {
     return 0
 }
 
+# A interface sem fio, por CAPACIDADE e não por nome. `ip -o link | /: w/`
+# pegava qualquer nome começando com w — um `wwan0` de modem 4G ganha da
+# `wlan0` na ordem do kernel, e o boot ia tentar associar num modem.
+nb_wifi_iface() {
+    for _nbi_d in "$NB_SYS_NET"/*; do
+        [ -e "$_nbi_d/wireless" ] || [ -e "$_nbi_d/phy80211" ] || continue
+        echo "${_nbi_d##*/}"
+        return 0
+    done
+    return 1
+}
+
+# `wpa_cli` pelo PATH (que o /init do initramfs-tools define com /sbin e
+# /usr/sbin), e não por caminho absoluto: com o caminho fixo nenhum teste
+# alcança esta parte, e foi assim que o módulo do NetworkManager passou meses
+# sem nunca ter sido executado.
+nb_wpa_cli() {
+    wpa_cli -p"$NB_WPA_CTRL" -i"$NB_WIFI_IFACE" "$@" 2> /dev/null
+}
+
+# Por que o wifi não subiu — a pergunta que o console não respondia.
+#
+# O log do wpa_supplicant vai para um arquivo (-f) e morre com o initrd, então
+# "associated" seguido de "deauthenticating by local choice" era tudo que a
+# sala via, e isso não distingue senha errada de PMF exigido pelo AP. Aqui as
+# linhas que importam vão para a tela. A SENHA NUNCA É IMPRESSA.
+nb_wifi_state() {
+    NB_WIFI_STATE=$(nb_wpa_cli status | sed -n 's/^wpa_state=//p' | sed -n 1p)
+    [ -z "$NB_WIFI_STATE" ] && NB_WIFI_STATE="(no answer from wpa_supplicant)"
+}
+
+nb_wifi_report() {
+    nb_wifi_state
+    # -i: o supplicant escreve "Management frame protection" com maiúscula, e
+    # casar caixa exata é como um diagnóstico deixa de aparecer sem ninguém ver
+    _nbr_log=$(grep -iE '4-way|pre-shared|wrong_key|assoc-reject|mfp|management frame|rsn: |no suitable network|^line [0-9]+:' \
+        "$NB_WPA_LOG" 2> /dev/null | tail -n 6)
+
+    nb_warn "wifi state: $NB_WIFI_STATE"
+    [ -n "$_nbr_log" ] && echo "$_nbr_log"
+
+    # o scan responde a pergunta seguinte sem nenhuma ferramenta extra: o nome
+    # aparece? com que segurança? ([WPA2-PSK-CCMP], [WPA3-SAE], [MFPR])
+    _nbr_ssids=$(cut -f1 "$NB_RUN/wifi.conf" 2> /dev/null | tr '\n' ' ')
+    nb_warn "wifi.conf asks for: $_nbr_ssids"
+    for _nbr_s in $_nbr_ssids; do
+        _nbr_seen=$(nb_wpa_cli scan_results | grep -F "	$_nbr_s" | tail -n 1)
+        [ -n "$_nbr_seen" ] && nb_warn "seen: $_nbr_seen"
+    done
+
+    _nbr_min=$(printf '%s' "$_nbr_log" | tr 'A-Z' 'a-z')
+    case "$_nbr_min" in
+        *pre-shared* | *4-way* | *wrong_key*)
+            NB_WIFI_REASON="the access point refused the password in wifi.conf" ;;
+        *mfp* | *"management frame"*)
+            NB_WIFI_REASON="the access point requires WPA3 protection (PMF)" ;;
+        *"no suitable network"*)
+            NB_WIFI_REASON="the network name in wifi.conf was not found on the air" ;;
+        *"line "*)
+            NB_WIFI_REASON="this wpa_supplicant does not understand the generated config" ;;
+        *)
+            NB_WIFI_REASON="associated but the key exchange did not finish (state: $NB_WIFI_STATE)" ;;
+    esac
+}
+
 # Sobe o wifi e ESPERA a associação completar. O nb2 dava um `sleep 3` cego —
 # tempo insuficiente para handshake WPA2 + DHCP, e o stuff servido ainda por
 # cima deixava de chamar esta função.
 configure_wifi() {
-    # sem `head` no initrd: o awk já resolve, e um pipe a menos
-    _iface=$(ip -o link | awk -F': ' '/: w/ {print $2; exit}')
-    [ -z "$_iface" ] && return 1
-    nb_write_wpaconf || [ -s /etc/wpa_supplicant.conf ] || return 1
+    NB_WIFI_IFACE=$(nb_wifi_iface) || return 1
+    [ -z "$NB_WIFI_IFACE" ] && return 1
+    nb_write_wpaconf "$1" || [ -s "$NB_WPA_CONF" ] || return 1
 
-    log_begin_msg "Connecting to wifi on $_iface"
-    rfkill unblock all 2>/dev/null
-    ip link set "$_iface" up
-    mkdir -p /run/wpa_supplicant
-    /sbin/wpa_supplicant -i"$_iface" -c/etc/wpa_supplicant.conf \
-        -P/run/initram-wpa_supplicant.pid -B -f /tmp/wpa_supplicant.log
+    log_begin_msg "Connecting to wifi on $NB_WIFI_IFACE"
+    rfkill unblock all 2> /dev/null
+    ip link set "$NB_WIFI_IFACE" up
+    mkdir -p "$NB_WPA_CTRL"
 
-    _n=0
-    while [ "$_n" -lt "${NB_WIFI_TIMEOUT:-30}" ]; do
-        if /sbin/wpa_cli -p/run/wpa_supplicant -i"$_iface" status 2>/dev/null |
-            grep -q '^wpa_state=COMPLETED'; then
+    # Um supplicant por interface. A partir da segunda rodada de
+    # configure_localnetwork o antigo ainda está vivo, e dois processos
+    # disputando o mesmo rádio dão associação e queda em laço.
+    if nb_wifi_supplicant_vivo; then
+        nb_wpa_cli reconfigure > /dev/null
+        nb_wpa_cli reassociate > /dev/null
+    elif ! wpa_supplicant -i"$NB_WIFI_IFACE" -c"$NB_WPA_CONF" \
+        -P"$NB_WPA_PID" -B -f "$NB_WPA_LOG"; then
+        # Não subiu: quase sempre é o arquivo que ele não entendeu (um
+        # key_mgmt que este binário não tem compilado invalida o arquivo
+        # INTEIRO). Uma tentativa com o mínimo, e só uma.
+        if [ "$1" != basico ]; then
+            nb_warn "wpa_supplicant refused the config; retrying without WPA3"
+            configure_wifi basico
+            return $?
+        fi
+        log_failure_msg "wpa_supplicant did not start"
+        return 1
+    fi
+
+    _nbw_n=0
+    while [ "$_nbw_n" -lt "${NB_WIFI_TIMEOUT:-30}" ]; do
+        if nb_wpa_cli status | grep -q '^wpa_state=COMPLETED'; then
             log_end_msg
-            nb_log "wifi associated on $_iface"
-            DEVICE=$_iface
+            nb_log "wifi associated on $NB_WIFI_IFACE"
+            DEVICE=$NB_WIFI_IFACE
             export DEVICE
             return 0
         fi
         sleep 1
-        _n=$((_n + 1))
+        _nbw_n=$((_nbw_n + 1))
     done
     log_failure_msg "wifi did not associate within ${NB_WIFI_TIMEOUT:-30}s"
+    nb_wifi_report
     return 1
 }
 
+nb_wifi_supplicant_vivo() {
+    _nbv_pid=$(sed -n 1p "$NB_WPA_PID" 2> /dev/null)
+    [ -n "$_nbv_pid" ] && [ -d "/proc/$_nbv_pid" ]
+}
+
 nb_resolvconf() {
-    for _f in /run/net-*.conf; do
+    for _f in "$NB_NETCONF_DIR"/net-*.conf; do
         [ -e "$_f" ] || continue
         # shellcheck disable=SC1090
         . "$_f"
@@ -239,24 +445,99 @@ nb_post() {
         "$NB_SERVER/boot/v3/$1"
 }
 
-configure_localnetwork() {
-    _n=1
-    while [ "$_n" -le "${NB_NET_TRIES:-10}" ]; do
-        log_begin_msg "Configuring the network (attempt $_n)"
-        configure_networking
-        nb_resolvconf
-        log_end_msg
-        nb_online && return 0
+# A sala tentou por wifi e não foi. Dizer "confira o cabo e o switch" aqui é
+# mandar procurar no lugar errado — e o motivo já foi apurado pelo
+# nb_wifi_report, que leu o log do wpa_supplicant e o resultado do scan.
+nb_wifi_screen() {
+    nb_fatal_screen "NO WIFI" \
+        "!This machine could not connect to the wireless network." \
+        "" \
+        "Reason: $NB_WIFI_REASON" \
+        "Last state: ${NB_WIFI_STATE:-unknown}" \
+        "" \
+        "The system is downloaded over the network at every boot, so the" \
+        "machine cannot continue without it." \
+        "" \
+        "!What to check, in this order:" \
+        "  1. wifi.conf on the USB drive: the network name and the" \
+        "     password, with a TAB between them (not spaces)." \
+        "     Upper and lower case matter in both." \
+        "  2. Is the same network working on a phone, in this room?" \
+        "  3. If the access point uses WPA3 or requires PMF, try the" \
+        "     WPA2 network of the same router, or add a WPA2 network." \
+        "  4. A network cable also solves it: plug it in and reboot."
+}
 
-        nb_warn "no connection over the wired network; trying wifi"
+# Devolve o `configure_networking` do initramfs-tools ao estado de quem ainda
+# não configurou nada.
+#
+# Ele roda NESTA shell e marca `IP="done"` assim que existe um
+# /run/net-*.conf. Na chamada seguinte — a do wifi — o `case ${IP}` dele cai em
+# `none|done|off` e NÃO RODA DHCP NENHUM. Basta a porta cabeada pegar um lease
+# que não alcança o servidor (switch sem uplink, VLAN errada, portal cativo)
+# para o wifi ficar sem IP para sempre, sem nada na tela dizendo isso.
+#
+# Restaura, e não zera: um `ip=` estático na linha de comando do kernel
+# continua valendo. E os net-*.conf velhos saem porque o DNS e o gateway da
+# tentativa que falhou seriam lidos como se fossem desta.
+nb_net_reset() {
+    IP=$_nbn_ip0
+    IP6=$_nbn_ip60
+    rm -f "$NB_NETCONF_DIR"/net-*.conf "$NB_NETCONF_DIR"/net6-*.conf 2> /dev/null
+}
+
+# Existe cabo? Só quem responde 0 explicitamente é considerado sem link: NIC
+# que não reporta carrier fica no caminho cabeado, que é o que boota as salas.
+nb_wired_carrier() {
+    for _nbk_d in "$NB_SYS_NET"/*; do
+        _nbk_i=${_nbk_d##*/}
+        [ "$_nbk_i" = lo ] && continue
+        if [ -e "$_nbk_d/wireless" ] || [ -e "$_nbk_d/phy80211" ]; then
+            continue
+        fi
+        ip link set "$_nbk_i" up 2> /dev/null
+        _nbk_c=$(cat "$_nbk_d/carrier" 2> /dev/null)
+        [ "$_nbk_c" = 0 ] || return 0
+    done
+    return 1
+}
+
+configure_localnetwork() {
+    _nbn_ip0=$IP
+    _nbn_ip60=$IP6
+    _nbn_try=1
+    while [ "$_nbn_try" -le "${NB_NET_TRIES:-10}" ]; do
+        # Sem cabo, o dhcpcd cabeado gasta 30+60+90+120 s ANTES de o wifi ser
+        # tentado — cinco minutos por rodada, medidos no console de uma sala.
+        # Com wifi.conf preenchido e nenhum carrier, o rádio vem primeiro.
+        if [ -s "$NB_RUN/wifi.conf" ] && ! nb_wired_carrier; then
+            nb_warn "no cable detected; trying wifi first"
+        else
+            log_begin_msg "Configuring the network (attempt $_nbn_try)"
+            nb_net_reset
+            configure_networking
+            nb_resolvconf
+            log_end_msg
+            nb_online && return 0
+            nb_warn "no connection over the wired network; trying wifi"
+        fi
+
         if configure_wifi; then
+            nb_net_reset
             configure_networking
             nb_resolvconf
             nb_online && return 0
+            # associou e o DHCP não veio: outro problema, outra ação — e o
+            # estado do rádio ainda é o que a tela precisa mostrar
+            nb_wifi_state
+            NB_WIFI_REASON="wifi is connected but no address came from DHCP"
         fi
         sleep 5
-        _n=$((_n + 1))
+        _nbn_try=$((_nbn_try + 1))
     done
+    # A falha do rádio tem tela própria: a lista de "confira o cabo e o switch"
+    # não serve para quem está tentando por wifi, e o motivo já é conhecido.
+    [ -n "$NB_WIFI_REASON" ] && nb_wifi_screen
     nb_fatal_screen "NO NETWORK" \
         "!This machine could not reach the network." \
         "" \

@@ -259,6 +259,21 @@ O ambiente de teste tem um nginx externo que faz proxy de
   (`nb_progress_probe`) e degrada em vez de falhar.
 - **`nb3-qemu-shot` com 2 GB não boota**: o kernel não descompacta um initrd de
   185 MB e a tela fica parada em "Booting", sem erro. Use `--mem 4G`.
+- **`configure_networking` do initramfs-tools roda na NOSSA shell e deixa
+  `IP="done"`.** Ele marca isso assim que existe um `/run/net-*.conf`, e a
+  chamada seguinte cai em `case ${IP} in none|done|off)` e **não roda DHCP
+  nenhum**. Chamá-lo duas vezes (cabo, depois wifi) é o padrão daqui, então
+  `configure_localnetwork` guarda `IP`/`IP6` na entrada e restaura antes de
+  cada chamada (`nb_net_reset`). Sem isso, basta o cabo pegar um lease que não
+  alcança o servidor para o wifi ficar sem endereço para sempre, calado. O
+  arquivo de verdade está DENTRO do initrd construído (`scripts/functions`) —
+  para lê-lo, extraia o cpio: o initrd é uma concatenação de arquivos cpio, o
+  último comprimido com zstd.
+- **Wifi que associa e cai em 1 s é negociação de chave, não DHCP.**
+  `deauthenticating ... by local choice` quer dizer que o CLIENTE desistiu:
+  senha recusada, ou AP em WPA2/WPA3 misto exigindo PMF contra um bloco só com
+  `key_mgmt=WPA-PSK`. O log do `wpa_supplicant` (`-f`) morre com o initrd, por
+  isso `nb_wifi_report` o leva para a tela — sem a senha.
 
 ## Estilo
 
