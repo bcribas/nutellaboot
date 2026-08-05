@@ -118,7 +118,13 @@ function renderImages() {
     perfil.className = "small";
     perfil.textContent = livre ? t("make_official") : t("make_free");
     perfil.onclick = async () => {
-      await api.patch(`/api/v1/site-images/${img.id}`, { unlocked: !livre }, A);
+      // Liberar é liberar: ao virar Livre, a trava PRÓPRIA de wallpaper sai
+      // junto — a trava da imagem vence o `unlocked` (é a do convite, de
+      // propósito), e sem esta linha "liberei a sede" deixava o wallpaper
+      // preso sem nada na tela explicando. A trava do MODELO o `unlocked` já
+      // dispensa sozinho, no servidor.
+      const corpo = livre ? { unlocked: false } : { unlocked: true, wallpaper_locked: false };
+      await api.patch(`/api/v1/site-images/${img.id}`, corpo, A);
       load();
     };
     const cam = document.createElement("button");

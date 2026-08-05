@@ -382,3 +382,13 @@ def test_o_precontest_tem_confirmacao_forte():
     assert "confirmarPrecontest" in js
     trecho = js.split("async function sendCommand")[1].split("try {")[0]
     assert 'cmd === "precontest"' in trecho, "o precontest caiu no confirm() simples"
+
+
+def test_virar_livre_solta_tambem_a_trava_propria_do_wallpaper():
+    """A trava DA IMAGEM vence o `unlocked` (é a do convite, de propósito).
+    Então o botão Livre do console manda as duas coisas — sem isso, "liberei a
+    sede" deixava o wallpaper preso sem nada na tela explicando (o caso
+    26tete, visto em produção)."""
+    js = (REPO / "web" / "admin" / "app.js").read_text(encoding="utf-8")
+    trecho = js.split('t("make_official")')[1].split("load()")[0]
+    assert '{ unlocked: true, wallpaper_locked: false }' in trecho
