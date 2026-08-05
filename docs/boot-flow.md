@@ -249,6 +249,22 @@ descartaria o bloco em silêncio, e o sintoma seria "não associou". Chave já
 derivada (64 hexadecimais) vai sem aspas, que é como ele a distingue de uma
 senha de 64 caracteres.
 
+### A crypto do kernel viaja junto
+
+O 4-way handshake termina com o kernel instalando a chave da sessão, e o
+mac80211 pede `ccm(aes)` por `request_module` NESSA HORA — mesmo com crypto em
+hardware. `ccm`, `cmac` e `michael_mic` são templates carregados por nome:
+nenhuma dependência de símbolo os arrasta para o initrd, e o `MODULES=most` do
+initramfs-tools não copia `kernel/crypto/`. O initrd bootava, associava, e a
+chave não instalava: o supplicant desistia com `WRONG_KEY` — senha certa, em
+Intel e MediaTek igualmente, com rede ABERTA funcionando (não instala chave).
+Três rodadas de campo caçaram senha e driver antes disto.
+
+Hoje o hook os embarca (`manual_add_modules ccm cmac michael_mic gcm ctr`), o
+`nb3-build-initrd` recusa initrd sem eles (aceitando builtin), e o
+`configure_wifi` os carrega antes de conectar — se o `modprobe ccm` falhar
+(initrd antigo), o console avisa na hora, com o rebuild como ação.
+
 ### Power-save desligado, de propósito
 
 Antes de conectar, o boot desliga o power-save do rádio (`iw ... set

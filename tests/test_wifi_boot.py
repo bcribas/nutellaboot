@@ -99,6 +99,11 @@ exit 0
 echo "iw $*" >> "$FAKE_LOG"
 exit 0
 """,
+    "modprobe": """#!/bin/sh
+echo "modprobe $*" >> "$FAKE_LOG"
+[ -n "$FAKE_SEM_CCM" ] && [ "$1" = ccm ] && exit 1
+exit 0
+""",
     "dmesg": """#!/bin/sh
 echo "[    5.1] mt7921e 0000:03:00.0: WM Firmware Version: ____010000, Build Time: 20240826"
 """,
@@ -145,6 +150,7 @@ def sh(tmp_path):
             "FAKE_LOG": str(tmp_path / "chamadas.log"),
             "FAKE_ONLINE": str(tmp_path / "online"),
             "FAKE_DHCP_OK": "",
+            "FAKE_SEM_CCM": "",
             "NB_CMDLINE": str(tmp_path / "cmdline"),
             "NB_WIFI_TIMEOUT": "2",
             "NB_NET_TRIES": "1",
@@ -599,3 +605,60 @@ def test_conectou_diz_em_qual_modo(sh):
     sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
     out = sh("configure_wifi", FAKE_WPA_STATE="COMPLETED")
     assert "(full config)" in out
+
+
+# --- a crypto do kernel ------------------------------------------------------
+#
+# A causa real das três rodadas de campo: o mac80211 pede ccm(aes) por
+# request_module ao instalar a chave do 4-way, e o initrd não tinha o módulo.
+# A chave não instala, o supplicant desiste, e o log diz WRONG_KEY com a senha
+# CERTA — em Intel e MediaTek igualmente. Rede aberta funcionando (não instala
+# chave) com WPA falhando é a assinatura da classe.
+
+
+def test_os_templates_de_crypto_sao_carregados_antes_de_conectar(sh):
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    sh("configure_wifi", FAKE_WPA_STATE="COMPLETED")
+    chamadas = sh.chamadas()
+    assert "modprobe ccm" in chamadas
+    assert "modprobe cmac" in chamadas
+    assert "modprobe michael_mic" in chamadas
+    assert chamadas.index("modprobe ccm") < chamadas.index("wpa_supplicant")
+
+
+def test_initrd_sem_ccm_e_nomeado_na_hora(sh):
+    """Initrd velho, sem os módulos: o aviso aparece antes de gastar 60 s, e o
+    motivo da tela aponta o rebuild — não a senha, que foi o beco das três
+    primeiras rodadas."""
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh(
+        'configure_wifi; echo "REASON=$NB_WIFI_REASON"',
+        FAKE_SEM_CCM="1",
+        FAKE_WPA_CONFLOG="WPA: 4-Way Handshake failed - pre-shared key may be incorrect",
+    )
+    assert "without the WPA crypto modules" in out
+    assert "REASON=this initrd is missing kernel crypto for WPA" in out
+    # e a tentativa NÃO é abortada: driver full-MAC conecta sem os templates
+    assert "wpa_supplicant" in sh.chamadas()
+
+
+def test_sem_ccm_mas_conectou_nao_ha_tela_de_erro(sh):
+    """brcmfmac e afins fazem a crypto no firmware: o aviso fica, o boot segue."""
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh("configure_wifi && echo SUBIU", FAKE_SEM_CCM="1", FAKE_WPA_STATE="COMPLETED")
+    assert "SUBIU" in out
+
+
+def test_chave_recusada_pelo_kernel_aponta_crypto_e_nao_senha(sh):
+    """A linha "Failed to set PTK" era jogada fora pelo filtro do relatório —
+    e sem ela, tudo que sobrava no log era WRONG_KEY, apontando para senha."""
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh(
+        'configure_wifi; echo "REASON=$NB_WIFI_REASON"',
+        FAKE_WPA_CONFLOG=(
+            "WPA: Failed to set PTK to the driver (alg=3 keylen=16)\n"
+            "WPA: 4-Way Handshake failed - pre-shared key may be incorrect"
+        ),
+    )
+    assert "Failed to set PTK" in out
+    assert "REASON=the kernel refused to install the session key" in out

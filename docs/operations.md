@@ -1041,9 +1041,18 @@ rodada.
 
 **A escada, quando "refused the password" insiste.** Um aviso importante:
 `WRONG_KEY` no log **não prova senha errada** — o supplicant carimba isso em
-qualquer desconexão no meio da troca de chaves, inclusive quando o firmware do
-rádio cochila (a família MediaTek mt792x é useira nisso; o boot já desliga o
-power-save dela por conta própria). A ordem de ataque:
+qualquer desconexão no meio da troca de chaves. As duas causas já vistas em
+campo que produzem exatamente isso com a senha CERTA:
+
+- **initrd sem os módulos de crypto do kernel** (`ccm`/`cmac`): a chave da
+  sessão não instala e o cliente desiste — em qualquer chip, com rede aberta
+  funcionando. O boot agora confere sozinho e diz "this initrd was built
+  without the WPA crypto modules; rebuild it" — a solução é regerar o initrd
+  (`nb3-build-initrd`) e regravar/atualizar o pendrive;
+- firmware do rádio cochilando (família MediaTek mt792x; o boot já desliga o
+  power-save por conta própria).
+
+A ordem de ataque:
 
 1. **Confira o tamanho e a impressão digital na tela.** Cada rede aparece como
    `'nome' (password: N chars, fingerprint xxxxxxxx)`. Em qualquer Linux:

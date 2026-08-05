@@ -391,3 +391,16 @@ def test_stuff_does_not_redefine_network_functions():
                 if line.strip().startswith(f"{fn}()") or line.strip().startswith(f"{fn} ()"):
                     bad.append(f"{path.name}:{n}: {fn}")
     assert bad == [], "stuff redefine função de rede: " + "; ".join(bad)
+
+
+def test_o_hook_leva_os_templates_de_crypto_do_wifi():
+    """O mac80211 pede ccm(aes) por request_module ao instalar a chave do
+    4-way: nenhuma dependência de símbolo os arrasta, e o MODULES=most não
+    copia kernel/crypto/. Sem eles, WRONG_KEY com senha certa em todo chip —
+    e rede aberta funcionando, porque não instala chave. Três rodadas de campo
+    caçaram senha e driver antes de achar isto."""
+    texto = HOOK.read_text(encoding="utf-8")
+    linhas = [l for l in texto.splitlines() if "manual_add_modules" in l]
+    juntas = " ".join(linhas)
+    for mod in ("ccm", "cmac", "michael_mic"):
+        assert f" {mod}" in juntas, f"o hook não leva o módulo {mod}"

@@ -276,11 +276,19 @@ O ambiente de teste tem um nginx externo que faz proxy de
   isso `nb_wifi_report` o leva para a tela — sem a senha.
 - **`WRONG_KEY` não prova senha errada.** O supplicant carimba isso em
   QUALQUER desconexão durante o 4-way — inclusive firmware cochilando no meio
-  (MediaTek mt792x, caso documentado upstream; uma MT7922 de sala falhou em
-  duas redes WPA2 com a senha certa). Por isso o boot desliga o power-save
-  antes de conectar, tenta o bloco mínimo quando o rico não fecha, e imprime o
-  tamanho + md5 curto de cada senha para fechar a dúvida dos bytes sem
-  expô-los.
+  (MediaTek mt792x, caso documentado upstream). Por isso o boot desliga o
+  power-save antes de conectar, tenta o bloco mínimo quando o rico não fecha,
+  e imprime o tamanho + md5 curto de cada senha para fechar a dúvida dos bytes
+  sem expô-los.
+- **O mac80211 pede `ccm(aes)` ao kernel POR NOME, na hora de instalar a chave
+  do 4-way.** `request_module`, não dependência de símbolo: `modules.dep` não
+  arrasta os templates de crypto e o `MODULES=most` não copia `kernel/crypto/`.
+  O initrd saiu com TODOS os drivers de wifi e SEM o `ccm.ko` — associava, a
+  chave não instalava, e o log dizia `WRONG_KEY` com a senha certa, em Intel e
+  MediaTek. **Rede aberta funcionando com WPA falhando é a assinatura** (aberta
+  não instala chave). O hook embarca `ccm cmac michael_mic gcm ctr`, o
+  `nb3-build-initrd` recusa initrd sem eles, e `nb_wifi_crypto_check` denuncia
+  initrd antigo no console. Foram TRÊS rodadas de campo caçando senha e driver.
 
 ## Estilo
 

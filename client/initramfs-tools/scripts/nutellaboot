@@ -331,8 +331,11 @@ nb_wifi_state() {
 nb_wifi_report() {
     nb_wifi_state
     # -i: o supplicant escreve "Management frame protection" com maiúscula, e
-    # casar caixa exata é como um diagnóstico deixa de aparecer sem ninguém ver
-    _nbr_log=$(grep -iE '4-way|pre-shared|wrong_key|assoc-reject|mfp|management frame|rsn: |no suitable network|^line [0-9]+:' \
+    # casar caixa exata é como um diagnóstico deixa de aparecer sem ninguém ver.
+    # "failed to set" pega o "Failed to set PTK to the driver" — a linha que
+    # denuncia a chave que o KERNEL recusou (crypto faltando), e que o filtro
+    # antigo jogava fora: sem ela, três rodadas de campo apontaram para senha.
+    _nbr_log=$(grep -iE '4-way|pre-shared|wrong_key|assoc-reject|mfp|management frame|rsn: |no suitable network|failed to set|^line [0-9]+:' \
         "$NB_WPA_LOG" 2> /dev/null | tail -n 6)
 
     nb_warn "wifi state: $NB_WIFI_STATE"
@@ -363,7 +366,16 @@ nb_wifi_report() {
     done
 
     _nbr_min=$(printf '%s' "$_nbr_log" | tr 'A-Z' 'a-z')
+    # A falta de crypto no kernel VENCE o caso de senha: os dois produzem
+    # WRONG_KEY no log, e mandar a sede trocar uma senha certa foi exatamente
+    # o beco das três primeiras rodadas.
+    if [ -n "$NB_WIFI_CRYPTO_MISSING" ]; then
+        NB_WIFI_REASON="this initrd is missing kernel crypto for WPA (rebuild it with nb3-build-initrd)"
+        return 0
+    fi
     case "$_nbr_min" in
+        *"failed to set"*)
+            NB_WIFI_REASON="the kernel refused to install the session key (missing crypto modules in the initrd?)" ;;
         *pre-shared* | *4-way* | *wrong_key*)
             NB_WIFI_REASON="the access point refused the password in wifi.conf" ;;
         *mfp* | *"management frame"*)
@@ -412,6 +424,24 @@ nb_wifi_debug() {
     grep -q 'nbwifidebug=y' "${NB_CMDLINE:-/proc/cmdline}" 2> /dev/null
 }
 
+# Os templates de crypto do 4-way, ANTES de conectar. O mac80211 pede
+# ccm(aes) por request_module na hora de instalar a chave — se o módulo não
+# está no initrd, a chave não instala, o supplicant desiste e o log diz
+# WRONG_KEY com a senha CERTA, em qualquer chip. Rede aberta funcionando com
+# WPA falhando é a assinatura. modprobe é no-op quando é builtin.
+#
+# A falha aqui NÃO bloqueia a tentativa: driver full-MAC (brcmfmac) faz a
+# crypto por conta própria e conecta mesmo sem os templates.
+nb_wifi_crypto_check() {
+    modprobe cmac 2> /dev/null
+    modprobe michael_mic 2> /dev/null
+    if ! modprobe ccm 2> /dev/null; then
+        nb_warn "this initrd was built without the WPA crypto modules (ccm); rebuild it with nb3-build-initrd"
+        NB_WIFI_CRYPTO_MISSING=1
+    fi
+    return 0
+}
+
 # Sobe o wifi e ESPERA a associação completar. O nb2 dava um `sleep 3` cego —
 # tempo insuficiente para handshake WPA2 + DHCP, e o stuff servido ainda por
 # cima deixava de chamar esta função.
@@ -424,6 +454,7 @@ configure_wifi() {
     rfkill unblock all 2> /dev/null
     ip link set "$NB_WIFI_IFACE" up
     nb_wifi_power_off
+    nb_wifi_crypto_check
     mkdir -p "$NB_WPA_CTRL"
 
     # Um supplicant por interface. A partir da segunda rodada de

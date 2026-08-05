@@ -81,6 +81,16 @@ copy_exec /sbin/wpa_supplicant /sbin
 copy_exec /sbin/wpa_cli /sbin
 copy_exec /usr/bin/wpa_passphrase /bin
 copy_exec /sbin/rfkill /sbin
+# Os templates de crypto que o mac80211 pede EM TEMPO DE EXECUÇÃO ao instalar
+# a chave do 4-way (crypto_alloc_aead("ccm(aes)") — incondicional, mesmo com
+# crypto em hardware). São carregados por request_module, então modules.dep NÃO
+# cria aresta para eles e o MODULES=most não copia kernel/crypto/. Sem o ccm:
+# a chave não instala, o supplicant desiste e carimba WRONG_KEY com a senha
+# CERTA, em qualquer chip — e rede aberta funciona, porque não instala chave.
+# Foi assim em Intel e MediaTek, com a mesma senha que o NetworkManager aceita.
+# gcm e ctr são builtin no kernel de hoje; entram na lista porque um kernel
+# futuro pode torná-los módulo, e é exatamente assim que essa classe volta.
+manual_add_modules ccm cmac michael_mic gcm ctr
 # `iw` não é usado por script nenhum — o wpa_cli responde tudo que o boot
 # precisa. Vai junto porque, quando o wifi de uma sede não sobe, é a única
 # forma de olhar o rádio pelo console: `iw dev wlan0 scan`, `iw reg get`.

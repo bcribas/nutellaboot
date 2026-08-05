@@ -111,6 +111,16 @@ for f in usr/bin/aria2c usr/bin/wget.good usr/bin/md5sum usr/bin/tail \
     lib/firmware/regulatory.db net/wireless/cfg80211 net/mac80211/mac80211; do
     grep -Fq "$f" "$LISTA" || FALTOU="$FALTOU $f"
 done
+# Os templates de crypto do 4-way: o mac80211 os pede por request_module ao
+# instalar a chave, então nenhuma dependência os arrasta — e a falta produz
+# WRONG_KEY com senha certa em todo chip (rede aberta funcionando é a
+# assinatura). Valem tanto como módulo no initrd quanto embutidos no kernel:
+# um kernel que os embuta não pode reprovar o build.
+for m in crypto/ccm crypto/cmac crypto/michael_mic; do
+    grep -q "$m" "$LISTA" ||
+        grep -q "$m" "$MNT/lib/modules/$KVER/modules.builtin" ||
+        FALTOU="$FALTOU $m"
+done
 # `iw` é aviso, não erro: o hook o copia SE a imagem-mestre o tiver, e a falta
 # não derruba o boot (o desligamento de power-save tem o caminho do sysfs).
 # Mas sem ele não há como depurar rádio no console de uma sala.
