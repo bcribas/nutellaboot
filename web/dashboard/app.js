@@ -22,6 +22,9 @@ const seriePorSede = new Map();
 let ultimaBusca = 0;
 let zoomAberto = null; // id da sede com o zoom aberto
 let zoomTimer = null;
+let vista = "geral";
+let inventario = null;
+const INV_MS = 60000; // o inventário varre a frota inteira: ritmo mais folgado
 
 // --- regiões -----------------------------------------------------------------
 //
@@ -180,7 +183,7 @@ function render() {
     grade.className = "mapa";
     for (const s of lista) {
       const r = s.res || {};
-      const pior = Math.max(r.mem_max ?? 0, r.cpu_max ?? 0);
+      const pior = Math.max(r.mem_max ?? 0, r.cpu_max ?? 0, r.disk_max ?? 0);
       const el = document.createElement("div");
       el.className =
         "sede" +
@@ -191,7 +194,8 @@ function render() {
         ${s.alerts > 0 ? `<span class="badge">${s.alerts}</span>` : ""}
         ${medidor("RAM", r.mem_avg, r.mem_avg != null ? `${r.mem_avg}%` : "—")}
         ${medidor("CPU", r.cpu_avg, r.cpu_avg != null ? `${r.cpu_avg}%` : "—")}
-        ${medidor("swap", r.swap_on > 0 ? 100 : 0, r.swap_mb > 0 ? `${r.swap_mb}M` : "0")}`;
+        ${medidor("swap", r.swap_on > 0 ? 100 : 0, r.swap_mb > 0 ? `${r.swap_mb}M` : "0")}
+        ${r.disk_max != null ? medidor("disco", r.disk_max, `${r.disk_max}%`) : ""}`;
       el.onclick = () => abrirZoom(s.id);
       grade.appendChild(el);
     }
@@ -237,6 +241,70 @@ async function buscar() {
   render();
 }
 
+// --- as visões de inventário -------------------------------------------------
+
+function hbarra(rotulo, valor, maximo, texto) {
+  const pct = maximo > 0 ? Math.round((100 * valor) / maximo) : 0;
+  return `<div class="hbarra"><span class="hrot" title="${rotulo}">${rotulo}</span>
+    <span class="htrilho"><i style="width:${pct}%"></i></span>
+    <span class="hval">${texto ?? valor}</span></div>`;
+}
+
+function renderInventario() {
+  if (!inventario) return;
+  const inv = inventario;
+  const maxCpu = Math.max(1, ...inv.processors.map(([, n]) => n));
+  $("#inv-cpus").innerHTML = inv.processors
+    .map(([nome, n]) => hbarra(nome, n, maxCpu))
+    .join("") || `<p class="dsub">${t("dash_inv_none")}</p>`;
+  const maxRam = Math.max(1, ...inv.ram.map(([, n]) => n));
+  $("#inv-ram").innerHTML = inv.ram.map(([faixa, n]) => hbarra(faixa, n, maxRam)).join("");
+
+  const maxEd = Math.max(1, ...inv.editors_now.map(([, n]) => n));
+  $("#inv-ed-agora").innerHTML = inv.editors_now
+    .map(([ed, n]) => hbarra(ed, n, maxEd))
+    .join("") || `<p class="dsub">${t("dash_inv_none")}</p>`;
+  const maxMin = Math.max(1, ...inv.editors_minutes.map(([, n]) => n));
+  $("#inv-ed-min").innerHTML = inv.editors_minutes
+    .map(([ed, n]) => hbarra(ed, n, maxMin, `${n} min`))
+    .join("") || `<p class="dsub">${t("dash_inv_none")}</p>`;
+
+  $("#inv-disklow").textContent = inv.disks_low > 0 ? inv.disks_low : "";
+  $("#inv-discos").innerHTML = inv.disks.length
+    ? inv.disks
+        .map((d) => {
+          const cls = d.pct >= 95 ? "bad" : d.pct >= 85 ? "warn" : "";
+          return `<div class="disco-linha${d.online ? "" : " offline"}">
+            <span class="dsede">${d.site}</span>
+            <span class="dquem">${d.team || d.mac}</span>
+            <span class="dpct ${cls}">${d.pct}%</span>
+            <span class="dsub">${d.free_mb} MB ${t("dash_disk_free")}</span></div>`;
+        })
+        .join("")
+    : `<p class="dsub">${t("dash_disk_none")}</p>`;
+}
+
+async function buscarInventario() {
+  try {
+    inventario = await api.get("/api/v1/labs/inventory", { kind: "admin" });
+  } catch (e) {
+    return;
+  }
+  renderInventario();
+}
+
+function trocarVista(nova) {
+  vista = nova;
+  for (const b of document.querySelectorAll(".dabas button")) {
+    b.classList.toggle("on", b.dataset.vista === nova);
+  }
+  $("#v-geral").hidden = nova !== "geral";
+  $("#v-hw").hidden = nova !== "hw";
+  $("#v-ed").hidden = nova !== "ed";
+  $("#v-disco").hidden = nova !== "disco";
+  if (nova !== "geral" && !inventario) buscarInventario();
+}
+
 // --- o zoom de uma sede ------------------------------------------------------
 
 function estadoMaquina(m) {
@@ -250,7 +318,8 @@ function piorDe(m) {
   const mem = res.mem_pct ?? 0;
   const cpu =
     Array.isArray(res.loadavg) && cores ? Math.min(100, Math.round((100 * res.loadavg[0]) / cores)) : 0;
-  return Math.max(mem, cpu, (res.swap_used_mb || 0) > 0 ? 90 : 0);
+  const hd = m.status?.sysdisk?.home_pct ?? 0;
+  return Math.max(mem, cpu, hd, (res.swap_used_mb || 0) > 0 ? 90 : 0);
 }
 
 function renderZoomCabecalho() {
@@ -312,7 +381,10 @@ async function renderZoomMaquinas() {
       <div class="zmacaddr">${m.mac}${est !== "on" ? ` · ${t(est === "stale" ? "stale" : "offline")}` : ""}</div>
       ${medidor("RAM", res.mem_pct, res.mem_pct != null ? `${res.mem_pct}%` : "—")}
       ${medidor("CPU", cpu, cpu != null ? `${cpu}%` : "—")}
-      ${medidor("swap", (res.swap_used_mb || 0) > 0 ? 100 : 0, res.swap_used_mb ? `${res.swap_used_mb}M` : "0")}`;
+      ${medidor("swap", (res.swap_used_mb || 0) > 0 ? 100 : 0, res.swap_used_mb ? `${res.swap_used_mb}M` : "0")}
+      ${m.status?.sysdisk?.home_pct != null
+        ? medidor("disco", m.status.sysdisk.home_pct, `${m.status.sysdisk.home_pct}%`)
+        : ""}`;
     grade.appendChild(el);
   }
 }
@@ -352,8 +424,13 @@ async function main() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") fecharZoom();
   });
+  for (const b of document.querySelectorAll(".dabas button")) {
+    b.onclick = () => trocarVista(b.dataset.vista);
+  }
   await buscar();
+  buscarInventario();
   setInterval(buscar, RITMO_MS);
+  setInterval(buscarInventario, INV_MS);
   setInterval(relogio, 1000);
   relogio();
 }

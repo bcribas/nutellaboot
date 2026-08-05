@@ -443,6 +443,7 @@ que está acontecendo no conjunto, e como ajo num recorte dele".
 |---|---|---|---|---|
 | GET | `/api/v1/labs` | C | `?dias=7` e `?format=csv` | `{sites:[{id, fullname, machines, active, new, online, locked, alerts, unbound}], days}` |
 | POST | `/api/v1/commands` | C | `{command, targets, args?, delay?}` | `{results, machines, failed}` |
+| GET | `/api/v1/labs/inventory` | C | — | de que é feito o parque: `{machines, processors, ram, editors_now, editors_minutes, disks, disks_low}` |
 
 `targets` é `{sede: "all"}` ou `{sede: [macs]}`, misturando os dois à vontade.
 Cada sede vira uma entrada em `results` — com `command_id` e `machines`, ou com

@@ -58,6 +58,11 @@ def record(image_id: str, mac: str, status: dict) -> None:
     sw = _num(rec.get("swap_used_mb"))
     if sw is not None:
         linha["sw"] = sw
+    # disco do /home: o que enche durante a prova. Histórico barato (um int
+    # por amostra) para o relatório de período poder responder "quando encheu"
+    hd = _num((status.get("sysdisk") or {}).get("home_pct"))
+    if hd is not None:
+        linha["hd"] = hd
     editores = ops.get("editors")
     if isinstance(editores, list):
         linha["ed"] = [str(e)[:24] for e in editores[:8]]

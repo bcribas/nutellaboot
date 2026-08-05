@@ -57,6 +57,7 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
     lista_alertas: list[dict] = []
     mems: list[int] = []
     cpus: list[int] = []
+    discos: list[int] = []
     swap_mb = swap_on = 0
     for mac in m.list_macs(image_id):
         d = m.machine_dir(image_id, mac)
@@ -93,6 +94,9 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
             if isinstance(sw, (int, float)) and sw > 0:
                 swap_mb += int(sw)
                 swap_on += 1
+            hd = (status.get("sysdisk") or {}).get("home_pct")
+            if isinstance(hd, (int, float)):
+                discos.append(int(hd))
         if (fsdb.read_json(d / "lockstate.json", {}) or {}).get("locked"):
             travadas += 1
         # o arquivo sempre foi lido INTEIRO e só o len() era aproveitado — foi
@@ -130,6 +134,8 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
             "cpu_max": max(cpus) if cpus else None,
             "swap_mb": swap_mb,
             "swap_on": swap_on,
+            "disk_max": max(discos) if discos else None,
+            "disk_low": sum(1 for d in discos if d >= 85),
         },
     }
 
@@ -189,3 +195,98 @@ def csv_de(linhas: list[dict]) -> str:
 
 def site_existe(image_id: str) -> bool:
     return store.site_image_exists(image_id)
+
+
+# --- inventário da frota ------------------------------------------------------
+#
+# As visões "de que é feito o parque": processadores, RAM instalada, editores
+# em uso, e os discos mais cheios. Cache próprio (mais folgado que o do
+# resumo: o dashboard atualiza isto a cada 60 s) e a MESMA regra de
+# visibilidade — o vazamento clássico seria um cache indexado só pelo tempo
+# servindo ao sub-admin a contagem das sedes alheias.
+
+CACHE_INV_SEG = 15.0
+_cache_inv: dict[tuple, tuple[float, dict]] = {}
+PIORES_DISCOS = 20
+
+
+def limpar_cache_inventario() -> None:
+    _cache_inv.clear()
+
+
+def inventario(p) -> dict:
+    chave = (getattr(p, "kind", ""), getattr(p, "owner", ""), getattr(p, "name", ""))
+    agora = time.time()
+    guardado = _cache_inv.get(chave)
+    if guardado and (agora - guardado[0]) < CACHE_INV_SEG:
+        return guardado[1]
+
+    from collections import Counter
+
+    cpus: Counter = Counter()
+    rams: Counter = Counter()
+    ed_agora: Counter = Counter()
+    ed_minutos: Counter = Counter()
+    discos: list[dict] = []
+    maquinas = 0
+    for img in ownership.visible_site_images(p):
+        image_id = img["id"]
+        for mac in m.list_macs(image_id):
+            d = m.machine_dir(image_id, mac)
+            status = fsdb.read_json(d / "status.json", {}) or {}
+            hw = status.get("hwinfo") or {}
+            maquinas += 1
+            if hw.get("processor"):
+                cpus[str(hw["processor"])[:60]] += 1
+            ram = hw.get("memtotal_mb")
+            if isinstance(ram, (int, float)) and ram > 0:
+                rams[_faixa_ram(ram)] += 1
+            ops = status.get("operations") or {}
+            for ed in ops.get("editors") or []:
+                ed_agora[str(ed)[:24]] += 1
+            tempos = ops.get("editors_time")
+            if isinstance(tempos, dict):
+                for ed, mins in tempos.items():
+                    if ed != "total" and isinstance(mins, (int, float)):
+                        ed_minutos[str(ed)[:24]] += int(mins)
+            disco = status.get("sysdisk") or {}
+            hd = disco.get("home_pct")
+            if isinstance(hd, (int, float)):
+                info = fsdb.read_json(d / "machine.json", {}) or {}
+                binding = fsdb.read_json(d / "binding.json") or {}
+                online = (agora - info.get("last_seen", 0)) < m.ONLINE_WINDOW
+                discos.append({
+                    "site": image_id,
+                    "mac": mac,
+                    "team": binding.get("name", ""),
+                    "pct": int(hd),
+                    "free_mb": int(disco.get("home_free_mb") or 0),
+                    "online": online,
+                })
+    discos.sort(key=lambda x: -x["pct"])
+    inv = {
+        "machines": maquinas,
+        "processors": cpus.most_common(12),
+        "ram": sorted(rams.items(), key=lambda kv: kv[0]),
+        "editors_now": ed_agora.most_common(12),
+        "editors_minutes": ed_minutos.most_common(12),
+        "disks": discos[:PIORES_DISCOS],
+        "disks_low": sum(1 for x in discos if x["pct"] >= 85),
+    }
+    _cache_inv[chave] = (agora, inv)
+    return inv
+
+
+def _faixa_ram(mb) -> str:
+    """A mesma bucketização do relatório por sede (services/report.py)."""
+    gb = float(mb) / 1024
+    if gb <= 4.5:
+        return "≤ 4 GB"
+    if gb <= 9:
+        return "8 GB"
+    if gb <= 17:
+        return "16 GB"
+    if gb <= 33:
+        return "32 GB"
+    return "> 32 GB"
+

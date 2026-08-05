@@ -173,3 +173,27 @@ def test_a_troca_da_telemetria_casa_por_papel():
     texto = FERRAMENTA.read_text()
     assert '"replace_role"' in texto
     assert '"telemetry"' in texto
+
+
+def test_a_parte_de_disco_emite_json_valido(tmp_path):
+    """O 25-disco roda DE VERDADE contra um diretório qualquer: o fragmento
+    tem que ser JSON válido (dentro de chaves) com os campos do /home. É a
+    telemetria que responde "quem está perto de encher o disco"."""
+    import json
+    import os
+    import subprocess
+
+    parte = REPO / "client" / "telemetry" / "usr" / "share" / "mlog" / "parts.d" / "25-disco.sh"
+    r = subprocess.run(
+        ["bash", str(parte)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "NB_DISCO_HOME": str(tmp_path), "NB_DISCO_ROOT": str(tmp_path)},
+        timeout=30,
+    )
+    assert r.returncode == 0, r.stderr
+    d = json.loads("{" + r.stdout + "}")
+    disco = d["sysdisk"]
+    for campo in ("home_used_mb", "home_free_mb", "home_pct", "root_free_mb"):
+        assert campo in disco, f"faltou {campo}"
+    assert 0 <= disco["home_pct"] <= 100

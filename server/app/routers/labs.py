@@ -121,6 +121,18 @@ async def comandar_frota(body: dict, p=Depends(auth.require_console)) -> dict:
     }
 
 
+@router.get("/labs/inventory")
+async def inventario_da_frota(request: Request) -> dict:
+    """De que é feito o parque: processadores, RAM instalada, editores em uso
+    e os discos mais cheios. Console (sub-admin vê só as sedes dele); aceita o
+    cookie sem cabeçalho pela mesma razão do resumo — é GET de leitura para
+    telas que sondam."""
+    p = auth.principal_de_link(request)
+    if p is None or p.kind not in ("admin", "subadmin"):
+        raise HTTPException(401, "credencial ausente ou inválida")
+    return labs.inventario(p)
+
+
 # --- o relatório da frota ----------------------------------------------------
 #
 # Só a administração. O artefato é UM arquivo com a frota inteira dentro;

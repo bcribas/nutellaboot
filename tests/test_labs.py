@@ -373,3 +373,87 @@ def test_mas_comandar_continua_exigindo_o_cabecalho(navegador, frota):
 def test_sem_sessao_nenhuma_das_duas_abre(client, frota):
     assert client.get("/api/v1/labs?format=csv").status_code == 401
     assert client.post("/api/v1/commands", json={"command": "mlreboot", "targets": {}}).status_code == 401
+
+
+# --- o inventário da frota ----------------------------------------------------
+
+
+def _status_inv(image, mac, **kw):
+    fsdb.write_json(m.machine_dir(image, mac) / "status.json", {
+        "hwinfo": {"processor": kw.get("cpu", "Intel i5"), "cores": 4,
+                   "memtotal_mb": kw.get("ram", 8000)},
+        "sysresources": {"mem_pct": 30, "loadavg": [1.0, 0, 0]},
+        "operations": {"editors": kw.get("ed", []),
+                       "editors_time": kw.get("mins", {})},
+        "sysdisk": {"home_pct": kw.get("hd", 20), "home_free_mb": kw.get("free", 9000)},
+    })
+
+
+def test_o_inventario_conta_o_parque(client, frota, ha):
+    planta("sala1", "52-54-00-00-00-01", visto_ha=5)
+    planta("sala1", "52-54-00-00-00-02", visto_ha=5)
+    planta("sala2", "52-54-00-00-01-01", visto_ha=5)
+    _status_inv("sala1", "52-54-00-00-00-01", cpu="Intel i5", ram=8000,
+                ed=["code"], mins={"code": 30, "total": 40}, hd=96, free=300)
+    _status_inv("sala1", "52-54-00-00-00-02", cpu="AMD Ryzen 5", ram=16000,
+                ed=["code", "vim"], mins={"vim": 10}, hd=50)
+    _status_inv("sala2", "52-54-00-00-01-01", cpu="Intel i5", ram=8000, hd=88, free=1200)
+    labs.limpar_cache_inventario()
+
+    inv = client.get("/api/v1/labs/inventory", headers=ha).json()
+    assert inv["machines"] == 3
+    assert dict(map(tuple, inv["processors"])) == {"Intel i5": 2, "AMD Ryzen 5": 1}
+    assert dict(map(tuple, inv["ram"])) == {"8 GB": 2, "16 GB": 1}
+    assert dict(map(tuple, inv["editors_now"])) == {"code": 2, "vim": 1}
+    # "total" é o denominador da telemetria, não um editor
+    assert dict(map(tuple, inv["editors_minutes"])) == {"code": 30, "vim": 10}
+    assert inv["disks_low"] == 2
+    assert [d["pct"] for d in inv["disks"][:2]] == [96, 88], "os piores primeiro"
+    assert inv["disks"][0]["free_mb"] == 300
+
+
+def test_o_inventario_respeita_o_dono(client, frota, ha, data_root):
+    """O vazamento clássico: cache indexado só pelo tempo serviria ao sub-admin
+    a contagem das sedes alheias."""
+    from server.app import auth as _auth
+
+    planta("sala1", "52-54-00-00-00-01", visto_ha=5)
+    _status_inv("sala1", "52-54-00-00-00-01")
+    planta("dooutro", "52-54-00-00-02-01", visto_ha=5)
+    _status_inv("dooutro", "52-54-00-00-02-01", cpu="Celeron")
+    labs.limpar_cache_inventario()
+
+    p_sub = _auth.Principal(kind="subadmin", name="invite:NB3-AAAA-BBBB")
+    inv = labs.inventario(p_sub)
+    assert inv["machines"] == 1
+    assert dict(map(tuple, inv["processors"])) == {"Celeron": 1}
+
+
+def test_o_resumo_agrega_o_disco_das_ligadas(client, frota, ha):
+    planta("sala1", "52-54-00-00-00-01", visto_ha=5)
+    planta("sala1", "52-54-00-00-00-02", visto_ha=9999)  # offline
+    _status_inv("sala1", "52-54-00-00-00-01", hd=91)
+    _status_inv("sala1", "52-54-00-00-00-02", hd=99)  # não conta
+    labs.limpar_cache()
+    linha = next(s for s in client.get("/api/v1/labs", headers=ha).json()["sites"]
+                 if s["id"] == "sala1")
+    assert linha["res"]["disk_max"] == 91
+    assert linha["res"]["disk_low"] == 1
+
+
+def test_a_amostra_guarda_o_disco(data_root, frota):
+    """O `hd` entra no samples.jsonl: é o histórico barato que deixa o
+    relatório de período responder "quando o disco encheu"."""
+    import json as _json
+
+    from server.app.services import samples
+
+    samples.record("sala1", "52-54-00-00-00-09", {
+        "sysresources": {"mem_pct": 10},
+        "sysdisk": {"home_pct": 77},
+    })
+    linha = _json.loads(
+        (m.machine_dir("sala1", "52-54-00-00-00-09") / "samples.jsonl").read_text().strip()
+    )
+    assert linha["hd"] == 77
+

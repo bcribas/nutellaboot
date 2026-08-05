@@ -219,3 +219,44 @@ body.dash main { max-width: none; padding: 0; }
 .zmac.alerta { border-color: var(--bad); border-left-color: var(--bad); }
 .zmac .ztitulo { font-weight: 700; font-size: 14px; }
 .zmac .zmacaddr { color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; }
+
+/* --- abas de visão --- */
+.dabas { display: flex; gap: 8px; margin: 2px 0 14px; }
+.dabas button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 7px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.dabas button.on { border-color: var(--accent); color: var(--fg); font-weight: 700; }
+
+.duas { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 1100px) { .duas { grid-template-columns: 1fr; } }
+
+/* barras horizontais das distribuições */
+.hbarra { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 14px; }
+.hbarra .hrot { width: 46%; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.hbarra .htrilho { flex: 1; height: 16px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
+.hbarra .htrilho i { display: block; height: 100%; background: var(--serie1); }
+.hbarra .hval { width: 52px; font-variant-numeric: tabular-nums; }
+
+/* a lista dos piores discos */
+.disco-linha {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 15px;
+}
+.disco-linha .dsede { font-weight: 700; color: var(--accent); font-family: ui-monospace, monospace; }
+.disco-linha .dquem { min-width: 180px; }
+.disco-linha .dpct { font-weight: 700; font-variant-numeric: tabular-nums; }
+.disco-linha .dpct.warn { color: var(--warn); }
+.disco-linha .dpct.bad { color: var(--bad); }
+.disco-linha.offline { opacity: 0.5; }
+.ral { color: var(--bad); }
+

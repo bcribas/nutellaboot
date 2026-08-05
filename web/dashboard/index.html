@@ -42,9 +42,36 @@
   </div>
 </section>
 
+<nav class="dabas">
+  <button type="button" data-vista="geral" class="on" data-i18n="dash_tab_overview"></button>
+  <button type="button" data-vista="hw" data-i18n="dash_tab_hw"></button>
+  <button type="button" data-vista="ed" data-i18n="dash_tab_editors"></button>
+  <button type="button" data-vista="disco" data-i18n="dash_tab_disk"></button>
+</nav>
+
 <main>
-  <div id="mapa"></div>
-  <p id="dvazio" class="dsub" hidden></p>
+  <div id="v-geral">
+    <div id="mapa"></div>
+    <p id="dvazio" class="dsub" hidden></p>
+  </div>
+  <div id="v-hw" hidden>
+    <div class="duas">
+      <div class="gbox"><h2 data-i18n="dash_hw_cpus"></h2><div id="inv-cpus"></div></div>
+      <div class="gbox"><h2 data-i18n="dash_hw_ram"></h2><div id="inv-ram"></div></div>
+    </div>
+  </div>
+  <div id="v-ed" hidden>
+    <div class="duas">
+      <div class="gbox"><h2 data-i18n="dash_ed_now"></h2><div id="inv-ed-agora"></div></div>
+      <div class="gbox"><h2 data-i18n="dash_ed_minutes"></h2><div id="inv-ed-min"></div></div>
+    </div>
+  </div>
+  <div id="v-disco" hidden>
+    <div class="gbox">
+      <h2><span data-i18n="dash_disk_title"></span> <b id="inv-disklow" class="ral"></b></h2>
+      <div id="inv-discos"></div>
+    </div>
+  </div>
 </main>
 
 <!-- O zoom de uma sede: os dados finos, sem nenhum comando (o link para o

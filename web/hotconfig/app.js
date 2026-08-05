@@ -191,6 +191,8 @@ function card(m) {
   const res = m.status?.sysresources || {};
   const ops = m.status?.operations || {};
   const memPct = res.mem_pct ?? 0;
+  const diskPct = m.status?.sysdisk?.home_pct ?? null;
+  const diskFree = m.status?.sysdisk?.home_free_mb ?? null;
   const load = Array.isArray(res.loadavg) ? res.loadavg[0] : null;
   const seat = m.binding?.seat ? `#${m.binding.seat} · ` : "";
 
@@ -203,6 +205,9 @@ function card(m) {
       <span>${t("firewall")} <b>${ops.firewall === true ? "ON" : ops.firewall === false ? "OFF" : "—"}</b></span>
     </div>
     <div class="bar"><i class="${memPct > 85 ? "bad" : memPct > 70 ? "warn" : ""}" style="width:${Math.min(memPct, 100)}%"></i></div>
+    ${diskPct != null ? `<div class="metrics"><span>${t("disk_home")} <b class="${diskPct >= 85 ? "hot" : ""}">${diskPct}%</b>${
+      diskFree != null ? ` · ${diskFree} MB` : ""}</span></div>
+    <div class="bar"><i class="${diskPct >= 95 ? "bad" : diskPct >= 85 ? "warn" : ""}" style="width:${Math.min(diskPct, 100)}%"></i></div>` : ""}
     <div class="metrics"><span>${
       m.online ? t("online") : st === "stale" ? t("stale") : t("offline")
     }${m.seconds_since_contact != null ? ` · ${m.seconds_since_contact}s` : ""}</span></div>`;
