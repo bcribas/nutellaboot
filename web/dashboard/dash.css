@@ -135,3 +135,81 @@ body.dash main { max-width: none; padding: 0; }
   display: flex;
   gap: 12px;
 }
+
+/* os cartões são clicáveis: o zoom é o "entender a situação" */
+.sede { cursor: pointer; transition: transform 0.1s; }
+.sede:hover { transform: translateY(-2px); border-color: var(--accent); }
+
+/* cabeçalho de região */
+.regiao {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 18px 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.regiao .ral { color: var(--bad); }
+
+/* --- o zoom ------------------------------------------------------------- */
+.zoom {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4vh 4vw;
+  z-index: 60;
+  overflow-y: auto;
+}
+
+.zoomcard {
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 18px 22px;
+  width: min(1500px, 100%);
+}
+
+.zhead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.zhead .sid {
+  font-family: ui-monospace, monospace;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.zhead .sname { font-size: 19px; font-weight: 600; }
+.zhead .spacer { flex: 1; }
+
+.zgraf { margin-bottom: 12px; }
+
+.zalerta {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  border-left: 3px solid var(--bad);
+  padding: 4px 10px;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.zmaq {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.zmac {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--ok);
+  border-radius: 8px;
+  padding: 9px 11px;
+}
+.zmac.stale { border-left-color: var(--warn); }
+.zmac.off { border-left-color: var(--line); opacity: 0.5; }
+.zmac.alerta { border-color: var(--bad); border-left-color: var(--bad); }
+.zmac .ztitulo { font-weight: 700; font-size: 14px; }
+.zmac .zmacaddr { color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; }

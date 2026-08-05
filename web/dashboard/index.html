@@ -43,9 +43,34 @@
 </section>
 
 <main>
-  <div id="mapa" class="mapa"></div>
+  <div id="mapa"></div>
   <p id="dvazio" class="dsub" hidden></p>
 </main>
+
+<!-- O zoom de uma sede: os dados finos, sem nenhum comando (o link para o
+     hotconfig existe para quem precisa agir). Esc ou × fecha. -->
+<div id="zoom" class="zoom" hidden>
+  <div class="zoomcard">
+    <div class="zhead">
+      <span class="sid" id="z-id"></span>
+      <span class="sname" id="z-name"></span>
+      <span class="dsub" id="z-counts"></span>
+      <span class="spacer"></span>
+      <a id="z-hot" class="btn small" target="_blank" rel="noopener" data-i18n="dash_zoom_hotconfig"></a>
+      <button type="button" id="z-close" class="small">✕</button>
+    </div>
+    <div class="gbox zgraf">
+      <h2 data-i18n="dash_zoom_trend"></h2>
+      <div id="z-graf"></div>
+      <div class="legenda">
+        <span class="l1" data-i18n="dash_mem"></span>
+        <span class="l2" data-i18n="dash_cpu"></span>
+      </div>
+    </div>
+    <div id="z-alertas"></div>
+    <div id="z-maquinas" class="zmaq"></div>
+  </div>
+</div>
 
 <script type="module" src="./app.js"></script>
 </body>

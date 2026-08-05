@@ -408,3 +408,14 @@ def test_a_identidade_da_sede_e_evidente_nas_duas_telas():
     # o hotconfig busca a identidade (é a tela que não a tinha)
     js = (REPO / "web" / "hotconfig" / "app.js").read_text(encoding="utf-8")
     assert "/api/v1/site-images/${api.imageId}`" in js
+
+
+def test_o_dashboard_e_so_leitura_e_o_zoom_abre_no_clique():
+    """Tela de transmissão: fica aberta num telão, então NENHUM comando pode
+    sair dela — quem precisa agir usa o link para o hotconfig. E o cartão da
+    sede abre o zoom (o "entender a situação")."""
+    js = (REPO / "web" / "dashboard" / "app.js").read_text(encoding="utf-8")
+    codigo = "\n".join(l for l in js.splitlines() if not l.lstrip().startswith("//"))
+    assert "api.post" not in codigo, "comando numa tela de telão"
+    assert "abrirZoom" in codigo
+    assert 'e.key === "Escape"' in codigo, "Esc precisa fechar o zoom"
