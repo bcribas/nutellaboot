@@ -235,3 +235,44 @@ def test_o_parser_roda_no_awk_do_busybox(tmp_path):
     )
     assert "-" not in r.stdout, f"o awk do busybox truncou: {r.stdout!r}"
     assert "6.1 GB" in r.stdout, r.stdout
+
+
+# --- o relatório do modo seed usa o mesmo awk de 32 bits ----------------------
+
+
+SEED = STUFF / "50-seed.sh"
+
+
+def test_o_relatorio_do_seed_nao_usa_percent_d_para_bytes():
+    """O mesmo guarda da barra, para o `nb_seed_report`: uma sala inteira
+    baixando a base passa fácil de 2 GiB servidos."""
+    corpo = "\n".join(
+        l for l in SEED.read_text().splitlines() if not l.lstrip().startswith("#")
+    )
+    trecho = corpo[corpo.index("nb_seed_report()") :]
+    trecho = trecho[: trecho.index("seedimage()")]
+    assert "%d" not in trecho and "%i" not in trecho, (
+        "campo de bytes com %d: acima de 2 GiB o awk do busybox trunca em 32 bits"
+    )
+    assert "%.0f" in trecho
+
+
+@pytest.mark.skipif(shutil.which("busybox") is None, reason="sem busybox nesta máquina")
+def test_o_relatorio_do_seed_roda_no_awk_do_busybox(tmp_path):
+    log = tmp_path / "seed.log"
+    linha = '10.0.0.%d - - [05/Aug/2026:10:00:00 +0000] "GET /base.squash HTTP/1.1" 200 1200000000\n'
+    log.write_text("".join(linha % i for i in range(3)))  # 3,6 GB > 2^31
+
+    bb = tmp_path / "bb"
+    bb.mkdir()
+    os.symlink(shutil.which("busybox"), bb / "awk")
+    r = subprocess.run(
+        ["sh", "-c", f'. "{SEED}"; NB_SEED_LOG="{log}" nb_seed_report 7'],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{bb}:/usr/bin:/bin"},
+    )
+    assert r.returncode == 0, r.stderr
+    assert "-" not in r.stdout.replace("10.0.0", ""), f"truncou: {r.stdout!r}"
+    assert "reqs 3" in r.stdout and "machines 3" in r.stdout and "3433 MB" in r.stdout, r.stdout
+    assert "idle 7s" in r.stdout

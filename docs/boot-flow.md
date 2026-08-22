@@ -346,7 +346,10 @@ senão para de bootar.
 
 O manifest chega por HTTPS validado e traz o **md5 de cada camada**. As URLs
 dentro dele apontam para os seeders da rede local (`http://<ip>/<arquivo>`,
-servidos por `webfsd` na porta 80) e, por último, para o CDN.
+servidos por `webfsd` na porta 80) e, por último, para o CDN. Um seeder é uma
+máquina com `SEEDIMAGE` ligado que **segura o próprio boot no initrd** para
+servir as outras — depois do boot o firewall bloquearia as conexões — e sai
+do modo seed por ENTER no teclado ou pela liberação no configureitor.
 
 Um seeder malicioso ou defeituoso não consegue entregar conteúdo alterado: o
 `stuff` confere o md5 de cada arquivo baixado contra o valor que veio pelo
@@ -370,7 +373,7 @@ variáveis de configuração daquela imagem:
 | `20-download.sh` | `nb_download` (multi-URL, TLS, retry), `nutella_md5sum`, `download_boot_files` |
 | `30-storage.sh` | `nutella_findblock` (acha disco), checagem de virtualização e de RAM mínima |
 | `40-mount.sh` | monta as camadas em overlayfs, home persistente, swap em disco e zram |
-| `50-seed.sh` | semeia a imagem para a rede local, com heartbeat |
+| `50-seed.sh` | segura o boot semeando para a rede local, com relatório ao vivo; sai por ENTER ou liberação no configureitor |
 | `60-postmount.d/*` | os ajustes no sistema montado, um arquivo por assunto |
 | `90-main.sh` | orquestra tudo (`nb3_mountroot`) e devolve a rede ao NetworkManager |
 

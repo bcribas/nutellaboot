@@ -279,3 +279,57 @@ def test_campo_novo_do_esquema_padrao_chega_a_modelo_antigo(data_root):
     # e o que o modelo já tinha continua sendo dele
     assert campos["TIMEZONE"]["default"] == "America/Bahia"
     assert campos["TIMEZONE"]["options"], "os metadados do padrão também entram"
+
+
+def test_nome_reservado_no_allowlist_e_recusado(client, img, admin_key):
+    """"maratona" é o hostname das máquinas: o boot grava hosts/maratona com
+    127.0.1.1 DEPOIS do whitelist, sobrescrevendo a entrada em silêncio — o
+    host "liberado" simplesmente não resolvia. Melhor recusar na tela."""
+    h = {"Authorization": f"Bearer {admin_key}"}
+    r = client.put(
+        "/api/v1/site-images/testes3/config",
+        json={"values": {"FIREWALL_ALLOWLIST": ["maratona 1.2.3.4"]}},
+        headers=h,
+    )
+    assert r.status_code == 400
+    assert "reservado" in r.json()["detail"]
+
+    # a variação de caixa cai na mesma regra; um nome que só CONTÉM a
+    # substring é legítimo (o defeito de substring é do filtro do firewall)
+    r = client.put(
+        "/api/v1/site-images/testes3/config",
+        json={"values": {"FIREWALL_ALLOWLIST": ["MARATONA 1.2.3.4"]}},
+        headers=h,
+    )
+    assert r.status_code == 400
+    r = client.put(
+        "/api/v1/site-images/testes3/config",
+        json={"values": {"FIREWALL_ALLOWLIST": ["boca.maratona.br 1.2.3.4"]}},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_nome_reservado_vale_para_schema_antigo(data_root):
+    """Modelo gravado antes do `item_reserved` existir também recusa: o
+    metadado é herdado do esquema padrão, como o `item_pattern`."""
+    from server.app.services import store
+
+    fsdb.write_json(data_root / "models" / "velho2" / "model.json", {"layers": []})
+    fsdb.write_json(
+        data_root / "models" / "velho2" / "schema.json",
+        {
+            "fields": [
+                {
+                    "key": "FIREWALL_ALLOWLIST",
+                    "type": "list",
+                    "default": [],
+                    "locked": True,
+                    "options": [],
+                }
+            ]
+        },
+    )
+    store.create_site_image("sala10", "S", "velho2")
+    with pytest.raises(cfg.ConfigError, match="reservado"):
+        cfg.write_values("sala10", {"FIREWALL_ALLOWLIST": ["maratona 1.2.3.4"]}, is_admin=True)

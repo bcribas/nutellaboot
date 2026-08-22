@@ -83,9 +83,15 @@ mandar a chave no corpo; `aria2c` e `curl` usam o cabeçalho.
 | GET | `/boot/v3/time` | — | initrd | epoch em segundos, ex. `1785621130` |
 | GET/POST | `/boot/v3/{img}/manifest` | B | initrd (`stuff`) | uma linha por camada: `MD5 ARQUIVO URL1 URL2 …` |
 | GET/POST | `/boot/v3/{img}/stuff` | B | initrd | o script de boot completo, em shell |
-| POST | `/boot/v3/{img}/seeders/join?ip=…` | B | `stuff` | `ok` |
-| POST | `/boot/v3/{img}/seeders/heartbeat?ip=…` | B | `stuff` (a cada 60 s) | `ok` |
+| POST | `/boot/v3/{img}/seeders/join?ip=…` | B | `stuff` | `accepted=t\|f` + `seeders=N` |
+| POST | `/boot/v3/{img}/seeders/heartbeat?ip=…` | B | `stuff` (a cada 60 s) | `released=t\|f` + `seeders=N` |
 | POST | `/boot/v3/{img}/seeders/leave?ip=…` | — | `stuff` | `ok` |
+
+O join respeita o limite `SEEDMAX` da configuração da imagem (padrão 4):
+pool cheio responde **200 com `accepted=f`** — não é erro, a máquina só pula
+a semeadura e boota direto. `released=t` no heartbeat avisa que o console
+liberou a máquina: ela sai do modo seed, chama `leave` e termina o boot.
+Tudo em texto puro `chave=valor`, como o resto do `/boot/v3`.
 | GET/POST | `/boot/v3/{img}/wallpaper` | B | `stuff` | PNG/JPEG, com `ETag` = md5 |
 | GET/POST | `/boot/v3/{img}/clionkey` | B | `stuff` | a licença do CLion (404 se não instalada no servidor) |
 | GET/POST | `/boot/v3/{img}/lockinfo/{mac}` | B | tela de bloqueio | JSON com time, organização, país e lugar |
@@ -383,8 +389,8 @@ O `user_id` do vínculo tem que existir no roster da imagem, senão vem 404 —
 | POST | `/api/v1/site-images/{img}/machines/{mac}/status` | M | JSON livre da telemetria (teto de 256 kB) | `{pending_commands, lock}` |
 | GET | `/api/v1/site-images/{img}/machines` | C, I, S`machines:read` | — | `{machines:[…]}` |
 | GET | `/api/v1/site-images/{img}/machines/{mac}` | C, I, S`machines:read` | — | estado completo da máquina |
-| GET | `/api/v1/site-images/{img}/seeders` | C, I | — | `{seeders:[{ip, last_seen, ttl_left}]}` |
-| DELETE | `/api/v1/site-images/{img}/seeders/{ip}` | C, I | — | `204` |
+| GET | `/api/v1/site-images/{img}/seeders` | C, I | — | `{seeders:[{ip, last_seen, ttl_left, released}]}` |
+| DELETE | `/api/v1/site-images/{img}/seeders/{ip}` | C, I | libera o seeder: marca `released`; a máquina vê no próximo heartbeat, sai do modo seed e termina o boot | `204` |
 
 Cada máquina devolve `online`, `seconds_since_contact`, `status` (última
 telemetria), `binding`, `lock`, `pending`, `logs` e `alerts`. O MAC é aceito
@@ -604,7 +610,7 @@ data: {"machines": ["52-54-00-12-34-56"]}
 
 Eventos: `machine.first_seen`, `machine.status`, `machine.locked`,
 `machine.unlocked`, `machine.bound`, `machine.unbound`, `command.sent`,
-`command.acked`, `config.updated`, `seeder.joined`, `alert.raised`,
+`command.acked`, `config.updated`, `seeder.joined`, `seeder.released`, `alert.raised`,
 `alert.dismissed`. A lista viva está em `GET /api/v1/events/types`. Linhas
 `: ping` a cada 20 segundos mantêm a conexão viva.
 
@@ -714,7 +720,7 @@ de pacotes extras, gastando a cota dela:
 | GET | `/api/v1/service-keys` | A | — | lista sem as chaves |
 | DELETE | `/api/v1/service-keys/{nome}` | A | — | `204` |
 
-Eventos disponíveis: `machine.first_seen`, `machine.status`, `machine.locked`, `machine.unlocked`, `machine.bound`, `machine.unbound`, `command.sent`, `command.acked`, `config.updated`, `seeder.joined`, `alert.raised` e `alert.dismissed` (a lista viva está em `GET /api/v1/events/types`).
+Eventos disponíveis: `machine.first_seen`, `machine.status`, `machine.locked`, `machine.unlocked`, `machine.bound`, `machine.unbound`, `command.sent`, `command.acked`, `config.updated`, `seeder.joined`, `seeder.released`, `alert.raised` e `alert.dismissed` (a lista viva está em `GET /api/v1/events/types`).
 
 `events` vazio significa "todos os eventos". A URL precisa começar com
 `http://` ou `https://`, e cada evento é validado contra o catálogo.

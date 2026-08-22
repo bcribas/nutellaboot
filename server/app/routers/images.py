@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import csv
 import io
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from .. import auth
 from ..models import BulkRequest, SiteImageCreate, SiteImagePatch
-from ..services import ownership, seeders, store, usb
+from ..services import ownership, seeders, store, usb, webhook_push
+from ..services.notify import notify
 
 router = APIRouter(prefix="/api/v1")
 
@@ -197,7 +199,11 @@ async def list_seeders(image: str, p=Depends(auth.require_image_access())) -> di
 
 @router.delete("/site-images/{image}/seeders/{ip}", status_code=204)
 async def remove_seeder(image: str, ip: str, p=Depends(auth.require_image_access())) -> None:
-    seeders.leave(image, ip)
+    """Libera o seeder: marca o tombstone e a máquina, ao ver `released=t` no
+    heartbeat, sai do modo seed e termina o boot."""
+    seeders.release(image, ip)
+    notify.publish(image, {"event": "seeder.released", "data": {"ip": ip}, "at": time.time()})
+    webhook_push.emit(image, "seeder.released", {"ip": ip})
 
 
 def _minha(p, image: str) -> None:

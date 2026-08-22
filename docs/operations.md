@@ -1128,6 +1128,16 @@ Confira quem está semeando:
 curl "$SERVER/api/v1/site-images/26spsp/seeders" -H "Authorization: Bearer $TOKEN"
 ```
 
+### Máquina parada na tela SEEDING
+
+É de propósito: com `SEEDIMAGE` ligado, a máquina segura o próprio boot no
+initrd servindo a imagem para as outras (depois do boot o firewall bloquearia
+as conexões), com um relatório ao vivo na tela. Ela sai do modo seed e termina
+o boot quando alguém aperta ENTER nela — ou remota e preguiçosamente: remova o
+seeder da lista no configureitor e o próximo heartbeat (até 60 s) a libera. O
+limite de máquinas semeando ao mesmo tempo é o campo "Limite de semeadores" do
+configureitor (padrão 4); quem chega depois do limite boota direto.
+
 ### O wallpaper não apareceu
 
 O wallpaper só é aplicado se o md5 estiver na configuração da imagem no momento

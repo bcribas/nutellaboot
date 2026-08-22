@@ -32,7 +32,10 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
 
 5. **Nada de `read` interativo no caminho de boot.** Máquina de prova boota
    sozinha; um prompt esperando ENTER trava a sala inteira. Há um teste que
-   falha se aparecer (`tests/test_bootstrap_shell.py`).
+   falha se aparecer (`tests/test_bootstrap_shell.py`). Exceção única e
+   sancionada: o hold do modo seed (`50-seed.sh`) — opt-in da sede, `read`
+   com timeout de 1 s e saída desatendida garantida pela liberação remota no
+   configureitor.
 
 6. **Certificado sempre verificado.** Nada de `--check-certificate=false`. A
    única exceção é `GET /boot/v3/time`, que existe justamente para acertar o

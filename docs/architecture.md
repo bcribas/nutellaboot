@@ -353,15 +353,27 @@ garantindo que `lockinfo` não devolva token, chave de máquina nem hash.
 ## Ciclo de vida dos seeders
 
 Um seeder é uma máquina da própria sala que serve o cache já baixado para as
-demais, acelerando o boot de um laboratório inteiro.
+demais, acelerando o boot de um laboratório inteiro. Ela **segura o próprio
+boot no initrd** enquanto semeia — é ali que o firewall ainda não subiu e a
+rede ainda é a do bootstrap — mostrando um relatório ao vivo (requisições,
+máquinas atendidas, bytes servidos) na tela.
 
-1. **Entrada** — `POST /boot/v3/{img}/seeders/join?ip=…&pw=<chave de máquina>`.
-2. **Renovação** — o mesmo endpoint (`/heartbeat`) a cada 60 segundos, feito
-   por um laço em segundo plano no `stuff`.
-3. **Expiração** — `seeders.live()` descarta na leitura quem não renova há
-   mais de `seeder_ttl_sec` (padrão: 180 s). Máquina desligada some sozinha.
-4. **Saída explícita** — `/seeders/leave` remove na hora; não exige credencial
-   porque só sabe remover uma entrada.
+1. **Entrada** — `POST /boot/v3/{img}/seeders/join?ip=…`. O servidor aplica o
+   limite `SEEDMAX` da configuração (padrão 4): pool cheio responde 200 com
+   `accepted=f` e a máquina boota direto, sem semear. Quem já está no pool
+   renova sem contar de novo no limite.
+2. **Renovação** — `/heartbeat` a cada 60 segundos, em primeiro plano dentro
+   do hold (nada sobrevive ao switch_root para fazê-lo depois). A resposta
+   `released=t` avisa que o console liberou a máquina.
+3. **Liberação** — quem opera aperta ENTER na máquina, ou remove o seeder da
+   lista no configureitor (`DELETE .../seeders/{ip}`): isso marca um
+   tombstone `released` que o heartbeat seguinte entrega. Nos dois casos a
+   máquina chama `leave`, mata o `webfsd` e termina o boot.
+4. **Expiração** — `seeders.live()` descarta na leitura quem não renova há
+   mais de `seeder_ttl_sec` (padrão: 180 s). Máquina desligada some sozinha,
+   e o tombstone de uma máquina que morreu sem se despedir expira igual.
+5. **Saída explícita** — `/seeders/leave` remove na hora (entrada e
+   tombstone); não exige credencial porque só sabe remover uma entrada.
 
 O manifest devolve **todas** as URLs de cada arquivo: todos os seeders vivos
 (do heartbeat mais recente para o mais antigo) e o CDN por último. O `aria2c`

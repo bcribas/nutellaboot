@@ -28,6 +28,7 @@ EVENTOS = [
     "command.acked",
     "config.updated",
     "seeder.joined",
+    "seeder.released",
     "alert.raised",
     "alert.dismissed",
 ]

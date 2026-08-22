@@ -277,9 +277,12 @@ def test_nenhum_script_de_boot_depende_de_head():
     dele: um initrd construído noutro ambiente pode não o ter, e a falha é
     silenciosa."""
     for path in CLIENT_SH:
-        # fora dos comentários: eles contam a história e citam o comando
+        # fora dos comentários (eles contam a história e citam o comando) e
+        # fora dos heredocs (conteúdo gravado no sistema montado, onde o
+        # `head` de verdade existe)
         codigo = "\n".join(
-            l for l in path.read_text().splitlines() if not l.lstrip().startswith("#")
+            l for l in _sem_heredoc(path.read_text()).splitlines()
+            if not l.lstrip().startswith("#")
         )
         assert "| head" not in codigo and "head -n" not in codigo, path.name
 
@@ -349,15 +352,28 @@ def test_nb_hosts_pin(sh):
 
 def test_no_interactive_read_in_client_scripts():
     """Regressão do nb2: `read` esperando teclado trava máquina desatendida —
-    o boot da sala inteira parava num "Press ENTER to continue"."""
+    o boot da sala inteira parava num "Press ENTER to continue".
+
+    Exceção única e deliberada: o hold do modo seed (50-seed.sh). É opt-in da
+    sede (SEEDIMAGE), o `read` tem timeout de 1 s, e a saída desatendida é
+    garantida pela liberação remota no configureitor — segurar o boot ali é a
+    função, não um esquecimento. Qualquer outro `read` de teclado (sem
+    redirecionamento, ou lendo de /dev/console ou /dev/tty) continua proibido,
+    inclusive atrás de `if`. (`while read` fica de fora: é o padrão
+    estabelecido de consumir pipe/arquivo, com o redirecionamento no `done`.)"""
     offenders = []
     for path in CLIENT_SH:
         for n, line in enumerate(path.read_text().splitlines(), 1):
             s = line.strip()
             if s.startswith("#"):
                 continue
-            if (s == "read" or s.startswith("read ")) and "<" not in s:
-                offenders.append(f"{path.name}:{n}: {s}")
+            if not re.match(r"(?:if\s+|elif\s+)?read(?:\s|$)", s):
+                continue
+            if "<" in s and not re.search(r"<\s*/dev/(console|tty)", s):
+                continue  # lê de arquivo/pipe, não de teclado
+            if path.name == "50-seed.sh" and re.search(r"read\s+-r\s+-t\s+\d", s):
+                continue  # a exceção documentada acima
+            offenders.append(f"{path.name}:{n}: {s}")
     assert offenders == [], "read interativo: " + "; ".join(offenders)
 
 

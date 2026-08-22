@@ -86,6 +86,101 @@ def test_seeder_leave_unauth_ok(client, image_with_template):
     assert seeders.live("testes3") == []
 
 
+# --- limite e liberação de seeders (o hold do boot no initrd) ---------------
+#
+# O seeder segura o boot semeando; o formato das respostas é contrato de shell
+# (grep no busybox), então os testes conferem o texto byte a byte.
+
+
+def _join(client, ip):
+    return client.post(f"/boot/v3/testes3/seeders/join?ip={ip}&key=nb3b_chavedeteste")
+
+
+def _hb(client, ip):
+    return client.post(f"/boot/v3/testes3/seeders/heartbeat?ip={ip}&key=nb3b_chavedeteste")
+
+
+def test_o_join_respeita_o_limite(client, image_with_template, data_root):
+    img = data_root / "site-images" / "testes3"
+    conf = fsdb.read_json(img / "config.json")
+    conf["values"]["SEEDMAX"] = "2"
+    fsdb.write_json(img / "config.json", conf)
+
+    assert _join(client, "10.0.0.1").text == "accepted=t\nseeders=1\n"
+    assert _join(client, "10.0.0.2").text == "accepted=t\nseeders=2\n"
+    r = _join(client, "10.0.0.3")
+    assert r.status_code == 200, "pool cheio não é erro: o cliente boota direto"
+    assert r.text == "accepted=f\nseeders=2\n"
+    # renovar quem já está dentro não é entrada nova
+    assert _join(client, "10.0.0.1").text == "accepted=t\nseeders=2\n"
+
+
+def test_o_join_sem_config_usa_o_padrao_de_4(client, image_with_template):
+    for i in range(1, 5):
+        assert _join(client, f"10.0.0.{i}").text.startswith("accepted=t")
+    assert _join(client, "10.0.0.9").text.startswith("accepted=f")
+
+
+def test_o_delete_libera_e_o_heartbeat_avisa(client, image_with_template, admin_key):
+    """Remover o seeder no configureitor não o apaga: marca o tombstone que a
+    máquina enxerga no heartbeat para sair do modo seed e terminar o boot."""
+    _join(client, "10.0.0.5")
+    h = {"Authorization": f"Bearer {admin_key}"}
+    r = client.delete("/api/v1/site-images/testes3/seeders/10.0.0.5", headers=h)
+    assert r.status_code == 204
+
+    # some das fontes na hora: nenhum boot novo cai num seeder de saída
+    assert seeders.live("testes3") == []
+    line = client.get("/boot/v3/testes3/manifest", headers=BK).text.splitlines()[0]
+    assert "10.0.0.5" not in line
+
+    assert _hb(client, "10.0.0.5").text == "released=t\nseeders=0\n"
+    d = client.get("/api/v1/site-images/testes3/seeders", headers=h).json()["seeders"]
+    assert [(s["ip"], s["released"]) for s in d] == [("10.0.0.5", True)]
+
+
+def test_o_join_novo_limpa_o_tombstone(client, image_with_template, admin_key):
+    """Máquina liberada que reiniciou com SEEDIMAGE ainda ligado volta limpa —
+    senão ela nasceria já 'liberada' e sairia do seed no primeiro heartbeat."""
+    _join(client, "10.0.0.5")
+    h = {"Authorization": f"Bearer {admin_key}"}
+    client.delete("/api/v1/site-images/testes3/seeders/10.0.0.5", headers=h)
+
+    assert _join(client, "10.0.0.5").text == "accepted=t\nseeders=1\n"
+    assert _hb(client, "10.0.0.5").text == "released=f\nseeders=1\n"
+
+
+def test_o_leave_remove_ate_o_tombstone(client, image_with_template, admin_key):
+    _join(client, "10.0.0.5")
+    h = {"Authorization": f"Bearer {admin_key}"}
+    client.delete("/api/v1/site-images/testes3/seeders/10.0.0.5", headers=h)
+    client.post("/boot/v3/testes3/seeders/leave?ip=10.0.0.5")
+    assert client.get("/api/v1/site-images/testes3/seeders", headers=h).json()["seeders"] == []
+
+
+def test_o_tombstone_expira_pelo_ttl(client, image_with_template, admin_key, data_root):
+    """Máquina que morreu antes de se despedir não deixa lixo na lista."""
+    _join(client, "10.0.0.5")
+    h = {"Authorization": f"Bearer {admin_key}"}
+    client.delete("/api/v1/site-images/testes3/seeders/10.0.0.5", headers=h)
+
+    pool_path = data_root / "site-images" / "testes3" / "seeders.json"
+    pool = fsdb.read_json(pool_path)
+    pool["10.0.0.5"]["last_seen"] = time.time() - 9999
+    fsdb.write_json(pool_path, pool)
+    assert client.get("/api/v1/site-images/testes3/seeders", headers=h).json()["seeders"] == []
+
+
+def test_o_heartbeat_renova_o_tombstone(client, image_with_template, admin_key, data_root):
+    """Enquanto a máquina conversa, o tombstone não pode expirar no meio — o
+    heartbeat seguinte o ressuscitaria como seeder vivo."""
+    _join(client, "10.0.0.5")
+    h = {"Authorization": f"Bearer {admin_key}"}
+    client.delete("/api/v1/site-images/testes3/seeders/10.0.0.5", headers=h)
+    assert _hb(client, "10.0.0.5").text == "released=t\nseeders=0\n"
+    assert _hb(client, "10.0.0.5").text == "released=t\nseeders=0\n"
+
+
 def test_stuff_renders_vars_and_modules(client, image_with_template):
     text = client.get("/boot/v3/testes3/stuff", headers=BK).text
     assert "IMAGEROOT='testes3'" in text

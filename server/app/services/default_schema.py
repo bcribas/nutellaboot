@@ -124,6 +124,25 @@ def build_default_schema() -> dict:
                 ),
             },
             {
+                "key": "SEEDMAX",
+                # não há tipo numérico no schema; select limita as opções e
+                # valida de graça (mesmo desenho do MINRAM)
+                "type": "select",
+                "default": "4",
+                "options": [
+                    {"value": str(n), "label": str(n)} for n in (1, 2, 3, 4, 6, 8, 12)
+                ],
+                "label": _t("Limite de semeadores", "Seeder limit", "Límite de sembradores"),
+                "help": _t(
+                    "Quantas máquinas podem semear ao mesmo tempo. Quem chegar depois "
+                    "do limite pula a semeadura e boota direto.",
+                    "How many machines may seed at once. Machines past the limit skip "
+                    "seeding and just boot.",
+                    "Cuántas máquinas pueden sembrar a la vez. Las que lleguen después "
+                    "del límite omiten la siembra y arrancan directo.",
+                ),
+            },
+            {
                 "key": "MINRAM",
                 "type": "select",
                 "default": "8192",
@@ -163,6 +182,10 @@ def build_default_schema() -> dict:
                 # cliente (usr/share/maratona-firewall/hosts/<nome>), então
                 # aqui é o lugar de garantir que ele não tem `/` nem `..`
                 "item_pattern": r"[A-Za-z0-9][A-Za-z0-9.-]*\s+[0-9a-fA-F.:]+",
+                # "maratona" é o hostname fixo das máquinas: o boot grava
+                # hosts/maratona com 127.0.1.1 DEPOIS do whitelist, então uma
+                # entrada com esse nome seria sobrescrita em silêncio
+                "item_reserved": ["maratona"],
                 "label": _t("Liberados no firewall", "Firewall allowlist", "Permitidos en el cortafuegos"),
                 "help": _t(
                     "Pares \"nome ip\" liberados durante a prova.",

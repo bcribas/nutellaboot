@@ -36,7 +36,7 @@ class ConfigError(ValueError):
 #
 # `options` porque sem elas o editor do console monta uma lista VAZIA e não dá
 # para escolher o padrão de um `select` — que foi o defeito relatado.
-HERDADOS_DO_PADRAO = ("sep", "item_pattern", "hash", "options")
+HERDADOS_DO_PADRAO = ("sep", "item_pattern", "item_reserved", "hash", "options")
 
 
 def schema_for(image_id: str) -> dict:
@@ -144,6 +144,11 @@ def _coerce(field: dict, value):
                 raise ConfigError(f"{key}: item não pode conter {sep!r} ({v!r})")
             if padrao and not re.fullmatch(padrao, v):
                 raise ConfigError(f"{key}: formato inválido ({v!r})")
+            nome = v.split()[0].lower() if v.split() else v
+            if nome in (field.get("item_reserved") or []):
+                raise ConfigError(
+                    f"{key}: o nome {nome!r} é reservado — é o hostname das máquinas da prova"
+                )
             itens.append(v)
         return itens
     if ftype in ("text", "password"):

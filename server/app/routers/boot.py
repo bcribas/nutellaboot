@@ -104,8 +104,16 @@ async def stuff(
     return stuffgen.render(image)
 
 
+def _seed_cap(image: str) -> int:
+    from ..services import config
+
+    try:
+        return int(config.effective_values(image).get("SEEDMAX") or 4)
+    except (TypeError, ValueError):
+        return 4
+
+
 @router.post("/{image}/seeders/join", name="seeder_join")
-@router.post("/{image}/seeders/heartbeat", name="seeder_heartbeat")
 async def seeder_join(
     image: str,
     request: Request,
@@ -113,18 +121,35 @@ async def seeder_join(
     key: str | None = Query(None),
     x_nb_boot_key: str | None = Header(None),
 ) -> str:
-    """join e heartbeat: registra/renova o seeder com a chave de boot."""
+    """Entra no pool. Pool cheio (SEEDMAX) é 200 com `accepted=f`, não 4xx:
+    o cliente precisa distinguir "não precisam de mim" de "rede quebrada"."""
     await _autorizar(request, image, x_nb_boot_key, key)
     if not seeders.valid_ip(ip):
         raise HTTPException(400, "bad ip")
-    novo = ip not in seeders.live(image)
-    seeders.touch(image, ip)
-    if novo:
-        # também estava no catálogo sem nunca ser emitido; só no join, não no
-        # heartbeat, senão viraria um evento por máquina a cada poucos minutos
+    r = seeders.join(image, ip, _seed_cap(image))
+    if r["accepted"] and r["new"]:
+        # só na entrada nova, não no heartbeat, senão viraria um evento por
+        # máquina a cada poucos minutos
         notify.publish(image, {"event": "seeder.joined", "data": {"ip": ip}, "at": time.time()})
         webhook_push.emit(image, "seeder.joined", {"ip": ip})
-    return "ok\n"
+    return f"accepted={'t' if r['accepted'] else 'f'}\nseeders={r['count']}\n"
+
+
+@router.post("/{image}/seeders/heartbeat", name="seeder_heartbeat")
+async def seeder_heartbeat(
+    image: str,
+    request: Request,
+    ip: str = Query(...),
+    key: str | None = Query(None),
+    x_nb_boot_key: str | None = Header(None),
+) -> str:
+    """Renova o registro; `released=t` avisa que o console liberou a máquina
+    e ela deve sair do modo seed e terminar o boot."""
+    await _autorizar(request, image, x_nb_boot_key, key)
+    if not seeders.valid_ip(ip):
+        raise HTTPException(400, "bad ip")
+    r = seeders.heartbeat(image, ip)
+    return f"released={'t' if r['released'] else 'f'}\nseeders={r['count']}\n"
 
 
 @router.post("/{image}/seeders/leave")

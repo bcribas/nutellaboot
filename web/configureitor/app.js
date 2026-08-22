@@ -245,9 +245,25 @@ async function loadSeeders() {
     box.innerHTML =
       "<table><tbody>" +
       data.seeders
-        .map((s) => `<tr><td class="mono">${s.ip}</td><td class="muted">${s.ttl_left}s</td></tr>`)
+        .map(
+          (s) =>
+            `<tr><td class="mono">${s.ip}</td>` +
+            `<td class="muted">${s.released ? t("seeder_released") : `${s.ttl_left}s`}</td>` +
+            `<td>${
+              s.released
+                ? ""
+                : `<button class="small danger" data-ip="${s.ip}" title="${t("seeder_release_tip")}">×</button>`
+            }</td></tr>`,
+        )
         .join("") +
       "</tbody></table>";
+    for (const b of box.querySelectorAll("button[data-ip]")) {
+      b.onclick = async () => {
+        b.disabled = true;
+        await api.del(`/api/v1/site-images/${api.imageId}/seeders/${b.dataset.ip}`);
+        loadSeeders();
+      };
+    }
   } catch (e) {
     $("#seeders").textContent = e.message;
   }
@@ -315,6 +331,9 @@ async function main() {
     renderWallpaper(data.wallpaper);
     renderUsb();
     loadSeeders();
+    // a máquina liberada sai da lista sozinha ao ver o released no heartbeat;
+    // sem o refresh o operador nunca a veria sumir
+    setInterval(loadSeeders, 10000);
   } catch (e) {
     $("#form").innerHTML = `<p class="muted">${e.status === 401 ? t("no_token") : e.message}</p>`;
     return;

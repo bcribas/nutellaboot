@@ -156,6 +156,62 @@ def test_host_com_barra_nao_escreve_fora_de_hosts(imagem, raiz, data_root):
     assert "invalid host" in r.stdout + r.stderr
 
 
+def test_entrada_maratona_e_pulada(imagem, raiz):
+    """"maratona" é o hostname da máquina: hosts/maratona é gravado com
+    127.0.1.1 no fim da função e sobrescreveria a entrada da sede em silêncio.
+    O servidor recusa o nome; isto é a segunda tranca, para stuff antigo."""
+    r = roda_consumidor(
+        imagem,
+        "nb3_post_firewall",
+        raiz,
+        extra='FIREWALL_ALLOWLIST="maratona 1.2.3.4,ok.com 5.6.7.8"',
+    )
+    assert r.returncode == 0, r.stderr
+    assert (raiz / "usr/share/maratona-firewall/hosts/maratona").read_text().strip() == "127.0.1.1"
+    assert (raiz / "usr/share/maratona-firewall/hosts/ok.com").is_file()
+    assert "reserved" in r.stdout + r.stderr
+
+
+# --- a sobrescrita do filtro de /etc/hosts da base publicada
+
+
+DEFEITUOSO = """#!/bin/bash
+IP="$(head -n1 $LATAMHOST)"
+egrep -v "($IP|$HOSTNAME)" /etc/hosts > $TMPFILE
+"""
+
+
+def test_a_base_defeituosa_e_corrigida(imagem, raiz):
+    """A base publicada apaga linhas do /etc/hosts por SUBSTRING (o egrep sem
+    âncora): o hosts/maratona levava junto qualquer host do whitelist com
+    "maratona" no nome. Enquanto a base não for reconstruída, o boot troca o
+    script pela versão corrigida."""
+    alvo = raiz / "usr/share/maratona-firewall/maratona-firewall-configuration.sh"
+    alvo.write_text(DEFEITUOSO)
+
+    r = roda_consumidor(imagem, "nb3_post_firewall", raiz)
+    assert r.returncode == 0, r.stderr
+    texto = alvo.read_text()
+    assert "egrep -v" not in texto
+    assert 'awk -v ip="$IP" -v host="$HOSTNAME"' in texto
+    assert alvo.stat().st_mode & 0o111, "o serviço executa o script direto"
+    ok = subprocess.run(["bash", "-n", str(alvo)], capture_output=True, text=True)
+    assert ok.returncode == 0, ok.stderr
+    assert "patching maratona-firewall" in r.stdout + r.stderr
+
+
+def test_a_base_ja_corrigida_fica_intacta(imagem, raiz):
+    """Quando o pacote consertado chegar à base, a sobrescrita se aposenta:
+    um script sem o padrão defeituoso não é tocado."""
+    alvo = raiz / "usr/share/maratona-firewall/maratona-firewall-configuration.sh"
+    alvo.write_text("#!/bin/bash\n# sentinela: versao nova do pacote\n")
+
+    r = roda_consumidor(imagem, "nb3_post_firewall", raiz)
+    assert r.returncode == 0, r.stderr
+    assert alvo.read_text() == "#!/bin/bash\n# sentinela: versao nova do pacote\n"
+    assert "patching" not in r.stdout + r.stderr
+
+
 # --- dconf: lista GVariant
 
 
