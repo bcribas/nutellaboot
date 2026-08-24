@@ -292,6 +292,18 @@ O ambiente de teste tem um nginx externo que faz proxy de
   não instala chave). O hook embarca `ccm cmac michael_mic gcm ctr`, o
   `nb3-build-initrd` recusa initrd sem eles, e `nb_wifi_crypto_check` denuncia
   initrd antigo no console. Foram TRÊS rodadas de campo caçando senha e driver.
+- **O `modinfo -F firmware` declara firmware que ainda não existe, e o
+  copiador cala.** O iwlwifi declara o TOPO da faixa de API
+  (`...-hr-b0-100.ucode`); o linux-firmware da imagem-mestre parava na 89; o
+  `dracut-install` do initramfs-tools copia só o nome LITERAL e a flag `-o`
+  engole a falta. O initrd saiu com 74 MiB de firmware de rádio e zero
+  arquivos da família `hr` — AX201 de campo sem wifi, com o `.ucode` certo
+  parado na imagem-mestre. O driver desce a faixa de API em runtime; o
+  copiador não. O hook embarca a MAIOR API existente de cada combo por glob +
+  `sort -V` (nunca lista fixa de nomes), o `nb3-build-initrd` recusa initrd
+  sem os canários (`so-a0-hr-b0`, `ty-a0-gf-a0`, `QuZ-a0-hr-b0`), e sem rádio
+  com `wifi.conf` preenchido o boot interroga o dmesg e nomeia o firmware
+  ausente na tela.
 
 ## Estilo
 

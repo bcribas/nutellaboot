@@ -192,9 +192,10 @@ segundos (`NB_WIFI_TIMEOUT`). Só então o DHCP roda.
 
 O NutellaBoot 2 dava um `sleep 3` cego — tempo insuficiente para o handshake
 WPA2 seguido de DHCP. Mas o problema maior era outro: **o wifi nunca era
-sequer tentado**. O initrd trazia `wpa_supplicant` e todo o firmware, e o
+sequer tentado**. O initrd trazia `wpa_supplicant` e os drivers, e o
 `stuff` servido pelo servidor sobrescrevia `configure_localnetwork()` sem
-chamar `configure_wifi()`. A função existia e nunca era executada.
+chamar `configure_wifi()`. A função existia e nunca era executada. (E "todo o
+firmware" nunca foi verdade — ver "O firmware do rádio viaja junto", abaixo.)
 
 No v3 a rede pertence **exclusivamente ao bootstrap**. O `stuff` recebe a rede
 pronta e não pode redefinir essas funções — há um teste automatizado
@@ -265,6 +266,35 @@ Hoje o hook os embarca (`manual_add_modules ccm cmac michael_mic gcm ctr`), o
 `configure_wifi` os carrega antes de conectar — se o `modprobe ccm` falhar
 (initrd antigo), o console avisa na hora, com o rebuild como ação.
 
+### O firmware do rádio viaja junto
+
+A mesma classe de silêncio, pela porta do firmware. O copiador do
+initramfs-tools (`dracut-install`, acionado pelo `copy_modules_dir`) lê o
+`modinfo -F firmware` de cada módulo e copia **o nome literal** — e o
+`iwlwifi.ko` declara o TOPO da faixa de API que ele aceita (ex.:
+`iwlwifi-so-a0-hr-b0-100.ucode`), uma versão que o linux-firmware da
+imagem-mestre ainda nem publica (o topo real era 89). O nome não casa com
+arquivo nenhum, nada é copiado, e a flag `-o` (optional) engole o aviso. Em
+runtime o driver desce a faixa de API até achar — mas dentro de um initrd
+onde não há nada para achar. Resultado de campo: um AX201 detectado, pedindo
+`iwlwifi-so-a0-hr-b0-89.ucode` (que EXISTIA na imagem-mestre), num initrd com
+74 MiB de firmware de rádio e **zero** arquivos da família `hr`.
+
+Hoje o hook embarca, para cada combo do iwlwifi (o prefixo antes de
+`-<API>.ucode`), o arquivo de **maior API que existe no disco** — glob +
+`sort -V`, sem lista fixa de nomes, imune ao descompasso entre kernel e
+linux-firmware — e todos os `.pnvm` (tabelas de potência, ~0,13 MiB). O
+`nb3-build-initrd` recusa initrd sem os três combos que mordem em campo
+(`so-a0-hr-b0` = AX201, `ty-a0-gf-a0` = AX210, `QuZ-a0-hr-b0` = AX201 em
+Comet Lake). E como sem `.ucode` a interface nem chega a existir — nenhum
+relatório de wifi rodava, a máquina caía na tela genérica de rede mandando
+conferir o cabo —, o `configure_wifi` agora interroga o dmesg quando não
+acha rádio com `wifi.conf` preenchido: `no suitable firmware found` vira a
+mensagem "the boot image is missing firmware for this wifi card", que aponta
+a organização, não a sede. Os demais firmwares de rádio (MediaTek, Realtek,
+Broadcom, Atheros) não têm número de API no nome e sempre entraram pelo
+mecanismo normal.
+
 ### Power-save desligado, de propósito
 
 Antes de conectar, o boot desliga o power-save do rádio (`iw ... set
@@ -289,8 +319,10 @@ PMF exigido pelo AP. `nb_wifi_report` lê esse log, o `wpa_cli status` e o
 pedidos — com o tamanho e a impressão digital (md5 curto) de cada senha, nunca
 a senha — os que aparecem no ar, e as últimas linhas do dmesg do driver, para
 a foto dizer qual rádio e qual firmware. Daí sai a tela `NO WIFI`, com o motivo
-já traduzido em ação: senha recusada, PMF/WPA3, nome não encontrado no ar, ou
-associado sem DHCP. `WRONG_KEY` não prova senha errada — é o carimbo de
+já traduzido em ação: senha recusada, PMF/WPA3, nome não encontrado no ar,
+associado sem DHCP, crypto do kernel ausente ou firmware do rádio ausente no
+initrd (estes dois vencem os diagnósticos de senha: com eles presentes,
+nenhuma senha do mundo conectaria). `WRONG_KEY` não prova senha errada — é o carimbo de
 qualquer desconexão no meio do 4-way. Com `nbwifidebug=y` na linha do kernel,
 o supplicant roda em `-dd` e o fim do log sai no console.
 

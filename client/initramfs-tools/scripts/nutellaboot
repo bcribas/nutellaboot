@@ -373,6 +373,14 @@ nb_wifi_report() {
         NB_WIFI_REASON="this initrd is missing kernel crypto for WPA (rebuild it with nb3-build-initrd)"
         return 0
     fi
+    # Firmware ausente vence os casos de senha: sem o .ucode (ou com o
+    # segundo estágio falhando) nenhuma senha do mundo conecta, e mandar a
+    # sede revisar a senha seria o mesmo beco do WRONG_KEY do crypto.
+    nb_wifi_firmware_check
+    if [ -n "$NB_WIFI_FIRMWARE_MISSING" ]; then
+        NB_WIFI_REASON="the boot image is missing firmware for this wifi card - contact the organization"
+        return 0
+    fi
     case "$_nbr_min" in
         *"failed to set"*)
             NB_WIFI_REASON="the kernel refused to install the session key (missing crypto modules in the initrd?)" ;;
@@ -442,12 +450,37 @@ nb_wifi_crypto_check() {
     return 0
 }
 
+# O firmware que o driver não achou. Sem .ucode a interface NEM EXISTE:
+# nb_wifi_iface falha, configure_wifi retorna cedo e nenhum relatório roda —
+# o dmesg é a única testemunha. "no suitable firmware found" é o carimbo do
+# iwlwifi (foi um AX201 de campo, com o initrd sem nenhum hr-b0); o "Direct
+# firmware load ... failed" cobre os demais drivers.
+nb_wifi_firmware_check() {
+    dmesg 2> /dev/null |
+        grep -qiE 'no suitable firmware found|direct firmware load for .* failed' &&
+        NB_WIFI_FIRMWARE_MISSING=1
+    return 0
+}
+
 # Sobe o wifi e ESPERA a associação completar. O nb2 dava um `sleep 3` cego —
 # tempo insuficiente para handshake WPA2 + DHCP, e o stuff servido ainda por
 # cima deixava de chamar esta função.
 configure_wifi() {
-    NB_WIFI_IFACE=$(nb_wifi_iface) || return 1
-    [ -z "$NB_WIFI_IFACE" ] && return 1
+    NB_WIFI_IFACE=$(nb_wifi_iface) || NB_WIFI_IFACE=""
+    if [ -z "$NB_WIFI_IFACE" ]; then
+        # Sem rádio E com wifi.conf preenchido: se o dmesg acusa firmware, a
+        # culpa é do initrd, não da sede — e a tela tem que dizer isso em vez
+        # de mandar conferir cabo e switch. Sala cabeada sem wifi configurado
+        # continua caindo na tela de rede genérica.
+        if [ -s "$NB_RUN/wifi.conf" ]; then
+            nb_wifi_firmware_check
+            if [ -n "$NB_WIFI_FIRMWARE_MISSING" ]; then
+                NB_WIFI_REASON="the boot image is missing firmware for this wifi card - contact the organization"
+                nb_warn "$NB_WIFI_REASON"
+            fi
+        fi
+        return 1
+    fi
     nb_write_wpaconf "$1" || [ -s "$NB_WPA_CONF" ] || return 1
 
     log_begin_msg "Connecting to wifi on $NB_WIFI_IFACE"

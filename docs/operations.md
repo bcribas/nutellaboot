@@ -170,6 +170,13 @@ sudo tools/nb3-build-initrd --raw /caminho/ubuntu-24.04-initial.raw
 **Por que sudo:** o `initramfs-tools` roda *dentro* da imagem-mestre — é
 `losetup` + `mount` + `chroot`.
 
+O build confere o resultado e **recusa** initrd incompleto: ferramentas do
+caminho de download, `wpa_supplicant`, os módulos de crypto do WPA
+(`ccm`/`cmac`/`michael_mic`) e os canários de firmware do iwlwifi
+(`so-a0-hr-b0`, `ty-a0-gf-a0`, `QuZ-a0-hr-b0` — as famílias Intel que já
+ficaram de fora em silêncio e deixaram um AX201 de campo sem wifi). O
+initrd sai com ~186 MiB.
+
 Se preferir não dar root no servidor, dá para fazer o mesmo dentro de uma
 máquina virtual: suba a imagem-mestre, copie `client/initramfs-tools/` para
 `/etc/initramfs-tools/`, rode `update-initramfs -c -k <versão>` e traga
@@ -936,7 +943,8 @@ placa de rede, aparece como máquina nova e o vínculo precisa ser refeito.
 ### Véspera
 
 - [ ] Camada base gerada e registrada no modelo (`nb3-gerar-squash`)
-- [ ] `vmlinuz` e `initrd.img` atualizados (`nb3-build-initrd`)
+- [ ] `vmlinuz` e `initrd.img` atualizados (`nb3-build-initrd` — ele mesmo
+      recusa initrd sem crypto de WPA ou sem os firmwares Intel de wifi)
 - [ ] Pendrives gravados e testados em **pelo menos uma máquina real** da sede
 - [ ] `wifi.conf` com as redes da sede (e a rede reserva)
 - [ ] `nutellaboot.conf` com a sede certa e a chave de boot certa
@@ -1095,6 +1103,15 @@ campo que produzem exatamente isso com a senha CERTA:
   (`nb3-build-initrd`) e regravar/atualizar o pendrive;
 - firmware do rádio cochilando (família MediaTek mt792x; o boot já desliga o
   power-save por conta própria).
+
+E a causa que nem chega ao `WRONG_KEY`, porque sem firmware a interface nem
+existe: **initrd sem o firmware do rádio**. A tela diz "the boot image is
+missing firmware for this wifi card - contact the organization" — a culpa é
+do initrd publicado, não da sede. A solução é da organização: regerar o
+initrd (`nb3-build-initrd`, que hoje recusa sair sem os firmwares Intel) e
+publicá-lo; as máquinas atualizam o pendrive sozinhas no próximo boot
+CABEADO. Uma máquina só-wifi precisa de um boot com cabo ou de um pendrive
+regravado a partir do configureitor.
 
 A ordem de ataque:
 

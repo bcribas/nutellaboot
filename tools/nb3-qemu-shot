@@ -61,7 +61,8 @@ def main() -> None:
     ap.add_argument("output")
     ap.add_argument("--wait", type=float, default=12)
     ap.add_argument("--disk", help="disco extra (o 'HD' da máquina de teste)")
-    ap.add_argument("--mem", default="2G")
+    # 2G não descompacta o initrd de ~186 MB: a tela para em "Booting" sem erro
+    ap.add_argument("--mem", default="4G")
     ap.add_argument("--keep", action="store_true", help="não encerra a VM ao final")
     args = ap.parse_args()
 

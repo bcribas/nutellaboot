@@ -420,3 +420,20 @@ def test_o_hook_leva_os_templates_de_crypto_do_wifi():
     juntas = " ".join(linhas)
     for mod in ("ccm", "cmac", "michael_mic"):
         assert f" {mod}" in juntas, f"o hook não leva o módulo {mod}"
+
+
+def test_o_hook_leva_o_firmware_do_iwlwifi_pela_maior_api_disponivel():
+    """O modinfo do iwlwifi declara o TOPO da faixa de API (...-hr-b0-100),
+    que o linux-firmware da imagem-mestre ainda não publica; o dracut-install
+    copia só o nome literal e cala (flag -o). Resultado de campo: um AX201 sem
+    wifi num initrd com 74 MiB de firmware de rádio. A inclusão é por glob +
+    sort -V — a maior API que EXISTE, combo a combo — mais todos os .pnvm; e o
+    nb3-build-initrd recusa initrd sem os combos que já morderam."""
+    hook = HOOK.read_text(encoding="utf-8")
+    assert "sort -u -V" in hook, "o hook não escolhe a maior API por sort -V"
+    assert ".ucode" in hook and ".pnvm" in hook, "o hook não copia ucode+pnvm"
+    assert "intel/iwlwifi" in hook, "os combos novos vivem em /lib/firmware/intel/iwlwifi"
+
+    ferramenta = (REPO / "tools" / "nb3-build-initrd").read_text(encoding="utf-8")
+    for canario in ("iwlwifi-so-a0-hr-b0-", "iwlwifi-ty-a0-gf-a0-", "iwlwifi-QuZ-a0-hr-b0-"):
+        assert canario in ferramenta, f"o build não confere o canário {canario}"

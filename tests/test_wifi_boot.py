@@ -662,3 +662,61 @@ def test_chave_recusada_pelo_kernel_aponta_crypto_e_nao_senha(sh):
     )
     assert "Failed to set PTK" in out
     assert "REASON=the kernel refused to install the session key" in out
+
+
+# --- o firmware do rádio -----------------------------------------------------
+#
+# O caso do AX201 de campo: o initrd saiu sem NENHUM iwlwifi hr-b0 (o copiador
+# só busca o nome literal do modinfo, que declara uma API inexistente) e, sem
+# .ucode, a interface nem existe — configure_wifi retornava 1 em silêncio e a
+# tela genérica mandava conferir cabo e switch. O dmesg é a única testemunha.
+
+
+DMESG_SEM_FIRMWARE = """#!/bin/sh
+echo "[    0.86] iwlwifi 0000:00:14.3: Direct firmware load for iwlwifi-so-a0-hr-b0-89.ucode failed with error -2"
+echo "[    0.86] iwlwifi 0000:00:14.3: no suitable firmware found!"
+echo "[    0.86] iwlwifi 0000:00:14.3: iwlwifi-so-a0-hr-b0-89 is required"
+"""
+
+
+def test_sem_firmware_a_tela_culpa_o_initrd_e_nao_a_sede(sh):
+    shutil.rmtree(sh.sysnet / "wlan0")  # sem .ucode não há interface
+    (sh.tmp / "bin" / "dmesg").write_text(DMESG_SEM_FIRMWARE)
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh('configure_wifi; echo "R=$?"; echo "REASON=$NB_WIFI_REASON"')
+    assert "missing firmware for this wifi card" in out
+    assert "R=1" in out
+
+
+def test_sem_radio_e_sem_wifi_conf_nao_ha_culpa_de_firmware(sh):
+    """Sala cabeada sem wifi configurado continua na tela de rede genérica —
+    mesmo que o dmesg tenha um firmware qualquer falhando."""
+    shutil.rmtree(sh.sysnet / "wlan0")
+    (sh.tmp / "bin" / "dmesg").write_text(DMESG_SEM_FIRMWARE)
+    out = sh('configure_wifi; echo "REASON=[$NB_WIFI_REASON]"')
+    assert "REASON=[]" in out
+
+
+def test_crypto_ausente_vence_firmware_no_relatorio(sh):
+    """Os dois motivos podem coexistir num initrd velho; o de crypto vem
+    primeiro porque o conserto é o mesmo rebuild e a mensagem já é conhecida
+    das sedes."""
+    (sh.tmp / "bin" / "dmesg").write_text(DMESG_SEM_FIRMWARE)
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh(
+        'nb_wifi_crypto_check; nb_wifi_report; echo "REASON=$NB_WIFI_REASON"',
+        FAKE_SEM_CCM="1",
+    )
+    assert "kernel crypto" in out.rsplit("REASON=", 1)[1]
+
+
+def test_firmware_vence_senha_no_relatorio(sh):
+    """Sem o firmware (ou com o segundo estágio dele falhando) nenhuma senha
+    conecta — mandar a sede revisar a senha seria o beco do WRONG_KEY de novo."""
+    (sh.tmp / "bin" / "dmesg").write_text(DMESG_SEM_FIRMWARE)
+    (sh.tmp / "wpa.log").write_text(
+        "WPA: 4-Way Handshake failed - pre-shared key may be incorrect\n"
+    )
+    sh.wifi(f"Rede{TAB}senha-boa{TAB}\n")
+    out = sh('nb_wifi_report; echo "REASON=$NB_WIFI_REASON"')
+    assert "missing firmware for this wifi card" in out.rsplit("REASON=", 1)[1]

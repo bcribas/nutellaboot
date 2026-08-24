@@ -121,6 +121,13 @@ for m in crypto/ccm crypto/cmac crypto/michael_mic; do
         grep -q "$m" "$MNT/lib/modules/$KVER/modules.builtin" ||
         FALTOU="$FALTOU $m"
 done
+# O firmware do rádio, pelos três combos que morderam ou mordem em campo:
+# AX201 (so-a0-hr-b0 — a regressão real), AX210 (ty-a0-gf-a0) e AX201 em
+# Comet Lake (QuZ-a0-hr-b0). SEM número de API, de propósito: o hook embarca
+# a maior que existir na imagem-mestre, seja ela qual for.
+for fw in iwlwifi-so-a0-hr-b0- iwlwifi-ty-a0-gf-a0- iwlwifi-QuZ-a0-hr-b0-; do
+    grep -Fq "$fw" "$LISTA" || FALTOU="$FALTOU firmware:$fw"
+done
 # `iw` é aviso, não erro: o hook o copia SE a imagem-mestre o tiver, e a falta
 # não derruba o boot (o desligamento de power-save tem o caminho do sysfs).
 # Mas sem ele não há como depurar rádio no console de uma sala.

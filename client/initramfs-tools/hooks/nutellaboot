@@ -91,6 +91,38 @@ copy_exec /sbin/rfkill /sbin
 # gcm e ctr são builtin no kernel de hoje; entram na lista porque um kernel
 # futuro pode torná-los módulo, e é exatamente assim que essa classe volta.
 manual_add_modules ccm cmac michael_mic gcm ctr
+
+# --- o firmware do rádio Intel ---
+# O copiador padrão (hook-functions -> dracut-install) pede o NOME LITERAL
+# que o `modinfo -F firmware` declara — e o iwlwifi.ko declara o TOPO da
+# faixa de API (ex.: iwlwifi-so-a0-hr-b0-100.ucode), que o linux-firmware da
+# imagem-mestre ainda não tem (topo real hoje: 89). Em runtime o driver DESCE
+# a faixa até achar; o copiador não desce, e a falha é MUDA (flag -o). Um
+# AX201 de campo ficou sem wifi num initrd com 74 MiB de firmware de rádio.
+# Aqui entra, para cada combo (o prefixo antes de -<API>.ucode), SÓ o arquivo
+# de maior API que EXISTE no disco — glob + sort -V, imune ao descompasso e
+# sem lista fixa de nomes — e todos os .pnvm (tabelas de potência que o
+# driver pede junto; ~0,13 MiB somados). O copy_file devolve 1 quando o
+# dracut-install já trouxe o arquivo — daí o `|| :` sob o set -e.
+for _nb_fw in /lib/firmware/iwlwifi-*.pnvm* /lib/firmware/intel/iwlwifi/*.pnvm*; do
+    # o `if` (e não `[ ] &&`) porque um glob sem par, sob o set -e, derrubaria
+    # o hook inteiro em silêncio
+    if [ -e "$_nb_fw" ]; then
+        copy_file firmware "$_nb_fw" || :
+    fi
+done
+for _nb_fw in /lib/firmware/iwlwifi-*.ucode* /lib/firmware/intel/iwlwifi/*.ucode*; do
+    if [ -e "$_nb_fw" ]; then
+        printf '%s\n' "$_nb_fw"
+    fi
+done | sort -u -V | awk '
+    { combo = $0
+      sub(/-[0-9]+\.ucode(\.(zst|xz))?$/, "", combo)
+      maior[combo] = $0 }
+    END { for (c in maior) print maior[c] }
+' | while IFS= read -r _nb_fw; do
+    copy_file firmware "$_nb_fw" || :
+done
 # `iw` não é usado por script nenhum — o wpa_cli responde tudo que o boot
 # precisa. Vai junto porque, quando o wifi de uma sede não sobe, é a única
 # forma de olhar o rádio pelo console: `iw dev wlan0 scan`, `iw reg get`.
