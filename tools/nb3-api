@@ -5,7 +5,7 @@ Feito para ser COPIADO. É um arquivo só, com biblioteca padrão do Python 3 e
 nada mais: quem integra (MOJ, planilha da organização, script de sede) leva
 este arquivo e usa, sem venv, sem pip, sem depender deste repositório.
 
-    export NB3_BASE_URL=https://nutellaboot.naquadah.com.br
+    export NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br
     export NB3_API_KEY=nb3a_...
     nb3-api whoami
     nb3-api bulk sedes.tsv > credenciais.csv

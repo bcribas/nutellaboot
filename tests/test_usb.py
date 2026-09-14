@@ -739,3 +739,37 @@ def test_o_download_continua_pedindo_credencial(client, build, genusb, data_root
     asyncio.run(usb.gerar_da_sala("sala1"))
     assert client.get("/api/v1/site-images/sala1/usb/image", follow_redirects=False).status_code == 401
     assert client.get("/api/v1/usb/generic/image", follow_redirects=False).status_code == 401
+
+
+def test_apagar_a_imagem_leva_o_pendrive_e_o_estado_de_publicacao(data_root, image_testes3):
+    """O rmtree da site-image deixava um .img de 400 MB órfão em data/usb/ e um
+    publish/*.json que o retry_failed tentaria reenviar: só o usb.json sabia o
+    nome deles."""
+    from server.app.services import publish, store, usb
+
+    img = data_root / "usb" / "testes3-0badcafe.img"
+    img.parent.mkdir(parents=True, exist_ok=True)
+    img.write_bytes(b"x")
+    pub = publish._state_path("testes3-0badcafe.img")
+    pub.parent.mkdir(parents=True, exist_ok=True)
+    fsdb.write_json(pub, {"file": "testes3-0badcafe.img", "status": "done"})
+    fsdb.write_json(data_root / "site-images" / "testes3" / "usb.json", {"file": "testes3-0badcafe.img", "status": "done"})
+    assert usb.file_path("testes3-0badcafe.img") == img
+
+    store.delete_site_image("testes3")
+    assert not img.exists() and not pub.exists()
+    assert not store.site_image_exists("testes3")
+
+
+def test_o_grub_leva_o_servidor_na_cmdline_mas_nunca_a_chave(tmp_path):
+    """O GRUB lê a FAT sozinho: IMAGEROOT e NB_SERVER na cmdline sobrevivem a
+    uma partição que o Linux não conseguiu ler (o caso do SATA morrendo). A
+    chave fica só no nutellaboot.conf, de propósito."""
+    _, ler = _gera_pendrive(tmp_path, "sala1", "Sala", "--server", "https://srv.test/", "--boot-key", "nb3b_segredo")
+    cfg = ler("grub.cfg")
+    assert "NB_SERVER=https://srv.test " in cfg or "NB_SERVER=https://srv.test\n" in cfg or "NB_SERVER=https://srv.test" in cfg
+    assert "nb3b_segredo" not in cfg
+    assert 'set NB_SERVER="https://srv.test/"' in ler("nutellaboot.conf")
+
+    _, ler = _gera_pendrive(tmp_path / "generica", "sala2", "Sala")
+    assert "NB_SERVER=" not in ler("grub.cfg")

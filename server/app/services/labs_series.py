@@ -45,6 +45,8 @@ def gravar_ponto(agora: float | None = None) -> dict:
     desde = agora - 86400  # a janela de "ativas" não importa aqui
     sites = {}
     for img in store.list_site_images():
+        if not store.site_image_visivel_na_frota(img):
+            continue
         r = labs.resumo_de(img["id"], desde=desde)
         # compacto de propósito: 55 sedes × 1440 pontos/dia somam rápido
         v = [
@@ -114,7 +116,10 @@ def serie(p, *, since: float = 0, until: float = 0, site: str = "") -> list[dict
 
     def ve(sid: str) -> bool:
         if sid not in visiveis:
-            visiveis[sid] = _pode_ver(p, sid)
+            # pontos gravados antes de a sede ser ocultada também saem do total
+            visiveis[sid] = _pode_ver(p, sid) and store.site_image_visivel_na_frota(
+                store.get_site_image(sid) or {}
+            )
         return visiveis[sid]
 
     pontos = []

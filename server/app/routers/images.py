@@ -25,6 +25,11 @@ async def create_image(body: SiteImageCreate, p=Depends(auth.require_console)) -
         raise HTTPException(403, erro)
     if not ownership.can_use_model(p, body.model):
         raise HTTPException(404, "modelo não existe")
+    extra = {}
+    if body.wallpaper_locked:
+        extra["wallpaper_locked"] = True
+    if body.dashboard_hidden:
+        extra["dashboard_hidden"] = True
     try:
         criada = store.create_site_image(
             body.id,
@@ -32,7 +37,7 @@ async def create_image(body: SiteImageCreate, p=Depends(auth.require_console)) -
             body.model,
             unlocked=body.unlocked,
             owner=p.owner,
-            extra={"wallpaper_locked": bool(body.wallpaper_locked)} if body.wallpaper_locked else None,
+            extra=extra or None,
         )
     except store.ImageError as e:
         raise HTTPException(400, str(e))
@@ -143,6 +148,10 @@ async def patch_image(image: str, body: SiteImagePatch, p=Depends(auth.require_c
     if campos.get("build_quota") is not None and p.kind != "admin":
         # cota que o próprio dono aumenta não é cota
         raise HTTPException(403, "só a administração muda a cota de builds")
+
+    if campos.get("dashboard_hidden") is not None and p.kind != "admin":
+        # tirar a própria sede do placar da organização não é decisão do dono
+        raise HTTPException(403, "só a administração oculta uma imagem do dashboard")
 
     if campos.get("wallpaper_locked") is not None and p.kind != "admin":
         # o mesmo portão do `unlocked`: a trava do wallpaper é decisão da

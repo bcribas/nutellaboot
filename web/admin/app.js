@@ -110,7 +110,11 @@ function renderImages() {
       }</span>
       <span class="pill ${livre ? "ok" : ""}" title="${
         livre ? t("profile_free") : t("profile_official")
-      }">${livre ? t("profile_free_short") : t("profile_official_short")}</span></td>`;
+      }">${livre ? t("profile_free_short") : t("profile_official_short")}</span>${
+        img.dashboard_hidden
+          ? ` <span class="pill" title="${t("dashboard_hidden_help")}">${t("dashboard_hidden_short")}</span>`
+          : ""
+      }</td>`;
     const actions = document.createElement("td");
     // alterna Oficial <-> Livre: é assim que se "volta uma imagem com tudo
     // liberado" sem recriar nada
@@ -125,6 +129,14 @@ function renderImages() {
       // dispensa sozinho, no servidor.
       const corpo = livre ? { unlocked: false } : { unlocked: true, wallpaper_locked: false };
       await api.patch(`/api/v1/site-images/${img.id}`, corpo, A);
+      load();
+    };
+    // a imagem de teste dos times fica fora do placar e dos gráficos da frota
+    const oculta = document.createElement("button");
+    oculta.className = "small";
+    oculta.textContent = img.dashboard_hidden ? t("show_on_dashboard") : t("hide_from_dashboard");
+    oculta.onclick = async () => {
+      await api.patch(`/api/v1/site-images/${img.id}`, { dashboard_hidden: !img.dashboard_hidden }, A);
       load();
     };
     const cam = document.createElement("button");
@@ -158,7 +170,7 @@ function renderImages() {
       await api.del(`/api/v1/site-images/${img.id}`, A);
       load();
     };
-    actions.append(perfil, " ", cam, " ", ver, " ", rot, " ", del);
+    actions.append(perfil, " ", oculta, " ", cam, " ", ver, " ", rot, " ", del);
     tr.appendChild(actions);
     tbody.appendChild(tr);
   }

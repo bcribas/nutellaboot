@@ -19,7 +19,7 @@ IMAGEROOT=25brbr
 NB_BOOT_KEY=nb3b_troque-por-a-chave-da-sua-imagem
 
 # Servidor do NutellaBoot (opcional; use para apontar a um servidor de teste).
-#NB_SERVER=https://nutellaboot.naquadah.com.br
+#NB_SERVER=https://nutellaboot.mdp.naquadah.com.br
 
 # Fixa nomes no /etc/hosts do initrd: "nome ip", uma linha por entrada.
 # Serve para testes em máquina virtual e para espelhos locais na sede.

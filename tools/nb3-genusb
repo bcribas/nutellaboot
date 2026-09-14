@@ -194,6 +194,10 @@ fi
 # --- grub.cfg (na partição, editável) ---
 CMDLINE_BASE="boot=nutellaboot noresume pcie_aspm=off net.ifnames=0"
 [ -n "$IMAGEROOT" ] && CMDLINE_BASE="$CMDLINE_BASE IMAGEROOT=$IMAGEROOT"
+# O servidor também na cmdline: o GRUB lê a FAT sozinho, sem o blkid do
+# initrd, então IMAGEROOT e NB_SERVER sobrevivem a uma partição que o Linux
+# não conseguiu ler. A CHAVE fica só no nutellaboot.conf, de propósito.
+[ -n "$SERVER" ] && CMDLINE_BASE="$CMDLINE_BASE NB_SERVER=${SERVER%/}"
 
 cat > "$WORK/grub.cfg" << EOF
 set timeout=10

@@ -108,7 +108,8 @@ for f in usr/bin/aria2c usr/bin/wget.good usr/bin/md5sum usr/bin/tail \
     scripts/nutellaboot scripts/nb3-ui \
     etc/nutellaboot-build etc/ssl/certs/ca-certificates.crt \
     sbin/wpa_supplicant sbin/wpa_cli sbin/rfkill sbin/dhcpcd \
-    lib/firmware/regulatory.db net/wireless/cfg80211 net/mac80211/mac80211; do
+    lib/firmware/regulatory.db net/wireless/cfg80211 net/mac80211/mac80211 \
+    usr/bin/udevadm usr/lib/udev/rules.d/60-persistent-storage.rules; do
     grep -Fq "$f" "$LISTA" || FALTOU="$FALTOU $f"
 done
 # Os templates de crypto do 4-way: o mac80211 os pede por request_module ao

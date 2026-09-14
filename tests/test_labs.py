@@ -494,3 +494,49 @@ def test_a_amostra_guarda_o_disco(data_root, frota):
     )
     assert linha["hd"] == 77
 
+
+
+# --- a imagem de teste dos times fica fora do placar --------------------------
+
+
+def test_sede_oculta_nao_entra_no_resumo_nem_no_inventario(client, frota, ha):
+    planta("sala1", "52-54-00-00-00-01", visto_ha=10)
+    planta("sala2", "52-54-00-00-00-02", visto_ha=10)
+    store.patch_site_image("sala2", {"dashboard_hidden": True})
+    labs.limpar_cache()
+    labs.limpar_cache_inventario()
+
+    ids = {s["id"] for s in client.get("/api/v1/labs", headers=ha).json()["sites"]}
+    assert "sala2" not in ids and "sala1" in ids
+    assert client.get("/api/v1/labs/inventory", headers=ha).json()["machines"] == 1
+
+
+def test_patch_liga_e_desliga_a_ocultacao(client, frota, ha):
+    r = client.patch("/api/v1/site-images/sala1", json={"dashboard_hidden": True}, headers=ha)
+    assert r.status_code == 200 and r.json()["dashboard_hidden"] is True
+    assert store.get_site_image("sala1")["dashboard_hidden"] is True
+    labs.limpar_cache()
+    assert "sala1" not in {s["id"] for s in client.get("/api/v1/labs", headers=ha).json()["sites"]}
+
+    client.patch("/api/v1/site-images/sala1", json={"dashboard_hidden": False}, headers=ha)
+    labs.limpar_cache()
+    assert "sala1" in {s["id"] for s in client.get("/api/v1/labs", headers=ha).json()["sites"]}
+
+    # o dono não tira a própria sede do placar da organização
+    hc = {"Authorization": "Bearer NB3-AAAA-BBBB", "X-NB-Console": "1"}
+    fsdb.write_json(
+        frota / "invites.json",
+        {"NB3-AAAA-BBBB": {"max_images": 5, "used_images": 1, "model": "t", "label": "x"}},
+    )
+    r = client.patch("/api/v1/site-images/dooutro", json={"dashboard_hidden": True}, headers=hc)
+    assert r.status_code == 403
+
+
+def test_a_criacao_grava_a_flag(client, frota, ha):
+    r = client.post(
+        "/api/v1/site-images",
+        json={"id": "teste-times", "fullname": "T", "model": "t", "unlocked": True, "dashboard_hidden": True},
+        headers=ha,
+    )
+    assert r.status_code == 201, r.text
+    assert store.get_site_image("teste-times")["dashboard_hidden"] is True

@@ -232,3 +232,13 @@ def test_o_glob_da_chave_limita_as_sedes(cliente, frota, ha):
     labs.limpar_cache()
     d = cliente.get(f"/api/v1/labs?tk={chave}").json()
     assert [s["id"] for s in d["sites"]] == ["sala1"], "o glob filtra; dooutro não aparece"
+
+
+def test_o_ponto_nao_grava_a_sede_oculta(frota):
+    from server.app.services import store
+
+    planta_maquina("sala1", "52-54-00-00-00-01")
+    planta_maquina("dooutro", "52-54-00-00-00-02")
+    store.patch_site_image("sala1", {"dashboard_hidden": True})
+    ponto = labs_series.gravar_ponto()
+    assert "sala1" not in ponto["sites"] and "dooutro" in ponto["sites"]

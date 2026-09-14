@@ -57,7 +57,7 @@ sistema base sobrescrever tudo, em silêncio.
 Transforma a imagem-mestre num `.squash`:
 
 ```bash
-sudo -E NB3_ADMIN_KEY=nb3a_... NB3_BASE_URL=https://nutellaboot.naquadah.com.br \
+sudo -E NB3_ADMIN_KEY=nb3a_... NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br \
     tools/nb3-gerar-squash \
         --raw /caminho/ubuntu-24.04-initial.raw \
         --name maratonalinux2026 \
@@ -89,7 +89,7 @@ Um comando faz a temporada inteira — duplica o modelo do ano passado
 a base:
 
 ```bash
-export NB3_BASE_URL=https://nutellaboot.naquadah.com.br
+export NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br
 export NB3_ADMIN_KEY=nb3a_...
 
 # sempre veja antes o que vai acontecer
@@ -139,7 +139,7 @@ O agente, a tela de bloqueio e a regra que detecta pendrive moram em
 transforma em camada, publica e registra no modelo:
 
 ```bash
-export NB3_BASE_URL=https://nutellaboot.naquadah.com.br
+export NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br
 export NB3_ADMIN_KEY=nb3a_...
 
 tools/nb3-camada-telemetria --dry-run                       # ver antes
@@ -223,7 +223,7 @@ NB3_ADMIN_KEY=nb3a_... tools/nb3-genusb \
     --output 26brbr.img \
     --imageroot 26brbr \
     --fetch-key \
-    --server https://nutellaboot.naquadah.com.br \
+    --server https://nutellaboot.mdp.naquadah.com.br \
     --wifi minhas-redes.conf
 ```
 
@@ -361,7 +361,7 @@ Se preferir travar (ou destravar) o papel de parede de uma imagem que já
 existe, use a API:
 
 ```bash
-curl -X PATCH https://nutellaboot.naquadah.com.br/api/v1/site-images/26spsp \
+curl -X PATCH https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26spsp \
     -H "Authorization: Bearer $NB3_ADMIN_KEY" \
     -H 'Content-Type: application/json' \
     -d '{"wallpaper_locked": true}'
@@ -586,7 +586,7 @@ sessões abertas com ela** — a identidade é reconferida a cada requisição.
 
 ### A página inicial
 
-O endereço raiz do servidor (`https://nutellaboot.naquadah.com.br/`) é a porta
+O endereço raiz do servidor (`https://nutellaboot.mdp.naquadah.com.br/`) é a porta
 de entrada para todo mundo, em português, inglês e espanhol. Ela tem quatro
 cartões: **coordenador** (cola o identificador e o token de uma imagem que já
 existe e abre a configuração ou o painel), **quero uma imagem própria** (leva
@@ -604,7 +604,7 @@ distribuídos continuam válidos.
 Cada imagem tem um link próprio, já com o token embutido:
 
 ```
-https://nutellaboot.naquadah.com.br/configureitor/?id=26spsp&tk=nb3i_...
+https://nutellaboot.mdp.naquadah.com.br/configureitor/?id=26spsp&tk=nb3i_...
 ```
 
 Esse link **é** a credencial: quem tem o link configura a imagem. Mande por
@@ -657,11 +657,11 @@ Quem preferir a API:
 
 ```bash
 # ver os campos e o estado de cada cadeado
-curl https://nutellaboot.naquadah.com.br/api/v1/models/maratonalinux2604/schema \
+curl https://nutellaboot.mdp.naquadah.com.br/api/v1/models/maratonalinux2604/schema \
     -H "Authorization: Bearer $NB3_ADMIN_KEY"
 
 # abrir a RAM mínima e fechar o fuso horário
-curl -X PUT https://nutellaboot.naquadah.com.br/api/v1/models/maratonalinux2604/schema/locks \
+curl -X PUT https://nutellaboot.mdp.naquadah.com.br/api/v1/models/maratonalinux2604/schema/locks \
     -H "Authorization: Bearer $NB3_ADMIN_KEY" \
     -H 'Content-Type: application/json' \
     -d '{"locks": {"MINRAM": false, "TIMEZONE": true}}'
@@ -769,7 +769,7 @@ para o início da prova.
 ### O painel do laboratório
 
 ```
-https://nutellaboot.naquadah.com.br/hotconfig/?id=26spsp&tk=nb3i_...
+https://nutellaboot.mdp.naquadah.com.br/hotconfig/?id=26spsp&tk=nb3i_...
 ```
 
 Cada máquina é um cartão, atualizado sozinho (o servidor empurra as mudanças —
@@ -864,10 +864,15 @@ consulta a cada 4 segundos) **e** enfileira o comando (que o agente executa).
 Se um falhar, o outro resolve. E matar o processo da tela não destrava: o
 agente relança em até 3 segundos enquanto o estado for "bloqueada".
 
+Ordem que a máquina não buscou em **10 minutos** caduca (`command_ttl_sec`
+em `data/server.json`): máquina desligada não executa a ordem de ontem ao
+ligar hoje. Se ela precisava mesmo receber, mande de novo. A ordem caducada
+aparece na aba de logs da máquina como `expired`.
+
 ### Todas as sedes numa tela
 
 ```
-https://nutellaboot.naquadah.com.br/laboratorios/
+https://nutellaboot.mdp.naquadah.com.br/laboratorios/
 ```
 
 Uma linha por sede — máquinas, quantas rodaram na janela escolhida, quantas
@@ -881,6 +886,11 @@ Acima de 50 máquinas, confirmar exige **digitar o número** — um clique errad
 
 O sub-admin vê só as sedes dele. O botão **Baixar CSV** dá as mesmas contas da
 tela, com a janela de dias escolhida.
+
+A imagem de teste dos times (perfil Livre, distribuída publicamente) fica
+marcada **"Fora do dashboard"** no `/admin/`: centenas de máquinas de casa
+não entram no placar, nas médias nem nos gráficos da frota. O botão ao lado
+do perfil liga e desliga a marca.
 
 ### Relatório da frota
 
@@ -1175,6 +1185,10 @@ não é um bloqueio de sessão do GNOME. É a mesma limitação prática do
 NutellaBoot 2, agora com o relançamento automático.
 
 ### O comando não chegou na máquina
+
+Se a máquina estava desligada quando o comando foi mandado e ligou mais de 10
+minutos depois, o comando caducou de propósito (aparece como `expired` nos
+logs dela): mande de novo.
 
 O agente fica pendurado numa requisição de até 25 segundos; se a rede oscilar,
 ele reconecta e recebe o que ficou pendente — comandos não se perdem, ficam na

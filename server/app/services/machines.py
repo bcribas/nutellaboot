@@ -4,6 +4,11 @@ Diferença central em relação ao nb2: a fila é por máquina e tem confirmaç�
 (ack). No nb2 havia um único arquivo de texto por sede em /tmp, nunca
 truncado, que servia de fila E de histórico; a máquina filtrava as linhas dos
 últimos 600 s e cada comando era um nome de função bash executado direto.
+
+A janela de 600 s voltou, do lado do servidor (`command_ttl_sec`): uma ordem
+que ninguém buscou dentro dela caduca. Sem isso, o alvo "all" — resolvido no
+envio para toda máquina com machine.json, inclusive as desligadas — deixava
+um poweroff de ontem esperando a máquina ligar hoje.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ import time
 from pathlib import Path
 
 from .. import fsdb
-from .store import site_image_dir
+from .store import server_conf, site_image_dir
 
 MAC_RE = re.compile(r"^[0-9a-f]{2}(-[0-9a-f]{2}){5,7}$")
 
@@ -157,6 +162,20 @@ def list_machines(image_id: str) -> list[dict]:
 
 # --- fila de comandos ---
 
+# Uma ordem que ninguém buscou em `command_ttl_sec` caduca. O relógio conta a
+# partir de `not_before`, não de `created_at`: uma ordem com delay de 15 min
+# não pode caducar antes de nascer.
+COMMAND_TTL_PADRAO = 600
+
+
+def _command_ttl() -> int:
+    return int(server_conf().get("command_ttl_sec", COMMAND_TTL_PADRAO))
+
+
+def _expirada(entry: dict, now: float, ttl: int) -> bool:
+    piso = entry.get("not_before") or entry.get("created_at") or 0
+    return now > piso + ttl
+
 
 def enqueue(image_id: str, macs: list[str], command: str, args: str = "", delay: int = 0) -> str:
     cid = secrets.token_hex(6)
@@ -175,14 +194,45 @@ def enqueue(image_id: str, macs: list[str], command: str, args: str = "", delay:
 
 
 def pending_commands(image_id: str, mac: str) -> list[dict]:
+    """A fila da máquina, já sem o que caducou.
+
+    O que caducou é APAGADO aqui (não só filtrado): senão queue/ cresceria
+    para sempre — o ack nunca virá — e o `pending` do painel mentiria. Fica o
+    rastro em acks.log, no formato do ack e com `status: "expired"`, para o
+    operador ver na aba de logs que a ordem não foi executada porque caducou,
+    e não porque se perdeu.
+    """
     q = machine_dir(image_id, mac) / "queue"
     if not q.is_dir():
         return []
+    from .logcap import append_capped
+
+    now = time.time()
+    ttl = _command_ttl()
     out = []
     for f in sorted(q.glob("*.json")):
         entry = fsdb.read_json(f)
-        if entry:
-            out.append(entry)
+        if not entry:
+            continue
+        if _expirada(entry, now, ttl):
+            f.unlink(missing_ok=True)
+            append_capped(
+                machine_dir(image_id, mac) / "acks.log",
+                json.dumps(
+                    {
+                        "id": entry.get("id"),
+                        "mac": mac,
+                        "at": now,
+                        "status": "expired",
+                        "command": entry.get("command"),
+                        "created_at": entry.get("created_at"),
+                        "not_before": entry.get("not_before"),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            continue
+        out.append(entry)
     return out
 
 

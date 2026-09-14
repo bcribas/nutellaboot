@@ -11,6 +11,9 @@ class SiteImageCreate(BaseModel):
     model: str
     unlocked: bool = False
     wallpaper_locked: bool = False
+    # fora das visões da frota (/labs*, dashboard, laboratórios): a imagem de
+    # teste dos times não pode inflar o placar nem o perfil de hardware
+    dashboard_hidden: bool = False
 
 
 class SiteImagePatch(BaseModel):
@@ -18,6 +21,7 @@ class SiteImagePatch(BaseModel):
     unlocked: bool | None = None
     model: str | None = None
     wallpaper_locked: bool | None = None
+    dashboard_hidden: bool | None = None
     # só o admin altera (ver routers/images.py): é a cota que contém o
     # auto-atendimento, e quem pode aumentá-la sozinho não tem cota
     build_quota: int | None = Field(default=None, ge=0)

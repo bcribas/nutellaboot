@@ -19,6 +19,7 @@
 #   * nutellaboot.conf e wifi.conf são da sede, não nossos. Não se toca.
 
 NB_USB_MNT=${NB_USB_MNT:-/nb3usb}
+NB_USB_BYLABEL=${NB_USB_BYLABEL:-/dev/disk/by-label/NB3CFG}
 
 # Lê a resposta de /boot/v3/<img>/usb. Devolve 0 só quando ela faz sentido.
 nb_usb_server_build() {
@@ -38,7 +39,14 @@ nb_usb_server_build() {
 nb_usb_device() {
     _uu_try=0
     while [ "$_uu_try" -lt "${NB_USB_TRIES:-3}" ]; do
-        _uu_dev=$(blkid -L NB3CFG 2> /dev/null)
+        # o link do udev primeiro, o blkid de reserva — gêmeo do
+        # nb_cfg_device do bootstrap: o `blkid -L` varre todo disco e fica
+        # preso num SATA doente (e este laço escreve no pendrive depois)
+        if [ -e "$NB_USB_BYLABEL" ]; then
+            _uu_dev=$(readlink -f "$NB_USB_BYLABEL")
+        else
+            _uu_dev=$(blkid -L NB3CFG 2> /dev/null)
+        fi
         if [ -n "$_uu_dev" ]; then
             printf '%s' "$_uu_dev"
             return 0

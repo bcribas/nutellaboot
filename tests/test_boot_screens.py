@@ -169,6 +169,9 @@ def test_bootstrap_tem_tela_para_cada_falha_de_rede():
     # e wifi é um terceiro problema: mandar conferir cabo e switch quem está
     # tentando por rádio é mandar procurar no lugar errado
     assert 'nb_fatal_screen "NO WIFI"' in texto
+    # a de configuração: partição do pendrive não lida é erro de pendrive/disco,
+    # não de rede — antes virava NO NETWORK mandando procurar cabo
+    assert 'nb_fatal_screen "NO CONF"' in texto
     assert "$NB_WIFI_REASON" in texto
     # a de servidor menciona o relógio: bateria de CMOS morta dá exatamente
     # este sintoma e é diagnóstico que ninguém adivinha
@@ -242,3 +245,13 @@ def test_toda_tela_fatal_diz_o_que_fazer():
         assert re.search(r"What to (do|check)|-> ", corpo), (
             f"a tela '{nome}' nao diz o que fazer"
         )
+
+
+def test_a_tela_de_configuracao_cabe_na_tela():
+    """NO CONF é do bootstrap, não do kit: carregado por cima, ele só define
+    funções — e o `command -v nb_fatal_screen ||` preserva a versão do kit."""
+    n = altura(
+        f"NB_UI_PLAIN=0\n. {BOOTSTRAP}\nreboot() {{ :; }}\npanic() {{ :; }}\n"
+        "nb_no_config_screen 'the NB3CFG partition did not show up in 40s'"
+    )
+    assert n <= MAX_LINHAS, f"NO CONF usa {n} linhas"

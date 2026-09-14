@@ -166,6 +166,7 @@ def resumo(p, *, dias: float = DIAS_PADRAO) -> list[dict]:
             **resumo_de(i["id"], desde=desde),
         }
         for i in ownership.visible_site_images(p)
+        if store.site_image_visivel_na_frota(i)
     ]
     linhas.sort(key=lambda l: l["id"])
     _cache[chave] = (agora, linhas)
@@ -244,6 +245,8 @@ def inventario(p) -> dict:
     maquinas = 0
     sites_hw: list[dict] = []
     for img in ownership.visible_site_images(p):
+        if not store.site_image_visivel_na_frota(img):
+            continue
         image_id = img["id"]
         _rams: list[float] = []
         _cores: list[float] = []

@@ -141,6 +141,7 @@ STORAGEDIR="{c.storage}"
 NB_USB_MNT="{c.pendrive}"
 NB_USB_TRIES=1
 NB_USB_WAIT=0
+NB_USB_BYLABEL="{c.tmp}/by-label"
 NB_USB_REBOOT_WAIT=0
 NB_FATAL_WAIT=0
 {extra}

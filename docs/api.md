@@ -86,12 +86,6 @@ mandar a chave no corpo; `aria2c` e `curl` usam o cabeçalho.
 | POST | `/boot/v3/{img}/seeders/join?ip=…` | B | `stuff` | `accepted=t\|f` + `seeders=N` |
 | POST | `/boot/v3/{img}/seeders/heartbeat?ip=…` | B | `stuff` (a cada 60 s) | `released=t\|f` + `seeders=N` |
 | POST | `/boot/v3/{img}/seeders/leave?ip=…` | — | `stuff` | `ok` |
-
-O join respeita o limite `SEEDMAX` da configuração da imagem (padrão 4):
-pool cheio responde **200 com `accepted=f`** — não é erro, a máquina só pula
-a semeadura e boota direto. `released=t` no heartbeat avisa que o console
-liberou a máquina: ela sai do modo seed, chama `leave` e termina o boot.
-Tudo em texto puro `chave=valor`, como o resto do `/boot/v3`.
 | GET/POST | `/boot/v3/{img}/wallpaper` | B | `stuff` | PNG/JPEG, com `ETag` = md5 |
 | GET/POST | `/boot/v3/{img}/clionkey` | B | `stuff` | a licença do CLion (404 se não instalada no servidor) |
 | GET/POST | `/boot/v3/{img}/lockinfo/{mac}` | B | tela de bloqueio | JSON com time, organização, país e lugar |
@@ -99,6 +93,12 @@ Tudo em texto puro `chave=valor`, como o resto do `/boot/v3`.
 | GET/POST | `/boot/v3/{img}/roster/logos/{org}` | B | tela de bloqueio | SVG ou PNG do logotipo |
 | GET/POST | `/boot/v3/{img}/usb` | B | `stuff` | `BUILD <id>` e, nas linhas seguintes, `MD5 ARQUIVO URL` (mesmo formato do manifest) |
 | GET/POST | `/boot/v3/{img}/usbfile/{nome}` | B | `stuff` | o `vmlinuz` ou o `initrd.img` da construção atual |
+
+O join respeita o limite `SEEDMAX` da configuração da imagem (padrão 4):
+pool cheio responde **200 com `accepted=f`** — não é erro, a máquina só pula
+a semeadura e boota direto. `released=t` no heartbeat avisa que o console
+liberou a máquina: ela sai do modo seed, chama `leave` e termina o boot.
+Tudo em texto puro `chave=valor`, como o resto do `/boot/v3`.
 
 `/usb` é como a máquina descobre que o pendrive de onde ela bootou está para
 trás: o initrd carrega o próprio carimbo em `/etc/nutellaboot-build`, compara,
@@ -111,7 +111,7 @@ aí a máquina não confere nada. `{nome}` sai de uma lista fechada
 
 ```
 $ curl -s -H "X-NB-Boot-Key: $BOOT_KEY" \
-    https://nutellaboot.naquadah.com.br/boot/v3/25brbr/manifest
+    https://nutellaboot.mdp.naquadah.com.br/boot/v3/25brbr/manifest
 60782353ebd1898ab5d5f7a86c9efc34 firefox.squash https://files.mdp.naquadah.com.br/maratonalinux/firefox.squash
 2c02aa5ea909e9f74ce47ea7d3a84b4d wifis.squash http://files.mdp.naquadah.com.br/maratonalinux/wifis.squash
 fbd0543ae7c9181ac029192e3c7d087e log23.squash http://files.mdp.naquadah.com.br/maratonalinux/log23.squash
@@ -154,7 +154,7 @@ O cliente lê com `while read MD5 ARQUIVO URLS` e passa `$URLS` inteiro ao
 
 NBUID=866112933
 IMAGEROOT='25brbr'
-NB_SERVER='https://nutellaboot.naquadah.com.br'
+NB_SERVER='https://nutellaboot.mdp.naquadah.com.br'
 NB_MACHINE_KEY='nb3m_…'
 NB_BOOT_KEY='nb3b_…'
 ALLOWNETWORKCHANGE='f'
@@ -177,16 +177,21 @@ ALLOWNETWORKCHANGE='f'
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| POST | `/api/v1/site-images` | C | `{id, fullname, model, unlocked?, wallpaper_locked?}` | imagem criada **com as credenciais em claro** (única vez) |
+| POST | `/api/v1/site-images` | C | `{id, fullname, model, unlocked?, wallpaper_locked?, dashboard_hidden?}` | imagem criada **com as credenciais em claro** (única vez) |
 | POST | `/api/v1/site-images/bulk` | A | TSV ou `{rows:[…]}` | `{results:[…]}`; com `?format=csv`, CSV das credenciais |
 | GET | `/api/v1/site-images?prefix=` | C | — | `{images:[…]}` (o sub-admin vê só as dele) |
 | GET | `/api/v1/site-images/{img}` | C, I | — | `image.json` |
-| PATCH | `/api/v1/site-images/{img}` | C | `{fullname?, unlocked?, model?, wallpaper_locked?}` | imagem atualizada |
-| DELETE | `/api/v1/site-images/{img}` | C | — | `204` |
+| PATCH | `/api/v1/site-images/{img}` | C | `{fullname?, unlocked?, model?, wallpaper_locked?, dashboard_hidden?}` | imagem atualizada |
+| DELETE | `/api/v1/site-images/{img}` | C | — | `204` (apaga também o pendrive gerado em `data/usb/` e o estado de publicação) |
 | POST | `/api/v1/site-images/{img}/token/rotate` | C | — | `{token}` |
 | GET | `/api/v1/site-images/{img}/credentials` | C | — | token, chaves e links prontos |
 | GET | `/api/v1/site-images/{img}/boot-key` | C | — | `{boot_key}` |
 | POST | `/api/v1/site-images/{img}/boot-key/rotate` | C | — | `{boot_key}` (exige atualizar os pendrives) |
+
+`dashboard_hidden` (só a administração muda) tira a imagem das visões da frota
+(`/labs`, `/labs/inventory`, `/labs/series`): é para a imagem de teste dos
+times, que não pode inflar o placar nem o perfil de hardware. Ela continua
+existindo em tudo o mais (hotconfig, configureitor, relatório).
 
 Identificadores começando com dígito ficam no espaço reservado à
 administração (`namespace: "contest"`); os demais são `personal`. O `id` aceita
@@ -464,6 +469,8 @@ que está acontecendo no conjunto, e como ajo num recorte dele".
 Cada sede vira uma entrada em `results` — com `command_id` e `machines`, ou com
 `error` e `status`.
 
+Sede marcada `dashboard_hidden` não entra em nenhuma das três leituras.
+
 As rotas de leitura da frota (`/labs`, `/labs/inventory`, `/labs/series`)
 aceitam também a **chave de serviço com escopo `labs:read`** — é a chave
 compartilhável do dashboard, por `?tk=` na URL ou Bearer. Ela só lê agregados:
@@ -564,6 +571,12 @@ token e a chave de máquina de cada sede. Nome fora da lista é `404`.
 > desbloqueia a sala inteira.
 
 `target` é `"all"` ou uma lista de MACs. `delay` adia a execução em segundos.
+
+Uma ordem que nenhuma máquina buscou caduca `command_ttl_sec` segundos
+(`data/server.json`, padrão 600) depois do seu `not_before`: é apagada da fila
+na leitura seguinte e registrada nos `acks` da máquina com `status: "expired"`.
+É o que impede um "desligar" mandado hoje de desligar a máquina que só ligar
+amanhã — o alvo `"all"` inclui as máquinas desligadas no momento do envio.
 Comandos aceitos: `donottouch`, `cantouch`, `cleanhomenow`, `mlreboot`,
 `mlpoweroff`, `disablefirewall`, `enablefirewall`, `resetcontaeditores`,
 `precontest`. Qualquer outro valor é recusado com `400`.
@@ -734,7 +747,7 @@ integra leva o arquivo e usa, sem venv, sem `pip` e sem depender deste
 repositório.
 
 ```bash
-export NB3_BASE_URL=https://nutellaboot.naquadah.com.br
+export NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br
 export NB3_API_KEY=nb3s_...          # serve nb3a_, nb3s_ e o nb3i_ da sede
 
 nb3-api whoami
@@ -770,7 +783,7 @@ Feito uma vez, pela administração. Os escopos limitam o que a chave faz, e
 `images` limita onde ela age.
 
 ```bash
-curl -sS -X POST https://nutellaboot.naquadah.com.br/api/v1/service-keys \
+curl -sS -X POST https://nutellaboot.mdp.naquadah.com.br/api/v1/service-keys \
   -H "Authorization: Bearer $ADMIN_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -790,7 +803,7 @@ Resposta (a chave aparece **uma única vez**):
 ### 2. Enviar o roster dos times
 
 ```bash
-curl -sS -X PUT https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/roster \
+curl -sS -X PUT https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/roster \
   -H "Authorization: Bearer $MOJ_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -811,7 +824,7 @@ curl -sS -X PUT https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/ro
 
 ```bash
 curl -sS -X PUT \
-  https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/roster/logos/unb \
+  https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/roster/logos/unb \
   -H "Authorization: Bearer $MOJ_KEY" \
   -F file=@unb.svg
 ```
@@ -823,7 +836,7 @@ barra nem `..`.
 
 ```bash
 curl -sS -X PUT \
-  https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/machines/52-54-00-12-34-56/binding \
+  https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/machines/52-54-00-12-34-56/binding \
   -H "Authorization: Bearer $MOJ_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"user_id": "team-001"}'
@@ -837,12 +850,12 @@ logotipo, a bandeira e o lugar.
 
 ```bash
 # a sala inteira
-curl -sS -X POST https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/lock \
+curl -sS -X POST https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/lock \
   -H "Authorization: Bearer $MOJ_KEY"
 
 # uma máquina
 curl -sS -X POST \
-  https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/machines/52-54-00-12-34-56/unlock \
+  https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/machines/52-54-00-12-34-56/unlock \
   -H "Authorization: Bearer $MOJ_KEY"
 ```
 
@@ -852,7 +865,7 @@ máquinas recebem em poucos segundos, porque estão penduradas no long-poll.
 ### 6. Ler telemetria
 
 ```bash
-curl -sS https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/machines \
+curl -sS https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/machines \
   -H "Authorization: Bearer $MOJ_KEY"
 ```
 
@@ -879,7 +892,7 @@ curl -sS https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/machines 
 Configuração (pela administração):
 
 ```bash
-curl -sS -X PUT https://nutellaboot.naquadah.com.br/api/v1/site-images/26brbr/webhooks \
+curl -sS -X PUT https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/webhooks \
   -H "Authorization: Bearer $ADMIN_KEY" \
   -H 'Content-Type: application/json' \
   -d '{

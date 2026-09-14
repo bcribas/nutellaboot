@@ -337,3 +337,84 @@ def test_a_rota_diz_o_que_pode_ser_mandado(client, uma_maquina, hi, admin_key):
 
     ha = {"Authorization": f"Bearer {admin_key}"}
     assert client.get("/api/v1/site-images/testes3/commands", headers=ha).json()["blocked"] == {}
+
+
+# --- validade das ordens -----------------------------------------------------
+#
+# O alvo "all" é resolvido no envio para toda máquina com machine.json —
+# inclusive as desligadas. Sem validade, um poweroff mandado hoje esperava a
+# máquina ligar amanhã (e desligava a sala do dia seguinte). O nb2 filtrava os
+# últimos 600 s; a fila com ack tinha perdido a janela.
+
+
+def _envelhece(data_root, segundos, mac=MAC):
+    q = data_root / "site-images" / "testes3" / "machines" / mac / "queue"
+    for f in q.glob("*.json"):
+        e = fsdb.read_json(f)
+        e["created_at"] -= segundos
+        e["not_before"] -= segundos
+        fsdb.write_json(f, e)
+
+
+def _manda_poweroff(client, hi, **extra):
+    r = client.post(
+        "/api/v1/site-images/testes3/commands",
+        json={"command": "mlpoweroff", "target": "all", **extra},
+        headers=hi,
+    )
+    return r.json()["command_id"]
+
+
+def test_ordem_velha_caduca_e_vira_expired_no_acks(client, img, hm, hi, data_root):
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    cid = _manda_poweroff(client, hi)
+    _envelhece(data_root, 700)
+
+    assert client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"] == []
+    assert m.pending_commands("testes3", MAC) == []
+    q = data_root / "site-images" / "testes3" / "machines" / MAC / "queue"
+    assert list(q.glob("*.json")) == [], "caducada é apagada, não só escondida"
+
+    acks = client.get(f"/api/v1/site-images/testes3/machines/{MAC}/logs", headers=hi).json()["acks"]
+    assert [(a["id"], a["status"], a["command"]) for a in acks] == [(cid, "expired", "mlpoweroff")]
+
+
+def test_o_ttl_conta_do_not_before_nao_do_created_at(client, img, hm, hi, data_root):
+    """Ordem com delay de 15 min não pode caducar antes de nascer."""
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    _manda_poweroff(client, hi, delay=900)
+    _envelhece(data_root, 700)  # not_before ainda 200 s no futuro
+
+    assert client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"] == []
+    assert len(m.pending_commands("testes3", MAC)) == 1
+    assert client.get(f"/api/v1/site-images/testes3/machines/{MAC}/logs", headers=hi).json()["acks"] == []
+
+
+def test_ordem_de_500_s_ainda_entrega(client, img, hm, hi, data_root):
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    _manda_poweroff(client, hi)
+    _envelhece(data_root, 500)
+    cmds = client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"]
+    assert [c["command"] for c in cmds] == ["mlpoweroff"]
+
+
+def test_ttl_configuravel_no_server_json(client, img, hm, hi, data_root):
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+
+    fsdb.write_json(data_root / "server.json", {"command_ttl_sec": 60})
+    _manda_poweroff(client, hi)
+    _envelhece(data_root, 120)
+    assert client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"] == []
+
+    fsdb.write_json(data_root / "server.json", {"command_ttl_sec": 3600})
+    _manda_poweroff(client, hi)
+    _envelhece(data_root, 700)
+    assert len(client.get(f"/api/v1/site-images/testes3/machines/{MAC}/commands", headers=hm).json()["commands"]) == 1
+
+
+def test_o_pending_do_painel_nao_conta_a_caducada(client, img, hm, hi, data_root):
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    _manda_poweroff(client, hi)
+    _envelhece(data_root, 700)
+    maquinas = client.get("/api/v1/site-images/testes3/machines", headers=hi).json()["machines"]
+    assert maquinas[0]["pending"] == 0

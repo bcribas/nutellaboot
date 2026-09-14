@@ -370,7 +370,8 @@ máquinas atendidas, bytes servidos) na tela.
    tombstone `released` que o heartbeat seguinte entrega. Nos dois casos a
    máquina chama `leave`, mata o `webfsd` e termina o boot.
 4. **Expiração** — `seeders.live()` descarta na leitura quem não renova há
-   mais de `seeder_ttl_sec` (padrão: 180 s). Máquina desligada some sozinha,
+   mais de `seeder_ttl_sec` (padrão: 180 s; `command_ttl_sec`, padrão 600 s,
+   é o irmão para a fila de ordens). Máquina desligada some sozinha,
    e o tombstone de uma máquina que morreu sem se despedir expira igual.
 5. **Saída explícita** — `/seeders/leave` remove na hora (entrada e
    tombstone); não exige credencial porque só sabe remover uma entrada.
@@ -412,6 +413,17 @@ Dois detalhes importantes:
   e ao acordar o disco é lido de novo. É a rede de segurança: mesmo que o sinal
   em memória se perca (processo reiniciado no meio, por exemplo), o pior caso é
   5 segundos, não 25.
+
+**Validade das ordens.** O alvo `"all"` é resolvido no envio para toda
+máquina que já apareceu na sede — inclusive as desligadas naquele momento — e
+cada uma ganha o seu arquivo em `queue/`; o único removedor era o `ack`. Uma
+ordem de desligar mandada no fim do dia ficava esperando, e a máquina que
+ligasse na manhã seguinte desligava de novo. Por isso `pending_commands`
+apaga, na leitura, o que passou de `command_ttl_sec` (`data/server.json`,
+padrão 600 s — a mesma janela que o nb2 aplicava do lado da máquina) contados
+do `not_before`, e deixa o rastro em `acks.log` com `status: "expired"`. O
+bloqueio de tela não depende disso: `lockstate.json` é reentregue em todo
+poll.
 
 Os eventos criados dentro da requisição, e não guardados em dicionário de longa
 duração, são propositais: um `asyncio.Event` fica preso ao *event loop* em que

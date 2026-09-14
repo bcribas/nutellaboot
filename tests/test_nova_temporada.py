@@ -319,8 +319,9 @@ def test_genusb_confere_a_publicacao():
 
 
 def test_genusb_nao_tem_servidor_padrao_de_producao():
-    """As irmãs apontam para o ambiente de teste; esta apontava para produção,
-    e pendrive gravado com a chave do servidor errado some pela sala."""
+    """As irmãs apontam para o ambiente de teste; esta apontava para o host do
+    NutellaBoot 2, e pendrive gravado com o servidor errado some pela sala.
+    (A guarda geral — cliente, tools e docs — está em test_bootstrap_shell.)"""
     texto = (REPO / "tools" / "nb3-genusb").read_text()
     assert "https://nutellaboot.naquadah.com.br" not in texto
 

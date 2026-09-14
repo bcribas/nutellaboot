@@ -469,7 +469,7 @@ def patch_site_image(image_id: str, fields: dict) -> dict:
     d = site_image_dir(image_id)
     with fsdb.locked(d):
         info = fsdb.read_json(d / "image.json") or {}
-        for k in ("fullname", "unlocked", "model", "wallpaper_locked", "build_quota"):
+        for k in ("fullname", "unlocked", "model", "wallpaper_locked", "build_quota", "dashboard_hidden"):
             if k in fields and fields[k] is not None:
                 if k == "model" and not model_exists(fields[k]):
                     raise ImageError(f"modelo '{fields[k]}' não existe")
@@ -478,10 +478,29 @@ def patch_site_image(image_id: str, fields: dict) -> dict:
     return info
 
 
+def site_image_visivel_na_frota(info: dict) -> bool:
+    """Falso para a imagem marcada `dashboard_hidden` (a de teste dos times):
+    ela existe, tem hotconfig e configureitor, mas não entra em /labs*."""
+    return not bool(info.get("dashboard_hidden"))
+
+
 def delete_site_image(image_id: str) -> None:
     d = site_image_dir(image_id)
-    if d.is_dir():
-        shutil.rmtree(d)
+    if not d.is_dir():
+        return
+    # O pendrive pré-configurado (~400 MB) e o estado de publicação vivem fora
+    # do diretório da imagem e só o usb.json sabe o nome deles: sem isto o
+    # rmtree deixava um .img órfão e um publish/*.json que o retry_failed
+    # tentaria reenviar. O .img.gz no servidor de arquivos fica (não há rota
+    # de remoção lá).
+    from . import publish, usb
+
+    estado = fsdb.read_json(d / "usb.json", {}) or {}
+    nome = estado.get("file")
+    if nome:
+        usb.file_path(nome).unlink(missing_ok=True)
+        publish._state_path(nome).unlink(missing_ok=True)
+    shutil.rmtree(d)
 
 
 def rotate_token(image_id: str) -> str:

@@ -67,9 +67,15 @@ A ordem de precedência é sempre a mesma:
 
 | Prioridade | Origem | Como se escreve |
 |---|---|---|
-| 1 (maior) | Linha de comando do kernel | `IMAGEROOT=26brbr` no `grub.cfg` |
+| 1 (maior) | Linha de comando do kernel | `IMAGEROOT=26brbr NB_SERVER=https://…` no `grub.cfg` |
 | 2 | `nutellaboot.conf` do pendrive | `IMAGEROOT=26brbr` |
 | 3 (menor) | Padrão embutido no initrd | `/etc/nutellaboot.defaults` |
+
+A imagem pré-configurada leva `IMAGEROOT` **e** `NB_SERVER` na linha de
+comando do GRUB: o GRUB lê a FAT sozinho, então os dois sobrevivem a uma
+partição que o Linux não conseguiu ler. A chave de boot **nunca** vai para a
+cmdline (ficaria legível em `/proc/cmdline` na máquina de prova) — ela só
+existe no `nutellaboot.conf`, e por isso a partição não lida é fatal (abaixo).
 
 O arquivo `nutellaboot.conf` aceita:
 
@@ -82,7 +88,7 @@ IMAGEROOT=26brbr
 NB_BOOT_KEY=nb3b_...
 
 # Servidor do NutellaBoot (opcional; use para apontar a um servidor de teste).
-#NB_SERVER=https://nutellaboot.naquadah.com.br
+#NB_SERVER=https://nutellaboot.mdp.naquadah.com.br
 
 # Fixa nomes no /etc/hosts do initrd: "nome ip", uma linha por entrada.
 #NB_HOSTS=nutellaboot.charge.naquadah.com.br 10.0.2.2
@@ -95,6 +101,32 @@ initrd desmonta a partição e mostra na tela, em três idiomas, que **o pendriv
 já pode ser retirado**. Nada mais é lido dele durante o resto do boot. Numa
 sala com 60 máquinas, isso libera o pendrive para a próxima máquina em
 segundos, em vez de ficar preso até o sistema subir.
+
+### Quando a partição não aparece
+
+Caso de campo: um disco SATA interno morrendo passou 33 s em `hard resetting
+link`. O `blkid -L NB3CFG` varre todo bloco da máquina e ficou preso nele; as
+5 tentativas de 2 s acabaram, a partição do pendrive não foi lida, e o boot
+seguiu — com a sede vinda da cmdline do GRUB, o servidor vindo do padrão
+embutido (que ainda era o host do NutellaBoot 2) e a chave de boot vazia. Dez
+tentativas de rede depois, a tela `NO NETWORK` mandava a pessoa procurar cabo
+e switch. Nada disso tinha a ver com rede.
+
+Hoje a busca tenta primeiro `/dev/disk/by-label/NB3CFG`, o link que o udev
+cria a partir do evento do **próprio** pendrive (sem ler nenhum outro disco;
+o `60-persistent-storage.rules` e o `blkid` builtin do udev estão no initrd e
+o `nb3-build-initrd` confere os dois), e só cai no `blkid -L` como reserva.
+São 20 tentativas de 2 s (`NB_CFG_TRIES`/`NB_CFG_WAIT`), com `udevadm settle`
+curto antes de cada uma. A mensagem distingue "a partição não apareceu em
+40 s" de "achei `/dev/sdX` e não montei" de "montei e não há
+`nutellaboot.conf`".
+
+E sem `nutellaboot.conf` na RAM — ou com ele sem `NB_BOOT_KEY` — o boot **para
+ali**, na tela `NO CONF`, dizendo a causa e o que fazer (recolocar o pendrive,
+conferir se foi gravado com a imagem da sede, trocar o disco que está morrendo),
+em vez de degradar para um servidor de outra geração e uma tela enganosa. O
+mesmo par by-label/blkid vale para o `25-usbupdate.sh`, que reescreve o
+pendrive e não pode escrever no disco errado.
 
 ### O pendrive se atualiza sozinho
 
@@ -471,7 +503,7 @@ o piso do que se encontra em sala (VGA texto 80x25). Sem isso o banner rola
 para fora e some justamente a parte que faz a pessoa olhar; há teste medindo a
 altura de cada tela.
 
-Telas existentes: `NO IMAGE`, `NO NETWORK`, `NO SERVER`, `NO DISK`,
+Telas existentes: `NO CONF`, `NO IMAGE`, `NO NETWORK`, `NO SERVER`, `NO DISK`,
 `NO SYSTEM`, `LOW RAM`, `NO VM` e `REMOVED`. A de disco é a mais elaborada:
 usa o registro que o próprio scan produziu para dizer a causa mais provável —
 Fast Startup do Windows, BitLocker, falta de espaço ou controladora em RAID —
@@ -512,7 +544,7 @@ O módulo `20-secrets.sh` escreve `/etc/.nb3` (modo 600). É o contrato entre o
 boot e o sistema em execução:
 
 ```sh
-NB_SERVER='https://nutellaboot.naquadah.com.br'
+NB_SERVER='https://nutellaboot.mdp.naquadah.com.br'
 IMAGEROOT='26brbr'
 NB_MACHINE_KEY='nb3m_...'
 NB_BOOT_KEY='nb3b_...'

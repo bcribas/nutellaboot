@@ -304,6 +304,17 @@ O ambiente de teste tem um nginx externo que faz proxy de
   sem os canários (`so-a0-hr-b0`, `ty-a0-gf-a0`, `QuZ-a0-hr-b0`), e sem rádio
   com `wifi.conf` preenchido o boot interroga o dmesg e nomeia o firmware
   ausente na tela.
+- **O padrão embutido de servidor era o host do NutellaBoot 2, e a chave de
+  boot só vive na partição do pendrive.** Um SATA morrendo prendeu o
+  `blkid -L NB3CFG` por 33 s, a partição não foi lida em 10 s de tentativas,
+  e o boot seguiu com `IMAGEROOT` da cmdline, servidor do nb2 e chave VAZIA —
+  dez tentativas de rede e uma tela `NO NETWORK` mandando procurar cabo.
+  Hoje: padrão = `NB3_BASE_URL` do `systemd/nutellaboot3.service` (há teste
+  cruzando os dois); `/dev/disk/by-label/NB3CFG` antes do `blkid` (o link
+  nasce do evento do próprio pendrive), 20×2 s; `NB_SERVER` também na cmdline
+  do GRUB (`nb3-genusb`), a chave nunca; e sem `nutellaboot.conf` ou sem
+  `NB_BOOT_KEY` o boot para na tela `NO CONF` com a causa. Precedência:
+  cmdline > conf > padrão, para o servidor como para a sede.
 
 ## Estilo
 
