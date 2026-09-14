@@ -36,11 +36,15 @@ navegador cuida do resto — recarregar a página não pede nada de novo.
 | Método | Caminho | Corpo | Resposta |
 |---|---|---|---|
 | POST | `/api/v1/session` | `{key}` | `Set-Cookie: nb3_session=…` + o mesmo corpo do `whoami` |
-| GET | `/api/v1/session` | — | quem está logado, quando expira e as outras sessões desta identidade |
+| GET | `/api/v1/session` | — | quem está logado, quando expira (já renovado, se esta requisição renovou) e as outras sessões desta identidade |
 | DELETE | `/api/v1/session[?all=true]` | — | encerra esta sessão (ou todas as da identidade) |
 
 O cookie é `HttpOnly` (nenhum script da página o lê), `Secure`,
-`SameSite=Strict` e vale **30 dias**.
+`SameSite=Strict` e vale **30 dias a partir do último uso**: uma requisição
+de console feita mais de 24 h depois da última renovação estende o prazo e
+reemite o cookie (`Set-Cookie` na própria resposta); `sessions.json` é
+reescrito no máximo uma vez por dia por sessão. Só requisição de console
+renova — `<img>`, `<a download>` e `EventSource` não recebem cookie de volta.
 
 **Requisição autenticada por cookie precisa do cabeçalho `X-NB-Console: 1`.**
 É o que impede CSRF: um `<form>` de outro site consegue fazer o navegador

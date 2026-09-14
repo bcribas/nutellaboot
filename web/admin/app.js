@@ -1,5 +1,6 @@
 // Administração: imagens, criação em massa e credenciais.
 import * as api from "/common/api.js";
+import { apararColagem, ligarOlho } from "/common/chave.js";
 import { init, t, apply, currentLang } from "/common/i18n.js";
 import { usbBlock } from "/common/usb.js";
 
@@ -1255,16 +1256,21 @@ function pedirChave() {
 
 // Troca a chave digitada por um cookie de sessão. Daí em diante o navegador
 // manda o cookie sozinho: recarregar a página não pede nada de novo.
-async function enter() {
+async function enter(ev) {
+  if (ev) ev.preventDefault(); // é o submit do <form>: a API responde com o cookie
   const chave = $("#key").value.trim();
   if (!chave) return;
+  // um "usuário" por tipo de credencial, para o gerenciador guardar as duas
+  $("#login_user").value = chave.toLowerCase().startsWith("nb3-") ? "convite" : "admin";
   try {
     await api.login(chave);
     $("#key").value = "";
     await load();
     abrirPainel();
   } catch (e) {
-    toast(`${t("error")}: ${e.message}`, true);
+    if (e.status === 429) toast(t("home_admin_wait"), true);
+    else if (e.status === 401) toast(t("home_admin_bad"), true);
+    else toast(`${t("error")}: ${e.message}`, true);
   }
 }
 
@@ -1343,8 +1349,9 @@ async function criarChaveDash() {
 
 async function main() {
   await init($("#lang"));
-  $("#enter").onclick = enter;
-  $("#key").onkeydown = (e) => e.key === "Enter" && enter();
+  $("#login").onsubmit = enter;
+  ligarOlho($("#key"), $("#key_eye"), { mostrar: () => t("key_show"), ocultar: () => t("key_hide") });
+  apararColagem($("#key"));
   $("#create").onclick = createImage;
   $("#mod_create").onclick = createModel;
   $("#bulkgo").onclick = bulkCreate;

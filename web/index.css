@@ -125,3 +125,7 @@
 .guide strong {
   color: var(--fg);
 }
+
+#admin_in .status { color: var(--fg); }
+#admin_in .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+#admin_form .actions { margin-top: 10px; }

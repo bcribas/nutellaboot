@@ -111,7 +111,15 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
     exceções são `GET` puro que um `<img>`/`EventSource` precisa carregar
     (SSE e prévia do wallpaper), que aceitam `?tk=` ou o cookie sem o
     cabeçalho. Há teste (`tests/test_session.py`,
-    `tests/test_layer_builds_console.py`).
+    `tests/test_layer_builds_console.py`). **O gerenciador de senhas do
+    navegador é o lugar certo para a chave** — não é storage da página: o
+    `<form>` da home e do `/admin/` tem `autocomplete=username` +
+    `current-password` e `<button type=submit>` para isso; nunca volte a pôr
+    `autocomplete=off` no campo de chave (era o que fazia "a chave nunca ser
+    lembrada"). A sessão desliza: renovação em disco + reemissão do cookie só
+    em requisição de console (`auth.principal` → `SessionCookieMiddleware`),
+    no máximo uma vez por dia — renovar só no disco não adianta, o navegador
+    apaga o cookie no fim do Max-Age original.
 
 15. **Ferramenta que fala com a API tem que falhar alto.** O
     `nb3-gerar-squash` usava `curl -sS` sem `--fail`: um 404 (nome de modelo

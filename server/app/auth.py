@@ -33,6 +33,9 @@ class Principal:
     name: str = ""
     scopes: set[str] = field(default_factory=set)
     images: list[str] = field(default_factory=list)  # globs (serviço)
+    # True quando sessions.resolve acabou de estender a sessão: o cookie
+    # precisa ser reemitido nesta resposta (SessionCookieMiddleware)
+    sessao_renovada: bool = False
 
     @property
     def owner(self) -> str:
@@ -191,7 +194,12 @@ def principal(request: Request | None, authorization: str | None, image_id: str 
 
     from .services import sessions
 
-    return sessions.resolve(request.cookies.get(sessions.COOKIE, ""))
+    sid = request.cookies.get(sessions.COOKIE, "")
+    p = sessions.resolve(sid)
+    if p is not None and p.sessao_renovada:
+        # vive em scope["state"]; o middleware põe o Set-Cookie na resposta
+        request.state.reemitir_cookie = sid
+    return p
 
 
 def principal_de_link(request: Request, tk: str = "", image_id: str | None = None):
@@ -209,7 +217,9 @@ def principal_de_link(request: Request, tk: str = "", image_id: str | None = Non
     if p is None:
         from .services import sessions
 
-        p = sessions.resolve(request.cookies.get(sessions.COOKIE, ""))
+        # sem renovar: <img>/<a download> não recebem cookie de volta, e
+        # renovar em disco aqui consumiria a renovação do dia sem reemitir nada
+        p = sessions.resolve(request.cookies.get(sessions.COOKIE, ""), renovar=False)
     return p
 
 

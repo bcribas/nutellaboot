@@ -427,3 +427,40 @@ def test_o_overlay_do_zoom_respeita_o_hidden():
     e o fechar não fechava — o JS setava hidden e o CSS mantinha a tela."""
     css = (REPO / "web" / "dashboard" / "dash.css").read_text(encoding="utf-8")
     assert "[hidden]" in css and "!important" in css
+
+
+# --- a chave de admin lembrada pelo navegador -------------------------------
+
+
+@pytest.mark.parametrize("html", ["index.html", "admin/index.html"])
+def test_o_campo_da_chave_e_um_formulario_que_o_navegador_reconhece(html):
+    """O gerenciador de senhas só oferece salvar quando há <form>, um par
+    usuário/senha com autocomplete e um submit de verdade. autocomplete="off"
+    no campo de chave era exatamente o que impedia isso — e "a chave nunca é
+    lembrada" foi a reclamação. Invariante 14: o gerenciador do navegador é o
+    lugar certo para a chave; storage da página não é."""
+    texto = (REPO / "web" / html).read_text(encoding="utf-8")
+    forms = re.findall(r"<form[^>]*>(.*?)</form>", texto, re.S)
+    com_chave = [f for f in forms if 'autocomplete="current-password"' in f]
+    assert com_chave, "o campo da chave precisa estar num <form> com autocomplete=current-password"
+    form = com_chave[0]
+    assert 'autocomplete="username"' in form, "sem usuário o gerenciador não guarda o par"
+    assert re.search(r'<button[^>]*type="submit"', form), "o submit é o gatilho do prompt de salvar"
+    assert 'name="password"' in form
+    assert 'type="hidden"' not in form, "o Chrome ignora type=hidden como usuário; use texto escondido por CSS"
+    for campo in re.findall(r"<input[^>]*type=\"password\"[^>]*>", texto):
+        assert 'autocomplete="off"' not in campo, campo
+
+
+def test_a_home_mostra_a_sessao_e_o_enter_e_o_submit():
+    js = (REPO / "web" / "index.js").read_text(encoding="utf-8")
+    api = (REPO / "web" / "common" / "api.js").read_text(encoding="utf-8")
+    assert "export async function session(" in api
+    assert "api.session()" in js, "a home precisa perguntar se já há sessão"
+    assert "api.logout(" in js
+    assert 'onsubmit' in js
+    # o atalho antigo de Enter interceptava o submit do form
+    assert 'e.key === "Enter"' not in js
+    admin = (REPO / "web" / "admin" / "app.js").read_text(encoding="utf-8")
+    assert '$("#login").onsubmit' in admin
+    assert 'e.key === "Enter" && enter()' not in admin

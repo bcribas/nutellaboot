@@ -64,6 +64,37 @@ class LegacyImagePathMiddleware:
         await self.app(scope, receive, send)
 
 
+class SessionCookieMiddleware:
+    """Reemite o cookie de sessão quando ela foi renovada nesta requisição.
+
+    `auth.principal` marca `request.state.reemitir_cookie` (que vive em
+    scope["state"]); aqui o Set-Cookie entra na resposta. ASGI puro, como o
+    de cima: um BaseHTTPMiddleware envolveria o long-poll e o SSE.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def enviar(msg):
+            if msg["type"] == "http.response.start":
+                sid = (scope.get("state") or {}).get("reemitir_cookie")
+                if sid:
+                    from starlette.responses import Response
+
+                    from .services import sessions
+
+                    r = Response()
+                    sessions.set_cookie(r, sid)
+                    msg = {**msg, "headers": list(msg.get("headers", [])) + r.raw_headers}
+            await send(msg)
+
+        await self.app(scope, receive, enviar)
+
+
 @asynccontextmanager
 async def _vida(app: FastAPI):
     # o gravador da série da frota vive no worker único (invariante 2): um
@@ -126,6 +157,7 @@ def create_app() -> FastAPI:
         app.mount("/", StaticFiles(directory=web, html=True), name="web")
 
     app.add_middleware(LegacyImagePathMiddleware)
+    app.add_middleware(SessionCookieMiddleware)
     return app
 
 

@@ -2,12 +2,15 @@
 // administração, documentação). Guarda o último id/token no navegador para
 // não obrigar a colar de novo.
 import * as api from "/common/api.js";
-import { init, t, apply } from "/common/i18n.js";
+import { apararColagem, ligarOlho } from "/common/chave.js";
+import { init, t, apply, currentLang } from "/common/i18n.js";
 
 const $ = (s) => document.querySelector(s);
 const STORE = "nb3-home-coord";
+const LOCALE = { pt: "pt-BR", en: "en", es: "es" };
 
 let validado = false;
+let sessao = null; // resposta de GET /api/v1/session, ou null
 
 function currentCoord() {
   return {
@@ -60,6 +63,65 @@ function open(area) {
   location.href = `/${area}/${q}`;
 }
 
+// --- administração: a sessão de 30 dias já existe? -------------------------
+//
+// A sessão do servidor sempre durou 30 dias, mas a home mostrava o campo de
+// chave vazio mesmo com ela viva — e a pessoa concluía que tinha sido
+// deslogada e saía atrás da chave. Agora a home pergunta e diz.
+
+function fmtData(epoch) {
+  return new Date(epoch * 1000).toLocaleDateString(LOCALE[currentLang()] || "en", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function mostrarAdmin() {
+  $("#admin_checking").classList.add("hidden");
+  const dentro = Boolean(sessao);
+  $("#admin_in").classList.toggle("hidden", !dentro);
+  $("#admin_form").classList.toggle("hidden", dentro);
+  if (dentro) {
+    const quem = `${sessao.label} (${t(sessao.kind === "admin" ? "who_admin" : "who_subadmin")})`;
+    $("#admin_who").textContent = t("home_admin_logged", { who: quem, until: fmtData(sessao.expires_at) });
+  }
+}
+
+async function carregarSessao() {
+  try {
+    sessao = await api.session();
+  } catch {
+    sessao = null; // 401 (ou rede): mostra o formulário
+  }
+  mostrarAdmin();
+}
+
+function erroAdmin(e) {
+  const el = $("#admin_status");
+  el.className = "status err";
+  el.textContent = e && e.status === 429 ? t("home_admin_wait") : t("home_admin_bad");
+}
+
+async function entrarAdmin(ev) {
+  ev.preventDefault(); // o navegador não navega: a API responde com o cookie
+  const key = $("#akey").value.trim();
+  if (!key) return;
+  // um "usuário" por tipo de credencial, para o gerenciador guardar as duas
+  $("#admin_user").value = key.toLowerCase().startsWith("nb3-") ? "convite" : "admin";
+  $("#go_admin").disabled = true;
+  $("#admin_status").textContent = "";
+  try {
+    await api.login(key);
+    $("#akey").value = "";
+    // navegar depois do submit é o que faz o navegador oferecer "salvar senha?"
+    location.href = "/admin/";
+  } catch (e) {
+    $("#go_admin").disabled = false;
+    erroAdmin(e);
+  }
+}
+
 async function main() {
   await init($("#lang"));
 
@@ -82,27 +144,29 @@ async function main() {
   $("#go_config").onclick = () => open("configureitor");
   $("#go_hot").onclick = () => open("hotconfig");
 
-  $("#go_admin").onclick = async () => {
-    const key = $("#akey").value.trim();
-    // sem chave: pode já haver sessão aberta, então o console decide
-    if (!key) {
-      location.href = "/admin/";
-      return;
-    }
-    $("#go_admin").disabled = true;
+  $("#admin_form").onsubmit = entrarAdmin;
+  ligarOlho($("#akey"), $("#akey_eye"), { mostrar: () => t("key_show"), ocultar: () => t("key_hide") });
+  apararColagem($("#akey"));
+  $("#admin_logout").onclick = async () => {
     try {
-      await api.login(key);
-      $("#akey").value = "";
-      location.href = "/admin/";
-    } catch (e) {
-      $("#go_admin").disabled = false;
-      alert(`${t("error")}: ${e.message}`);
+      await api.logout();
+    } catch {
+      /* a sessão já podia ter acabado */
     }
+    sessao = null;
+    mostrarAdmin();
   };
-  $("#akey").onkeydown = (e) => e.key === "Enter" && $("#go_admin").click();
+  $("#admin_other").onclick = () => {
+    $("#admin_form").classList.remove("hidden");
+    $("#akey").focus();
+  };
 
-  document.addEventListener("nb3:langchange", apply);
+  document.addEventListener("nb3:langchange", () => {
+    apply();
+    mostrarAdmin();
+  });
   if ($("#cid").value && $("#ctoken").value) validate();
+  carregarSessao();
 }
 
 main();

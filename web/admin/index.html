@@ -18,14 +18,21 @@
 </header>
 
 <main class="wide">
-  <div class="card" id="login">
+  <!-- <form> de verdade, com o par usuário/senha que o gerenciador de senhas
+       do navegador reconhece (o mesmo da home, para o autofill valer nas duas) -->
+  <form class="card" id="login" method="post" action="/api/v1/session">
     <h2 data-i18n="admin_key"></h2>
     <p class="help muted" data-i18n="admin_key_help"></p>
+    <input type="text" id="login_user" name="username" autocomplete="username" value="admin"
+           readonly tabindex="-1" aria-hidden="true" class="vh">
     <div class="actions">
-      <input type="password" id="key" style="max-width:420px" autocomplete="off">
-      <button type="button" id="enter" class="primary" data-i18n="admin_enter"></button>
+      <div class="pwd" style="max-width:420px">
+        <input type="password" id="key" name="password" autocomplete="current-password" spellcheck="false" required>
+        <button type="button" class="eye" id="key_eye" aria-pressed="false">👁</button>
+      </div>
+      <button type="submit" id="enter" class="primary" data-i18n="admin_enter"></button>
     </div>
-  </div>
+  </form>
 
   <div id="panel" class="hidden">
     <div class="card" id="whocard" style="border-color:var(--accent)">

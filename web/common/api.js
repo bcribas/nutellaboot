@@ -88,6 +88,12 @@ export async function logout(todos = false) {
   return del(`/api/v1/session${todos ? "?all=true" : ""}`, { kind: "admin" });
 }
 
+// Quem está logado nesta sessão (401 sem sessão). Mesmo cabeçalho de console
+// das outras chamadas: o cookie só vale com ele.
+export async function session() {
+  return get("/api/v1/session", { kind: "admin" });
+}
+
 export function wallpaperUrl(image, versao) {
   // Mesmo caso do eventsUrl: <img> não manda cabeçalho, então a credencial vai
   // na URL (token de sede) ou vem do cookie (console). O `v=` é só para o

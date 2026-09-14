@@ -260,3 +260,21 @@ header.topbar .siteident .sname {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* --- campo de chave com botão-olho dentro (home e /admin/) --- */
+.pwd { position: relative; width: 100%; max-width: 520px; }
+.pwd input { padding-right: 40px; width: 100%; max-width: none; box-sizing: border-box; }
+.pwd .eye {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  padding: 2px 8px; border: 0; background: transparent; font-size: 16px; line-height: 1;
+  color: var(--muted); cursor: pointer;
+}
+.pwd .eye:hover { border-color: transparent; color: var(--fg); }
+.pwd .eye[aria-pressed="true"] { color: var(--accent); }
+/* fora da tela, mas presente para o gerenciador de senhas (nunca display:none) */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* botão que parece link ("entrar com outra chave") */
+button.linkish {
+  background: none; border: 0; padding: 0; color: var(--accent);
+  font-size: 13px; cursor: pointer; text-decoration: underline;
+}

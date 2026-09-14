@@ -402,7 +402,8 @@ async def events(image: str, request: Request, tk: str = Query("")) -> Streaming
     if p is None:
         from ..services import sessions
 
-        p = sessions.resolve(request.cookies.get(sessions.COOKIE, ""))
+        # EventSource não recebe cookie: não renova (ver auth.principal_de_link)
+        p = sessions.resolve(request.cookies.get(sessions.COOKIE, ""), renovar=False)
     if not p or not p.can_see_image(image):
         raise HTTPException(401, "credencial inválida")
 

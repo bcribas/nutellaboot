@@ -561,10 +561,16 @@ protege — e um ajuste de proxy que você precisa garantir.
 ### Entrar no console
 
 Informe a chave uma vez, em `/admin/` (ou na caixa de administração da página
-inicial). A partir daí o navegador guarda uma **sessão de 30 dias**:
-recarregar a página, abrir outra aba ou voltar no dia seguinte não pedem a
-chave de novo. A chave em si não fica guardada no navegador — o que fica é um
-cookie que nenhum script da página consegue ler.
+inicial). A partir daí o navegador guarda uma **sessão de 30 dias a partir do
+último uso** (usar o console renova o prazo): recarregar a página, abrir
+outra aba ou voltar no dia seguinte não pedem a chave de novo. A página
+inicial diz se você já está dentro e até quando. A chave em si não fica
+guardada pela página — o que fica é um cookie que nenhum script consegue
+ler. Mas o campo é um formulário de senha normal: **se o navegador oferecer
+salvar a chave, aceite** — o gerenciador de senhas do navegador é o lugar
+certo para ela, e o autopreenchimento vale na página inicial e no `/admin/`.
+O botão do olho no campo mostra o que foi colado, para conferir antes de
+entrar; espaços e quebras de linha colados junto são descartados.
 
 O mesmo vale para quem entra com código de convite: o código abre a sessão do
 console de sub-administração.

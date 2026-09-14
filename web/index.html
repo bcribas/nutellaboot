@@ -63,13 +63,39 @@
       <div class="icon">🛠️</div>
       <h2 data-i18n="home_admin_title"></h2>
       <p class="desc" data-i18n="home_admin_desc"></p>
-      <label class="fld">
-        <span data-i18n="home_admin_key"></span>
-        <input type="password" id="akey" autocomplete="off" placeholder="nb3a_…  /  NB3-XXXX-XXXX-XXXX">
-      </label>
-      <div class="actions">
-        <button type="button" id="go_admin" class="primary" data-i18n="home_admin_enter"></button>
+      <!-- já estou dentro: preenchido por GET /api/v1/session -->
+      <div id="admin_in" class="hidden">
+        <p class="status" id="admin_who"></p>
+        <div class="actions">
+          <a class="btn primary" href="/admin/" data-i18n="home_admin_open"></a>
+          <a class="btn" href="/laboratorios/" data-i18n="fleet_title"></a>
+          <button type="button" id="admin_logout" data-i18n="admin_logout"></button>
+        </div>
+        <button type="button" class="linkish" id="admin_other" data-i18n="home_admin_other"></button>
       </div>
+      <!-- <form> de verdade: é o que o gerenciador de senhas do navegador
+           reconhece para oferecer salvar a chave. O JS faz preventDefault e
+           chama a API; a action é só o destino honesto se o JS não carregar. -->
+      <form id="admin_form" method="post" action="/api/v1/session" class="hidden">
+        <!-- "usuário" só para o gerenciador guardar um par usuário/senha: fica
+             fora da tela, mas NÃO é type=hidden (o Chrome o ignora ao detectar
+             o formulário). Vira "convite" quando o que se cola é NB3-, para as
+             duas credenciais não se sobrescreverem. -->
+        <input type="text" id="admin_user" name="username" autocomplete="username" value="admin"
+               readonly tabindex="-1" aria-hidden="true" class="vh">
+        <label class="fld" for="akey"><span data-i18n="home_admin_key"></span></label>
+        <div class="pwd">
+          <input type="password" id="akey" name="password" autocomplete="current-password"
+                 spellcheck="false" placeholder="nb3a_…  /  NB3-XXXX-XXXX-XXXX" required>
+          <button type="button" class="eye" id="akey_eye" aria-pressed="false">👁</button>
+        </div>
+        <div class="actions">
+          <button type="submit" id="go_admin" class="primary" data-i18n="home_admin_enter"></button>
+        </div>
+        <p class="status" id="admin_status" aria-live="polite"></p>
+        <p class="hint" data-i18n="home_admin_remember"></p>
+      </form>
+      <p class="status" id="admin_checking" data-i18n="home_admin_checking"></p>
     </section>
 
     <!-- Documentação -->

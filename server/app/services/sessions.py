@@ -27,6 +27,14 @@ from ..settings import settings
 COOKIE = "nb3_session"
 DURACAO = 30 * 24 * 3600  # 30 dias
 
+# Renovação deslizante: a sessão vale DURACAO a partir do último uso, com
+# granularidade de um dia — sessions.json é reescrito no máximo uma vez por
+# dia por sessão. Só requisição de console renova (ver auth.principal): é a
+# única que pode levar o cookie novo de volta, e sem cookie novo o navegador
+# apaga o antigo no fim do Max-Age original, com a renovação em disco valendo
+# nada.
+RENOVA_A_CADA = 24 * 3600
+
 # Só quem entra pelo console tem sessão. Chave de serviço (MOJ), token de
 # imagem e chave de máquina continuam só no Bearer: são credenciais de
 # programa, não de navegador.
@@ -52,6 +60,7 @@ def create(kind: str, name: str, *, ip: str = "") -> dict:
         "name": name,
         "created_at": agora,
         "expires_at": agora + DURACAO,
+        "renewed_at": agora,
         "ip": ip[:45],
     }
     with fsdb.locked(settings.data_root):
@@ -70,12 +79,37 @@ def get(sid: str) -> dict | None:
     return registro
 
 
-def resolve(sid: str):
+def _renovar(sid: str, registro: dict, agora: float) -> bool:
+    """Empurra expires_at para agora+DURACAO se a última renovação tem mais de
+    um dia. Devolve True se escreveu (o chamador reemite o cookie)."""
+    ultima = registro.get("renewed_at") or registro.get("created_at", 0)
+    if agora - ultima < RENOVA_A_CADA:
+        return False
+    with fsdb.locked(settings.data_root):
+        dados = _load()
+        atual = dados.get(sid)
+        # sumiu (logout concorrente) ou venceu enquanto esperávamos o lock
+        if atual is None or atual.get("expires_at", 0) <= agora:
+            return False
+        atual["expires_at"] = agora + DURACAO
+        atual["renewed_at"] = agora
+        # já que vai escrever, aproveita e poda as vencidas (como create())
+        dados = {k: v for k, v in dados.items() if v.get("expires_at", 0) > agora}
+        fsdb.write_json(_path(), dados, mode=0o600)
+    return True
+
+
+def resolve(sid: str, *, renovar: bool = True):
     """Devolve o Principal da sessão, revalidando a identidade.
 
     É esta revalidação que mantém o comportamento de sempre: trocar a chave de
     administração, revogar o convite ou suspender o sub-admin derruba o acesso
     na hora, mesmo com a sessão ainda dentro da validade.
+
+    Com `renovar`, estende a validade (ver _renovar) e marca
+    `p.sessao_renovada` para auth.principal reemitir o cookie. A renovação vem
+    DEPOIS da revalidação: sessão de chave trocada ou convite revogado não
+    ganha sobrevida.
     """
     from .. import auth
 
@@ -84,22 +118,39 @@ def resolve(sid: str):
         return None
 
     kind, name = registro.get("kind"), registro.get("name", "")
+    p = None
     if kind == "admin":
         chaves = fsdb.read_json(settings.data_root / "keys" / "admin.json", {"keys": []})
-        if not any(e.get("id", "admin") == name for e in chaves.get("keys", [])):
-            return None
-        return auth.Principal("admin", name)
-
-    if kind == "subadmin":
+        if any(e.get("id", "admin") == name for e in chaves.get("keys", [])):
+            p = auth.Principal("admin", name)
+    elif kind == "subadmin":
         from . import invites, owners
 
         code = owners.code_of(name)
         ok, _ = invites.is_valid_for_console(code)
-        if not ok or owners.disabled(name):
-            return None
-        return auth.Principal("subadmin", name)
+        if ok and not owners.disabled(name):
+            p = auth.Principal("subadmin", name)
+    if p is None:
+        return None
+    if renovar and _renovar(sid, registro, time.time()):
+        p.sessao_renovada = True
+    return p
 
-    return None
+
+def set_cookie(resp, sid: str) -> None:
+    """O Set-Cookie do login e da renovação — um lugar só."""
+    resp.set_cookie(
+        COOKIE,
+        sid,
+        max_age=DURACAO,
+        httponly=True,
+        # quem termina TLS é o nginx; o backend só fala HTTP no loopback
+        secure=True,
+        # o console não é linkado de fora, então Strict não custa nada e já
+        # barra requisição vinda de outro site
+        samesite="strict",
+        path="/",
+    )
 
 
 def delete(sid: str) -> bool:

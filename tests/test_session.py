@@ -300,7 +300,7 @@ def test_o_front_nao_guarda_mais_credencial():
     assert "sessionStorage.setItem" not in api
     assert "localStorage.setItem" not in api
 
-    for tela in ("admin/app.js", "criar/app.js", "index.js"):
+    for tela in ("admin/app.js", "criar/app.js", "index.js", "common/chave.js"):
         texto = (web / tela).read_text(encoding="utf-8")
         assert "nb3-admin-key" not in texto, f"{tela} ainda guarda a chave"
 
@@ -313,3 +313,91 @@ def test_o_console_entra_pela_sessao_no_carregamento():
     assert "api.login(" in app
     # o padrão antigo: enter() chamado no carregamento, regravando o campo vazio
     assert "if (api.consoleKey()) enter();" not in app
+
+
+# --- renovação deslizante ---
+#
+# A sessão vale 30 dias a partir do ÚLTIMO uso, não do login. E renovar só no
+# disco não bastaria: o navegador apaga o cookie no fim do Max-Age original, então
+# cada renovação reemite o cookie — só em requisição de console, no máximo uma
+# vez por dia por sessão.
+
+
+def _arquivo(data_root):
+    return (data_root / "sessions.json").read_text(encoding="utf-8")
+
+
+def test_sessao_nova_nao_reescreve_o_arquivo_a_cada_requisicao(client, base, data_root, admin_key):
+    entrar(client, admin_key)
+    antes = _arquivo(data_root)
+    for _ in range(3):
+        r = client.get("/api/v1/whoami", headers=CONSOLE)
+        assert r.status_code == 200
+        assert "set-cookie" not in r.headers
+    assert _arquivo(data_root) == antes
+
+
+def test_sessao_usada_depois_de_um_dia_renova_e_reemite_o_cookie(client, base, data_root, admin_key, monkeypatch):
+    inicio = time.time()
+    entrar(client, admin_key)
+    monkeypatch.setattr(time, "time", lambda: inicio + sessions.RENOVA_A_CADA + 60)
+    r = client.get("/api/v1/whoami", headers=CONSOLE)
+    assert r.status_code == 200
+    assert "max-age=2592000" in r.headers["set-cookie"].lower()
+    sid = next(iter(fsdb.read_json(data_root / "sessions.json", {})))
+    assert sessions.get(sid)["expires_at"] > inicio + sessions.DURACAO + sessions.RENOVA_A_CADA - 1
+    # e no mesmo dia não reescreve de novo
+    antes = _arquivo(data_root)
+    r = client.get("/api/v1/whoami", headers=CONSOLE)
+    assert "set-cookie" not in r.headers
+    assert _arquivo(data_root) == antes
+
+
+def test_sessao_perto_de_vencer_renova_ao_usar(client, base, admin_key, monkeypatch):
+    inicio = time.time()
+    entrar(client, admin_key)
+    monkeypatch.setattr(time, "time", lambda: inicio + sessions.DURACAO - 3600)
+    assert client.get("/api/v1/whoami", headers=CONSOLE).status_code == 200
+    monkeypatch.setattr(time, "time", lambda: inicio + sessions.DURACAO + 3600)
+    # sem a renovação isto seria 401
+    assert client.get("/api/v1/whoami", headers=CONSOLE).status_code == 200
+
+
+def test_sessao_expirada_continua_expirada(client, base, data_root, admin_key, monkeypatch):
+    inicio = time.time()
+    entrar(client, admin_key)
+    antes = _arquivo(data_root)
+    monkeypatch.setattr(time, "time", lambda: inicio + sessions.DURACAO + 60)
+    assert client.get("/api/v1/whoami", headers=CONSOLE).status_code == 401
+    assert _arquivo(data_root) == antes
+
+
+def test_get_session_devolve_o_prazo_ja_renovado(client, base, admin_key, monkeypatch):
+    inicio = time.time()
+    entrar(client, admin_key)
+    monkeypatch.setattr(time, "time", lambda: inicio + sessions.RENOVA_A_CADA + 60)
+    r = client.get("/api/v1/session", headers=CONSOLE)
+    assert r.status_code == 200
+    assert r.json()["expires_at"] > inicio + sessions.DURACAO + 60
+
+
+def test_link_e_sse_nao_renovam(data_root, monkeypatch):
+    """<img> e EventSource não podem receber cookie; se renovassem em disco,
+    consumiriam a renovação do dia sem reemitir nada."""
+    fsdb.write_json(data_root / "keys" / "admin.json", {"keys": [{"id": "a", "sha256": "x"}]})
+    inicio = time.time()
+    sid = sessions.create("admin", "a")["id"]
+    monkeypatch.setattr(time, "time", lambda: inicio + sessions.RENOVA_A_CADA + 60)
+    p = sessions.resolve(sid, renovar=False)
+    assert p is not None and not p.sessao_renovada
+    assert sessions.get(sid)["expires_at"] == pytest.approx(inicio + sessions.DURACAO)
+
+
+def test_identidade_revogada_nao_ganha_sobrevida(data_root, monkeypatch):
+    fsdb.write_json(data_root / "keys" / "admin.json", {"keys": [{"id": "a", "sha256": "x"}]})
+    inicio = time.time()
+    sid = sessions.create("admin", "a")["id"]
+    fsdb.write_json(data_root / "keys" / "admin.json", {"keys": []})  # chave trocada
+    monkeypatch.setattr(time, "time", lambda: inicio + sessions.RENOVA_A_CADA + 60)
+    assert sessions.resolve(sid) is None
+    assert sessions.get(sid)["expires_at"] == pytest.approx(inicio + sessions.DURACAO)
