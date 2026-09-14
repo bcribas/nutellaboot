@@ -39,11 +39,18 @@ done
 NOME_HOST=$(echo "$SERVIDOR" | sed -e 's,^https\?://,,' -e 's,/.*,,' -e 's,:.*,,')
 
 echo ">> gerando o pendrive de teste (sem root)"
+# a chave de boot da imagem local: sem ela o initrd para na tela NO CONF
+# (é a partição lida, mas o conf sem NB_BOOT_KEY), que é o certo em campo e
+# inútil aqui
+CHAVE=""
+[ -f "$REPO/data/site-images/$IMAGEM/boot.key" ] &&
+    CHAVE=$(tr -d '\n' < "$REPO/data/site-images/$IMAGEM/boot.key")
 "$REPO/tools/nb3-genusb" \
     --output "$USB" \
     --imageroot "$IMAGEM" \
     --server "$SERVIDOR" \
     --hosts "$NOME_HOST=10.0.2.2" \
+    ${CHAVE:+--boot-key "$CHAVE"} \
     > /dev/null
 echo "   $USB"
 
