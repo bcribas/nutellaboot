@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from .. import auth, fsdb
+from ..services import bindings
 from ..services import machines as m
 from ..services import store
 from ..services import webhook_push
@@ -104,15 +105,36 @@ async def put_logo(
     return {"ok": True, "org_id": org_id, "format": ext, "size": len(data)}
 
 
+def _fonte(p, body: dict) -> str:
+    """Quem afirmou o vínculo: o MOJ diz `source` explícito (ex.: "moj-login");
+    sem ele, deriva da credencial."""
+    s = str(body.get("source") or "").strip()[:40]
+    if s:
+        return s
+    return f"service:{p.name}" if p.kind == "service" else "console"
+
+
 @router.put("/site-images/{image}/machines/{mac}/binding")
 async def put_binding(
     image: str, mac: str, body: dict, p=Depends(auth.require_image_access(service_scope="bindings:write"))
 ) -> dict:
+    """Vincula a máquina a um time. `bound_at`/`by` são do servidor; `at` do
+    cliente vira `client_at` (o instante do login no juiz), `boot_id` diz em
+    qual boot, `note` é texto livre. Toda mudança fica no histórico."""
     mac = m.normalize_mac(mac)
     if not m.valid_mac(mac):
         raise HTTPException(400, "MAC inválido")
     user_id = body.get("user_id")
-    binding = {"bound_at": __import__("time").time(), "by": p.name}
+    binding = {"bound_at": time.time(), "by": p.name, "source": _fonte(p, body)}
+    if body.get("at") is not None:
+        try:
+            binding["client_at"] = float(body["at"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "at precisa ser epoch numérico")
+    if body.get("boot_id"):
+        binding["boot_id"] = str(body["boot_id"])[:64]
+    if body.get("note"):
+        binding["note"] = str(body["note"])[:200]
     if user_id:
         entry = next((e for e in _roster(image) if e["user_id"] == str(user_id)), None)
         if entry is None:
@@ -125,9 +147,7 @@ async def put_binding(
                 "seat": str(body.get("seat", "")),
             }
         )
-    d = m.machine_dir(image, mac)
-    d.mkdir(parents=True, exist_ok=True)
-    fsdb.write_json(d / "binding.json", binding)
+    bindings.gravar(image, mac, binding)
     _publish(image, "machine.bound", {"mac": mac, **binding})
     return binding
 
@@ -137,8 +157,20 @@ async def delete_binding(
     image: str, mac: str, p=Depends(auth.require_image_access(service_scope="bindings:write"))
 ) -> None:
     mac = m.normalize_mac(mac)
-    (m.machine_dir(image, mac) / "binding.json").unlink(missing_ok=True)
+    bindings.remover(image, mac, by=p.name, source=_fonte(p, {}))
     _publish(image, "machine.unbound", {"mac": mac})
+
+
+@router.get("/site-images/{image}/machines/{mac}/binding/history")
+async def binding_history(
+    image: str,
+    mac: str,
+    n: int = Query(200, ge=1, le=2000),
+    p=Depends(auth.require_image_access(service_scope="machines:read")),
+) -> dict:
+    """As últimas mudanças de vínculo da máquina (bound/unbound): a troca de
+    máquina no meio da prova é informação, não ruído."""
+    return {"history": bindings.history(image, m.normalize_mac(mac), n)}
 
 
 @router.get("/site-images/{image}/bindings")

@@ -71,6 +71,12 @@ function readFile(path) {
 }
 
 function machineMac() {
+    // o agente sabe a chave e a passa; sem ela, o MAC estável que o initrd
+    // gravou (a mesma chave do agente); o BOOTIF só de reserva — sem ele
+    // (boot por wifi) a tela nem consultava o estado de bloqueio
+    if (args.mac) return args.mac;
+    const estavel = (readFile("/etc/mac-icpc") || "").trim();
+    if (/^[0-9a-f]{2}(-[0-9a-f]{2}){5,7}$/.test(estavel)) return estavel;
     const cmdline = readFile("/proc/cmdline") || "";
     const m = cmdline.match(/BOOTIF=01-([0-9a-f-]+)/);
     return m ? m[1] : "";

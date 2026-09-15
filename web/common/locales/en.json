@@ -170,6 +170,7 @@
   "home_guide_title": "How to get my keys",
   "home_intro": "A USB drive powers the machine and it downloads a ready system from the server — with telemetry, screen lock and per-room configuration. It fits contests, teaching labs and managed rooms (the ICPC-style programming contest is one of the uses). Pick where to start below.",
   "home_tagline": "Lab management with network boot",
+  "identity_duplicate": "DUPLICATE IDENTITY (machine-id shared with another machine)",
   "image": "Image",
   "image_id": "Identifier",
   "image_id_help": "Lowercase letters, digits, dot, hyphen. Names starting with a digit are reserved for contest administration.",

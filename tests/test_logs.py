@@ -257,3 +257,163 @@ def test_o_dono_da_imagem_le_a_serie(client, imagem):
 
 def test_a_serie_exige_credencial(client, imagem):
     assert client.get(ROTA_SAMPLES).status_code == 401
+
+
+# --- o que o relatório do MOJ pediu: limit, metadados e um truncated honesto ---
+
+
+def test_append_capped_avisa_quando_corta(tmp_path):
+    from server.app.services.logcap import append_capped
+
+    p = tmp_path / "x.log"
+    linha = "y" * 50
+    cortou = [append_capped(p, linha, cap=400) for _ in range(20)]
+    assert cortou[:7] == [False] * 7, "antes do teto não corta"
+    assert True in cortou, "ao passar do teto avisa"
+    assert p.stat().st_size <= 400
+
+
+def test_o_corte_grava_meta_com_o_primeiro_ponto_que_sobrou(client, imagem, hm, monkeypatch):
+    from server.app.services import samples
+
+    monkeypatch.setattr(samples, "POR_MAQUINA", 4096)
+    for _ in range(150):
+        client.post(
+            f"/api/v1/site-images/sala1/machines/{MAC}/status",
+            json={"sysresources": {"mem_pct": 50, "loadavg": [1, 1, 1], "swap_used_mb": 0}},
+            headers={**hm, "Content-Type": "application/json"},
+        )
+    meta = samples.corte("sala1", MAC)
+    assert meta and meta["cuts"] >= 1
+    assert meta["first_t"] == samples.series("sala1", MAC)[0]["t"]
+
+
+def test_truncated_so_quando_o_corte_alcanca_a_janela(client, imagem, ha, data_root):
+    """Depois de um corte o arquivo fica na METADE do teto: o limiar de 90%
+    dizia `false` por dias com histórico comprovadamente descartado."""
+    from server.app import fsdb
+    from server.app.services import samples
+
+    _planta_amostras(20)
+    assert client.get(ROTA_SAMPLES, headers=ha).json()["truncated"] is False  # sem corte
+    primeiro = samples.series("sala1", MAC)[0]["t"]
+    fsdb.write_json(
+        samples.machine_dir("sala1", MAC) / samples.META,
+        {"cuts": 1, "first_t": primeiro, "cut_at": primeiro},
+    )
+    assert client.get(ROTA_SAMPLES, headers=ha).json()["truncated"] is True
+    assert client.get(f"{ROTA_SAMPLES}?since={primeiro - 1}", headers=ha).json()["truncated"] is True
+    assert client.get(f"{ROTA_SAMPLES}?since={primeiro + 1}", headers=ha).json()["truncated"] is False
+
+
+def test_o_downsample_inclui_o_ultimo_ponto_e_diz_o_que_fez(client, imagem, ha):
+    from server.app.services import samples
+
+    _planta_amostras(1000)
+    nativos = samples.series("sala1", MAC)
+    corpo = client.get(f"{ROTA_SAMPLES}?limit=100", headers=ha).json()
+    assert len(corpo["points"]) == 100
+    assert corpo["points"][0]["t"] == nativos[0]["t"]
+    assert corpo["points"][-1]["t"] == nativos[-1]["t"], "o fim da janela sumia"
+    assert corpo["resampled"] is True
+    assert corpo["native_points"] == 1000
+    assert corpo["interval_s"] == 45
+    ts = [p["t"] for p in corpo["points"]]
+    assert ts == sorted(set(ts))
+
+
+def test_limit_tem_teto_e_nao_inventa_pontos(client, imagem, ha):
+    _planta_amostras(2)
+    assert client.get(f"{ROTA_SAMPLES}?limit=0", headers=ha).status_code == 422
+    assert client.get(f"{ROTA_SAMPLES}?limit=5001", headers=ha).status_code == 422
+    corpo = client.get(f"{ROTA_SAMPLES}?limit=3", headers=ha).json()
+    assert len(corpo["points"]) == 2 and corpo["resampled"] is False
+
+
+def test_series_ignora_linha_corrompida_e_le_a_legada(imagem):
+    import json as _json
+
+    from server.app.services import samples
+
+    p = samples.machine_dir("sala1", MAC) / samples.ARQUIVO
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        "#####\n"
+        + _json.dumps({"mem": 1, "t": 100}) + "\n"   # legada: t não é o primeiro
+        + '{"t":200,"mem":2}\n'
+        + '{"t":300,"mem":\n'                          # quebrada
+        + '{"t":400,"mem":4}\n'
+    )
+    assert [d["t"] for d in samples.series("sala1", MAC)] == [100, 200, 400]
+    assert [d["t"] for d in samples.series("sala1", MAC, since=150, until=350)] == [200]
+
+
+def test_o_ponto_ganha_os_campos_novos_so_quando_o_agente_manda(client, imagem, hm):
+    from server.app.services import samples
+
+    h = {**hm, "Content-Type": "application/json"}
+    rota = f"/api/v1/site-images/sala1/machines/{MAC}/status"
+    client.post(rota, json={"sysresources": {"mem_pct": 50, "loadavg": [1, 1, 1], "swap_used_mb": 0}}, headers=h)
+    velho = samples.series("sala1", MAC)[-1]
+    for chave in ("psi_mem", "oom", "idle", "edm", "eds", "skew"):
+        assert chave not in velho
+
+    import time as _time
+
+    client.post(
+        rota,
+        json={
+            "t_agent": int(_time.time()) - 7,
+            "sysresources": {"mem_pct": 50, "loadavg": [1, 1, 1], "swap_used_mb": 0,
+                             "psi_mem": 12.34, "psi_cpu": 0.5, "psi_io": 3, "oom_kills": 2, "idle_s": 91.9},
+            "operations": {"editors": ["vim"], "editors_time": {"vim": 40, "total": 42},
+                           "editors_time_since": 1700000000},
+        },
+        headers=h,
+    )
+    novo = samples.series("sala1", MAC)[-1]
+    assert novo["psi_mem"] == 12.3 and novo["psi_cpu"] == 0.5 and novo["psi_io"] == 3.0
+    assert novo["oom"] == 2 and novo["idle"] == 91
+    assert novo["edm"] == 42 and novo["eds"] == 1700000000
+    assert 6 <= novo["skew"] <= 8
+
+
+def test_o_lote_devolve_uma_linha_por_maquina(client, imagem, ha, admin_key, data_root):
+    import json as _json
+    import time as _time
+
+    from server.app import fsdb
+    from server.app.services import samples
+
+    outra = "52-54-00-aa-bb-cc"
+    _planta_amostras(30)
+    _planta_amostras(30, base=_time.time() - 30 * 45)  # mesma máquina, mais pontos
+    for mac in (MAC, outra, "52-54-00-00-00-01"):
+        d = samples.machine_dir("sala1", mac)
+        d.mkdir(parents=True, exist_ok=True)
+        fsdb.write_json(d / "machine.json", {"mac": mac, "first_seen": 1, "last_seen": _time.time()})
+    fsdb.write_json(
+        samples.machine_dir("sala1", outra) / "machine.json",
+        {"mac": outra, "first_seen": 1, "last_seen": _time.time() - 86400 * 3},
+    )
+
+    r = client.get("/api/v1/site-images/sala1/samples", headers=ha)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/x-ndjson")
+    linhas = [_json.loads(l) for l in r.text.splitlines()]
+    assert sorted(l["mac"] for l in linhas) == sorted([MAC, outra, "52-54-00-00-00-01"])
+    por_mac = {l["mac"]: l for l in linhas}
+    assert por_mac[MAC]["native_points"] == 60 and {"points", "truncated", "interval_s"} <= set(por_mac[MAC])
+    assert por_mac["52-54-00-00-00-01"]["points"] == [], "máquina sem amostra aparece vazia"
+
+    r = client.get(f"/api/v1/site-images/sala1/samples?active_since={int(_time.time()) - 3600}&limit=5", headers=ha)
+    linhas = [_json.loads(l) for l in r.text.splitlines()]
+    assert outra not in {l["mac"] for l in linhas}, "sem contato na janela: pulada"
+    assert all(len(l["points"]) <= 5 for l in linhas)
+
+    assert client.get("/api/v1/site-images/sala1/samples").status_code == 401
+    hs = {"Authorization": f"Bearer {admin_key}"}
+    fraca = client.post(
+        "/api/v1/service-keys", json={"name": "so-roster", "scopes": ["roster:read"], "images": []}, headers=hs
+    ).json()["key"]
+    assert client.get("/api/v1/site-images/sala1/samples", headers={"Authorization": f"Bearer {fraca}"}).status_code == 403

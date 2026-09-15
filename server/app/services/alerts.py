@@ -33,7 +33,11 @@ TIPOS = (
     # disco inserido num drive óptico — que costuma ser interno, e por isso
     # não é `usb.*`. Ter o leitor não alarma; pôr um disco nele, sim.
     "media.cd",
+    # o servidor mesmo: duas máquinas da sede reportaram o mesmo machine-id
+    # (home clonada, imagem de disco) — confunde tudo que usa o id como chave
+    "identity.duplicate",
 )
+IDENTIDADE = "identity.duplicate"
 
 MAX_ABERTOS = 50  # por máquina; acima disso o mais antigo cede lugar
 HISTORICO = 256 * 1024

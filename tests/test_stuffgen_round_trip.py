@@ -573,3 +573,108 @@ def test_sem_wifi_conf_nao_escreve_nada(imagem, raiz, tmp_path):
     r = roda_consumidor(imagem, "nb3_post_nm_wifi", raiz, extra=com_wifi(tmp_path, "# só comentário\n"))
     assert r.returncode == 0, r.stderr
     assert perfis(raiz) == {}
+
+
+# --- identidade: qual MAC é "o" MAC, e o machine-id derivado dele -------------
+#
+# A chave da máquina no servidor é um MAC. Bootar por cabo, wifi ou adaptador
+# USB não pode virar três máquinas; e o machine-id, que era um id aleatório
+# gerado pelo systemd numa home clonada por imagem de disco, apareceu repetido
+# em 62 grupos de máquinas no relatório do MOJ.
+
+
+import hashlib
+
+
+class SysNet:
+    """Uma /sys/class/net de mentira, com `device` como symlink de verdade —
+    é pelo caminho resolvido que o stuff reconhece um adaptador USB."""
+
+    def __init__(self, tmp):
+        self.raiz = tmp / "sysnet"
+        self.raiz.mkdir()
+        self.devices = tmp / "devices"
+
+    def add(self, nome, mac, *, bus="pci0000:00/0000:03:00.0", wifi=False, fisica=True):
+        d = self.raiz / nome
+        d.mkdir()
+        (d / "address").write_text(mac + "\n")
+        if fisica:
+            alvo = self.devices / bus
+            alvo.mkdir(parents=True, exist_ok=True)
+            (d / "device").symlink_to(alvo)
+        if wifi:
+            (d / "wireless").mkdir()
+
+
+def _identidade(imagem, raiz, sysnet, cmdline="boot=nutellaboot"):
+    (raiz / "var/lib/dbus").mkdir(parents=True, exist_ok=True)
+    (raiz / "home").mkdir(exist_ok=True)
+    cmd = raiz.parent / "cmdline"
+    cmd.write_text(cmdline + "\n")
+    r = roda_consumidor(
+        imagem,
+        "nb3_post_machineid",
+        raiz,
+        extra=f'NB_SYS_NET="{sysnet.raiz}"; NB_CMDLINE="{cmd}"',
+    )
+    assert r.returncode == 0, r.stderr
+    return r
+
+
+def _md5(mac):
+    return hashlib.md5(mac.encode()).hexdigest()
+
+
+def test_a_cabeada_interna_vence_wifi_e_usb(imagem, raiz, tmp_path):
+    net = SysNet(tmp_path)
+    net.add("wlp2s0", "34:6F:24:DC:27:DD", bus="pci0000:00/0000:02:00.0", wifi=True)
+    net.add("enx001122334455", "00:11:22:33:44:55", bus="pci0000:00/0000:00:14.0/usb1/1-3/1-3:1.0")
+    net.add("enp3s0", "58:11:22:99:FC:6A")
+    net.add("docker0", "02:42:ab:cd:ef:01", fisica=False)
+    _identidade(imagem, raiz, net)
+    assert (raiz / "etc/mac-icpc").read_text().strip() == "58-11-22-99-fc-6a"
+    assert (raiz / "home/.machine-id").read_text().strip() == _md5("58-11-22-99-fc-6a")
+
+
+def test_sem_cabeada_vale_a_wifi_interna_nao_o_usb(imagem, raiz, tmp_path):
+    net = SysNet(tmp_path)
+    net.add("enx001122334455", "00:11:22:33:44:55", bus="pci0000:00/0000:00:14.0/usb1/1-3/1-3:1.0")
+    net.add("wlp2s0", "34:6f:24:dc:27:dd", bus="pci0000:00/0000:02:00.0", wifi=True)
+    _identidade(imagem, raiz, net)
+    assert (raiz / "etc/mac-icpc").read_text().strip() == "34-6f-24-dc-27-dd"
+
+
+def test_so_usb_vale_o_bootif_e_sem_ele_o_proprio_usb(imagem, raiz, tmp_path):
+    net = SysNet(tmp_path)
+    net.add("enx001122334455", "00:11:22:33:44:55", bus="pci0000:00/0000:00:14.0/usb1/1-3/1-3:1.0")
+    _identidade(imagem, raiz, net, cmdline="boot=nutellaboot BOOTIF=01-00-11-22-33-44-55")
+    assert (raiz / "etc/mac-icpc").read_text().strip() == "00-11-22-33-44-55"
+    _identidade(imagem, raiz, net)
+    assert (raiz / "etc/mac-icpc").read_text().strip() == "00-11-22-33-44-55"
+
+
+def test_o_machine_id_e_estavel_e_sobrescreve_o_herdado(imagem, raiz, tmp_path):
+    """Rodar de novo, com a home limpa (`cleanhome`) ou com um id antigo de
+    home clonada: sempre o mesmo md5 do MAC."""
+    net = SysNet(tmp_path)
+    net.add("enp3s0", "58:11:22:99:fc:6a")
+    _identidade(imagem, raiz, net)
+    esperado = _md5("58-11-22-99-fc-6a")
+    assert (raiz / "home/.machine-id").read_text().strip() == esperado
+    (raiz / "home/.machine-id").write_text("0123456789abcdef0123456789abcdef\n")  # clone
+    _identidade(imagem, raiz, net)
+    assert (raiz / "home/.machine-id").read_text().strip() == esperado
+    (raiz / "home/.machine-id").unlink()  # cleanhome
+    _identidade(imagem, raiz, net)
+    assert (raiz / "home/.machine-id").read_text().strip() == esperado
+    assert (raiz / "etc/machine-id").is_symlink() and (raiz / "var/lib/dbus/machine-id").is_symlink()
+
+
+def test_sem_placa_nenhuma_avisa_e_deixa_o_systemd_gerar(imagem, raiz, tmp_path):
+    net = SysNet(tmp_path)
+    net.add("lo", "00:00:00:00:00:00", fisica=False)
+    r = _identidade(imagem, raiz, net)
+    assert (raiz / "etc/mac-icpc").read_text().strip() == ""
+    assert (raiz / "home/.machine-id").read_text() == ""
+    assert "no stable MAC" in r.stdout + r.stderr

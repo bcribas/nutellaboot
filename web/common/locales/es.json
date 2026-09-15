@@ -170,6 +170,7 @@
   "home_guide_title": "Cómo conseguir mis claves",
   "home_intro": "Una memoria USB enciende la máquina y ésta descarga un sistema listo desde el servidor — con telemetría, bloqueo de pantalla y configuración por sala. Sirve para pruebas, laboratorios de enseñanza y salas gestionadas (la maratón de programación es uno de los usos). Elija abajo por dónde empezar.",
   "home_tagline": "Gestión de laboratorios con arranque en red",
+  "identity_duplicate": "IDENTIDAD DUPLICADA (machine-id repetido en otra máquina)",
   "image": "Imagen",
   "image_id": "Identificador",
   "image_id_help": "Minúsculas, dígitos, punto, guion. Los nombres que empiezan por dígito están reservados a la administración.",

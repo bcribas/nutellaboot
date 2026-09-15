@@ -219,10 +219,16 @@ def cmd_bindings(c, a):
 
 
 def cmd_bind(c, a):
-    return c.put(
-        f"/api/v1/site-images/{a.image}/machines/{a.mac}/binding",
-        {"user_id": a.user_id, "seat": a.seat},
-    )
+    corpo = {"user_id": a.user_id, "seat": a.seat}
+    if a.source:
+        corpo["source"] = a.source
+    if a.boot_id:
+        corpo["boot_id"] = a.boot_id
+    return c.put(f"/api/v1/site-images/{a.image}/machines/{a.mac}/binding", corpo)
+
+
+def cmd_binding_history(c, a):
+    return c.get(f"/api/v1/site-images/{a.image}/machines/{a.mac}/binding/history")
 
 
 def cmd_unbind(c, a):
@@ -354,7 +360,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("mac")
     s.add_argument("user_id")
     s.add_argument("--seat", default="")
+    s.add_argument("--source", default="", help="quem afirma o vínculo (ex.: moj-login)")
+    s.add_argument("--boot-id", default="", dest="boot_id")
     s.set_defaults(fn=cmd_bind)
+
+    s = sub.add_parser("binding-history", help="histórico de vínculos da máquina")
+    s.add_argument("image")
+    s.add_argument("mac")
+    s.set_defaults(fn=cmd_binding_history)
 
     s = sub.add_parser("unbind")
     s.add_argument("image")

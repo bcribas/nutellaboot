@@ -418,3 +418,74 @@ def test_o_pending_do_painel_nao_conta_a_caducada(client, img, hm, hi, data_root
     _envelhece(data_root, 700)
     maquinas = client.get("/api/v1/site-images/testes3/machines", headers=hi).json()["machines"]
     assert maquinas[0]["pending"] == 0
+
+
+# --- o ack diz QUAL comando foi confirmado; reset de editores e boots --------
+
+
+def test_ack_registra_o_nome_do_comando(client, img, hm, hi, data_root):
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    cid = client.post(
+        "/api/v1/site-images/testes3/commands", json={"command": "mlreboot", "target": "all"}, headers=hi
+    ).json()["command_id"]
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/commands/{cid}/ack", json={"status": "done"}, headers=hm)
+    acks = client.get(f"/api/v1/site-images/testes3/machines/{MAC}/logs", headers=hi).json()["acks"]
+    assert acks[-1]["id"] == cid and acks[-1]["command"] == "mlreboot"
+
+
+@pytest.mark.parametrize("comando", ["resetcontaeditores", "precontest"])
+def test_reset_de_editores_marca_desde_quando_a_contagem_vale(client, img, hm, hi, comando):
+    """`editors_time` é acumulado desde a instalação; quem lê precisa saber
+    quando foi o último reset — o MOJ tinha 7.972 minutos e nenhuma data."""
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    assert "editors_reset_at" not in client.get(f"/api/v1/site-images/testes3/machines/{MAC}", headers=hi).json()
+    cid = client.post(
+        "/api/v1/site-images/testes3/commands", json={"command": comando, "target": "all"}, headers=hi
+    ).json()["command_id"]
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/commands/{cid}/ack", json={"status": "done"}, headers=hm)
+    maq = client.get(f"/api/v1/site-images/testes3/machines/{MAC}", headers=hi).json()
+    assert time.time() - maq["editors_reset_at"] < 5
+
+
+def test_reset_com_erro_nao_marca_e_outro_comando_tambem_nao(client, img, hm, hi):
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    for comando, status in (("resetcontaeditores", "error"), ("mlreboot", "done")):
+        cid = client.post(
+            "/api/v1/site-images/testes3/commands", json={"command": comando, "target": "all"}, headers=hi
+        ).json()["command_id"]
+        client.post(f"/api/v1/site-images/testes3/machines/{MAC}/commands/{cid}/ack", json={"status": status}, headers=hm)
+    assert "editors_reset_at" not in client.get(f"/api/v1/site-images/testes3/machines/{MAC}", headers=hi).json()
+
+
+def test_boot_id_novo_conta_um_boot(client, img, hm, hi):
+    rota = f"/api/v1/site-images/testes3/machines/{MAC}/status"
+    client.post(rota, json={"hwinfo": {"boot_id": "a"}}, headers=hm)
+    client.post(rota, json={"hwinfo": {"boot_id": "a"}}, headers=hm)
+    maq = client.get(f"/api/v1/site-images/testes3/machines/{MAC}", headers=hi).json()
+    assert maq["boots"] == 1 and maq["boot_id"] == "a"
+    assert time.time() - maq["last_boot"] < 5, "sem last_boot do agente vale o primeiro contato"
+
+    client.post(rota, json={"hwinfo": {"boot_id": "b", "last_boot": 1700000000}}, headers=hm)
+    maq = client.get(f"/api/v1/site-images/testes3/machines/{MAC}", headers=hi).json()
+    assert maq["boots"] == 2 and maq["boot_id"] == "b" and maq["last_boot"] == 1700000000
+
+    client.post(rota, json={}, headers=hm)  # agente sem hwinfo: nada muda
+    assert client.get(f"/api/v1/site-images/testes3/machines/{MAC}", headers=hi).json()["boots"] == 2
+
+
+def test_lista_filtra_por_active_since(client, img, hm, hi, data_root):
+    outra = "52-54-00-aa-bb-cc"
+    for mac in (MAC, outra):
+        client.post(f"/api/v1/site-images/testes3/machines/{mac}/status", json={}, headers=hm)
+    p = data_root / "site-images" / "testes3" / "machines" / outra / "machine.json"
+    info = fsdb.read_json(p)
+    info["last_seen"] = time.time() - 86400 * 3
+    fsdb.write_json(p, info)
+
+    todos = client.get("/api/v1/site-images/testes3/machines", headers=hi).json()["machines"]
+    assert {q["mac"] for q in todos} == {MAC, outra}
+    corte = int(time.time() - 3600)
+    r = client.get(f"/api/v1/site-images/testes3/machines?active_since={corte}", headers=hi).json()
+    assert [q["mac"] for q in r["machines"]] == [MAC]
+    r = client.get(f"/api/v1/site-images/testes3/machines?active_since={int(time.time()) + 10}", headers=hi).json()
+    assert r["machines"] == [] and "rejected" not in r, "lista vazia por filtro não é 'ninguém consegue reportar'"

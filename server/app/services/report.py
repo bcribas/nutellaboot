@@ -131,9 +131,9 @@ def coletar(image_id: str, since: float, until: float) -> dict:
         # "faltou dado" só quando o TETO comeu o histórico. Deduzir isso de
         # "a amostra mais antiga é recente" acusaria toda máquina que ligou no
         # meio da prova — e o aviso deixaria de significar alguma coisa.
-        primeira = samples.primeira_amostra(image_id, mac)
-        if since and primeira > since and samples.foi_truncado(image_id, mac):
-            corte = max(corte, primeira)
+        meta = samples.corte(image_id, mac)
+        if meta and meta.get("cuts") and since < meta.get("first_t", 0):
+            corte = max(corte, meta["first_t"])
 
         # o acumulado contado na própria máquina (o que o nb2 fazia)
         tempos = (status.get("operations") or {}).get("editors_time") or {}

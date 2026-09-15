@@ -323,6 +323,27 @@ O ambiente de teste tem um nginx externo que faz proxy de
   do GRUB (`nb3-genusb`), a chave nunca; e sem `nutellaboot.conf` ou sem
   `NB_BOOT_KEY` o boot para na tela `NO CONF` com a causa. Precedência:
   cmdline > conf > padrão, para o servidor como para a sede.
+- **A chave da máquina é o MAC ESTÁVEL de `/etc/mac-icpc`, não o da
+  interface de boot.** O initrd escolhe (`client/stuff/10-identidade.sh`:
+  cabeada interna > wifi interna > `BOOTIF` > qualquer física, nunca USB se
+  houver outra) e grava o arquivo; o agente e a tela de bloqueio o leem, com
+  `BOOTIF`/detecção só de reserva para initrd antigo. Antes a mesma máquina
+  bootando por cabo, wifi e USB virava três, e sem `BOOTIF` a tela nem
+  consultava o `lockstate`. O `/etc/machine-id` é `md5(MAC)` e é
+  **sobrescrito a cada boot de propósito** — não "corrija" para preservar o
+  antigo: era o id herdado da home clonada que o MOJ viu duplicado em 62
+  grupos. O user-agent tem QUATRO campos (`MLinux/<img>/<mid>/<bid>/<mac>`,
+  o MAC no fim); quem lê por posição não pode assumir três. Campos novos de
+  telemetria (`t_agent`, PSI, `hwinfo.mac`…) são OPCIONAIS nos dois lados: a
+  frota é heterogênea e um agente antigo continua válido (invariante 10).
+- **`truncated` das séries vem de `samples.meta.json`, não do tamanho do
+  arquivo.** O `append_capped` corta para a METADE do teto, então um limiar
+  de "90% do teto" dizia `false` por dias com histórico comprovadamente
+  descartado; e o downsample `int(i*passo)` nunca alcançava o último ponto.
+  O reamostrador é `reamostrar()` (primeiro e último sempre) e a resposta
+  diz o que fez (`resampled`, `native_points`, `interval_s`) — sem isso o
+  MOJ concluiu que o agente mandava a cada 2 min quando era o passo do
+  reamostrador.
 
 ## Estilo
 

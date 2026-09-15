@@ -154,3 +154,44 @@ def test_a_deteccao_nao_conta_campos_da_saida_do_ip():
     codigo = "\n".join(l for l in texto.splitlines() if not l.lstrip().startswith("#"))
     assert "NF-2" not in codigo and "NF - 2" not in codigo
     assert "/sys/class/net" in codigo
+
+
+# --- a chave é o MAC ESTÁVEL que o initrd gravou -----------------------------
+#
+# Bootar por cabo hoje e por wifi amanhã virava duas máquinas: o agente usava
+# o BOOTIF. Agora o initrd escolhe uma placa estável (stuff/10-identidade.sh)
+# e grava /etc/mac-icpc; o agente lê o arquivo, com BOOTIF/detecção só de
+# reserva para initrd antigo.
+
+
+def _mac_do_boot(arquivo: Path) -> str:
+    texto = AGENTE.read_text()
+    inicio = texto.index("nb3_mac_do_boot() {")
+    fim = texto.index("\n}\n", inicio) + 3
+    script = f'NB3_MAC_ARQ="{arquivo}"\n{texto[inicio:fim]}\nnb3_mac_do_boot && echo " OK" || echo " FALHOU"\n'
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"})
+    return r.stdout.strip()
+
+
+def test_o_arquivo_do_initrd_vence(tmp_path):
+    p = tmp_path / "mac-icpc"
+    p.write_text("58-11-22-99-fc-6a\n")
+    assert _mac_do_boot(p) == "58-11-22-99-fc-6a OK"
+
+
+@pytest.mark.parametrize("conteudo", ["", "\n", "enp0s3\n", "58:11:22:99:fc:6a\n"])
+def test_arquivo_vazio_ou_invalido_cai_na_deteccao(tmp_path, conteudo):
+    p = tmp_path / "mac-icpc"
+    p.write_text(conteudo)
+    assert _mac_do_boot(p).endswith("FALHOU")
+    assert _mac_do_boot(tmp_path / "nao-existe").endswith("FALHOU")
+
+
+def test_o_agente_prefere_o_arquivo_e_a_tela_usa_o_mesmo_mac():
+    agente = AGENTE.read_text()
+    assert "MAC=$(nb3_mac_do_boot) || MAC=$(sed" in agente, "o arquivo do initrd vem antes do BOOTIF"
+    assert "--mac '$MAC'" in agente, "a tela de bloqueio recebe a chave do agente"
+    tela = (REPO / "client" / "telemetry" / "usr" / "bin" / "maratona-wait").read_text()
+    assert "args.mac" in tela and "/etc/mac-icpc" in tela
+    # sem BOOTIF (boot por wifi) a tela nem consultava o lockstate
+    assert tela.index("/etc/mac-icpc") < tela.index("BOOTIF=01-")

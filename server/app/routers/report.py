@@ -34,6 +34,9 @@ async def relatorio(
     p = auth.principal_de_link(request, tk, image)
     if p is None or not p.can_see_image(image):
         raise HTTPException(401, "credencial ausente ou inválida")
+    if p.kind == "service" and "machines:read" not in p.scopes:
+        # o relatório é a telemetria inteira: mesma exigência do GET machines
+        raise HTTPException(403, "escopo insuficiente")
     if not store.site_image_exists(image):
         raise HTTPException(404, "imagem não existe")
 

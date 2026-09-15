@@ -97,12 +97,26 @@ def test_o_carimbo_do_user_agent_e_preenchido_no_boot(raiz):
     assert alvo == "/usr/lib/firefox-esr/firefox.cfg", alvo
 
 
-def test_o_user_agent_leva_sede_maquina_e_boot(raiz):
+def test_o_user_agent_leva_sede_maquina_boot_e_mac(raiz):
+    """O MAC (a chave real da máquina no servidor) entra no FIM da tupla:
+    quem já lê imagem/machine-id/boot-id por posição continua lendo."""
     roda(raiz)
     rc = (raiz / "etc/rc.local.d/50-firefox-default").read_text()
-    for insumo in ("/etc/imageroot-icpc", "/home/.machine-id", "/home/.machine-id-boot"):
+    for insumo in ("/etc/imageroot-icpc", "/home/.machine-id", "/home/.machine-id-boot", "/etc/mac-icpc"):
         assert insumo in rc, insumo
     assert "MLinux/" in rc
+    linha = next(l for l in rc.splitlines() if "MLinux/" in l)
+    assert linha.index("/home/.machine-id-boot") < linha.index("/etc/mac-icpc")
+
+
+def test_o_user_agent_e_publicado_para_a_cli_do_juiz(raiz):
+    """A CLI moj-comp lê /etc/moj/user-agent e se apresenta como o navegador:
+    browser e CLI na mesma máquina viram a mesma sessão-máquina no MOJ."""
+    roda(raiz)
+    rc = (raiz / "etc/rc.local.d/50-firefox-default").read_text()
+    assert "mkdir -p /etc/moj" in rc
+    assert "> /etc/moj/user-agent" in rc
+    assert rc.index("/etc/moj/user-agent") < rc.index("sed -i"), "grava o arquivo antes de carimbar o Firefox"
 
 
 def test_a_versao_do_firefox_sai_da_instalacao(raiz):
@@ -160,6 +174,8 @@ def test_o_epiphany_tambem_recebe_o_carimbo(raiz):
     rc = (raiz / "etc/rc.local.d/55-epiphany-uid").read_text()
     assert "user-agent" in rc and "MLinux/" in rc
     assert "/etc/imageroot-icpc" in rc
+    # lê a mesma linha que o Firefox gravou: os dois dizem exatamente o mesmo
+    assert "/etc/moj/user-agent" in rc
 
 
 def test_sem_firefox_instalado_nao_faz_nada(tmp_path):

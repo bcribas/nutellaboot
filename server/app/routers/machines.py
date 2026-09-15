@@ -81,6 +81,8 @@ async def post_status(
     publicar_evento(image, "machine.status", {"mac": mac})
     if res["first_seen"]:
         publicar_evento(image, "machine.first_seen", {"mac": mac})
+    if res.get("alert"):
+        publicar_evento(image, "alert.raised", {"mac": mac, **res["alert"]})
     return {
         "pending_commands": len(m.ready_commands(image, mac)),
         "lock": m.get_lock(image, mac),
@@ -124,35 +126,67 @@ async def get_logs(
     }
 
 
-# o teto do payload de série: 24 h a 45 s são ~1900 amostras, e ninguém
-# distingue isso numa tela — o mesmo passo-inteiro do labs_series
+# o teto PADRÃO do payload de série: 24 h a ~50 s são ~1700 amostras, e
+# ninguém distingue isso numa tela. Quem analisa (o MOJ) pede `limit` maior.
 MAX_AMOSTRAS = 400
+MAX_AMOSTRAS_TETO = 5000
 
 
+# `def`, não `async def`: lê até 2 MiB por máquina, e no event loop único
+# (invariante 2) isso travaria o long-poll de toda a frota. O FastAPI roda a
+# rota síncrona no threadpool.
 @router.get("/site-images/{image}/machines/{mac}/samples")
-async def get_samples(
+def get_samples(
     image: str,
     mac: str,
     since: float = Query(0, ge=0),
     until: float = Query(0, ge=0),
+    limit: int = Query(MAX_AMOSTRAS, ge=1, le=MAX_AMOSTRAS_TETO),
     p=Depends(auth.require_image_access(service_scope="machines:read")),
 ) -> dict:
-    """A série da máquina para os gráficos do console — o que o
-    `samples.jsonl` guarda (mem %, load1, swap MB, /home %)."""
+    """A série da máquina (o que o `samples.jsonl` guarda), reamostrada a
+    `limit` pontos mantendo o primeiro e o último, com os metadados do que foi
+    feito (`resampled`, `native_points`, `interval_s`) e `truncated` só
+    quando o teto do arquivo cortou de fato dentro da janela."""
     from ..services import samples
 
-    mac = m.normalize_mac(mac)
-    pontos = samples.series(image, mac, since, until)
-    if len(pontos) > MAX_AMOSTRAS:
-        passo = len(pontos) / MAX_AMOSTRAS
-        pontos = [pontos[int(i * passo)] for i in range(MAX_AMOSTRAS)]
-    return {
-        "mac": mac,
-        "points": pontos,
-        # o cap por máquina já descartou a metade antiga pelo menos uma vez:
-        # a tela avisa que o começo do intervalo pode não existir mais
-        "truncated": samples.foi_truncado(image, mac),
-    }
+    return samples.janela(image, m.normalize_mac(mac), since, until, limit)
+
+
+@router.get("/site-images/{image}/samples")
+def get_samples_lote(
+    image: str,
+    since: float = Query(0, ge=0),
+    until: float = Query(0, ge=0),
+    limit: int = Query(MAX_AMOSTRAS, ge=1, le=MAX_AMOSTRAS_TETO),
+    active_since: float = Query(0, ge=0),
+    p=Depends(auth.require_image_access(service_scope="machines:read")),
+) -> StreamingResponse:
+    """Todas as máquinas da sede de uma vez: uma linha NDJSON por máquina, no
+    mesmo formato da rota individual. Um request por sede em vez de um por
+    máquina (o MOJ fazia 1.700 por coleta). O gerador é SÍNCRONO de
+    propósito: o Starlette o itera no threadpool, máquina a máquina, sem
+    montar tudo em memória."""
+    from .. import fsdb
+    from ..services import samples
+
+    def gerar():
+        for mac in m.list_macs(image):
+            if active_since:
+                info = fsdb.read_json(m.machine_dir(image, mac) / "machine.json", {}) or {}
+                if (info.get("last_seen") or 0) < active_since:
+                    continue
+            try:
+                corpo = samples.janela(image, mac, since, until, limit)
+            except OSError:
+                continue
+            yield json.dumps(corpo, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+    return StreamingResponse(
+        gerar(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/site-images/{image}/machines/{mac}/events")
@@ -256,13 +290,16 @@ async def ack_command(
 
 @router.get("/site-images/{image}/machines")
 async def list_machines(
-    image: str, p=Depends(auth.require_image_access(service_scope="machines:read"))
+    image: str,
+    active_since: float = Query(0, ge=0),
+    p=Depends(auth.require_image_access(service_scope="machines:read")),
 ) -> dict:
-    maquinas = m.list_machines(image)
+    maquinas = m.list_machines(image, active_since)
     corpo = {"machines": maquinas}
-    # só quando não há máquina nenhuma: é aí que o painel vazio precisa
-    # explicar que alguém ESTÁ tentando, e com que identificação
-    if not maquinas:
+    # só quando não há máquina nenhuma (e sem filtro: lista vazia por
+    # `active_since` é normal): é aí que o painel vazio precisa explicar que
+    # alguém ESTÁ tentando, e com que identificação
+    if not maquinas and not active_since:
         rejeitadas = m.rejected(image)
         if rejeitadas:
             corpo["rejected"] = rejeitadas

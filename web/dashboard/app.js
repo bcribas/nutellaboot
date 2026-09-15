@@ -116,6 +116,7 @@ function medidor(rotulo, pct, texto) {
 
 const KIND_LABEL = {
   "usb.storage": "usb_storage",
+  "identity.duplicate": "identity_duplicate",
   "usb.phone": "usb_phone",
   "usb.network": "usb_network",
   "usb.other": "usb_other",

@@ -89,13 +89,21 @@ EOF
     sed -i 's+epiphany.desktop+firefox-esr.desktop+g' \
         "${rootmnt?}/etc/dconf/db/local.d/50-favorites" 2> /dev/null
 
-    # O carimbo só pode ser feito com o sistema rodando: a identidade da
-    # máquina (e do boot) é gerada pelo 15-machineid.sh e muda a cada ligada.
+    # O carimbo só pode ser feito com o sistema rodando: os arquivos de
+    # identidade são gravados pelo 15-machineid.sh, e o id do boot muda a
+    # cada ligada. O MAC entra no FIM da tupla: quem já lê
+    # imagem/machine-id/boot-id por posição continua lendo. A mesma linha vai
+    # para /etc/moj/user-agent, que a CLI do juiz (moj-comp) manda como o
+    # navegador — browser e CLI na mesma máquina são a mesma sessão-máquina.
     cat > "${rootmnt?}/etc/rc.local.d/50-firefox-default" << EOF
 #!/bin/bash
 # gerado pelo NutellaBoot 3 — carimba a identidade da máquina no user-agent
 FFVER=\$(sed -n 's/^Version=//p' $NB_FF_DIR/application.ini 2>/dev/null | sed -n 1p)
-UIDBROWSER="Mozilla/5.0 (MLinux/\$(< /etc/imageroot-icpc)/\$(< /home/.machine-id)/\$(< /home/.machine-id-boot)) Gecko/20100101 Firefox/\${FFVER:-140.0}"
+NB_UA_ID="MLinux/\$(< /etc/imageroot-icpc)/\$(< /home/.machine-id)/\$(< /home/.machine-id-boot)/\$(< /etc/mac-icpc)"
+UIDBROWSER="Mozilla/5.0 (\$NB_UA_ID) Gecko/20100101 Firefox/\${FFVER:-140.0}"
+mkdir -p /etc/moj
+printf '%s\n' "\$UIDBROWSER" > /etc/moj/user-agent
+chmod 0644 /etc/moj/user-agent
 sed -i "s+{{ UIDBROWSER }}+\$UIDBROWSER+g" $NB_FF_DIR/$NB_FF_CFG
 xdg-settings set default-web-browser firefox-esr.desktop
 EOF
@@ -105,8 +113,10 @@ EOF
     # nenhuma. O nb2 carimbava os dois; o nb3 tinha perdido este.
     cat > "${rootmnt?}/etc/rc.local.d/55-epiphany-uid" << 'EOF'
 #!/bin/bash
-# gerado pelo NutellaBoot 3 — o mesmo carimbo, no outro navegador
-UID_EPI="Mozilla/5.0 (MLinux/$(< /etc/imageroot-icpc)/$(< /home/.machine-id)/$(< /home/.machine-id-boot)) Epiphany/42.1"
+# gerado pelo NutellaBoot 3 — o mesmo carimbo, no outro navegador: lê o que o
+# 50-firefox-default gravou, para os dois dizerem exatamente a mesma coisa
+UID_EPI=$(< /etc/moj/user-agent)
+[ -n "$UID_EPI" ] || UID_EPI="Mozilla/5.0 (MLinux/$(< /etc/imageroot-icpc)/$(< /home/.machine-id)/$(< /home/.machine-id-boot)/$(< /etc/mac-icpc)) Epiphany/42.1"
 cat > /etc/dconf/db/local.d/90-epiphany-user-agent << INNER
 [org/gnome/epiphany/web]
 user-agent='$UID_EPI'

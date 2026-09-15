@@ -378,12 +378,22 @@ mesmo portão do `unlocked`).
 | GET | `/api/v1/site-images/{img}/roster` | C, I, S`roster:read` | — | `{roster:[…]}` |
 | PUT | `/api/v1/site-images/{img}/roster` | C, I, S`roster:write` | `{roster:[{user_id, name, display_name, organization, country, seat}]}` | `{ok, entries}` |
 | PUT | `/api/v1/site-images/{img}/roster/logos/{org}` | C, I, S`roster:write` | multipart `file` (SVG ou PNG) | `{ok, org_id, format, size}` |
-| PUT | `/api/v1/site-images/{img}/machines/{mac}/binding` | C, I, S`bindings:write` | `{user_id}` ou `{name, seat}` | vínculo criado |
+| PUT | `/api/v1/site-images/{img}/machines/{mac}/binding` | C, I, S`bindings:write` | `{user_id}` ou `{name, seat}`, mais `source?`, `at?`, `boot_id?`, `note?` | vínculo criado |
 | DELETE | `/api/v1/site-images/{img}/machines/{mac}/binding` | C, I, S`bindings:write` | — | `204` |
+| GET | `/api/v1/site-images/{img}/machines/{mac}/binding/history?n=` | C, I, S`machines:read` | — | `{history:[{event, at, by, source, …}]}` |
 | GET | `/api/v1/site-images/{img}/bindings` | C, I, S`machines:read` | — | `{bindings:[{mac, …}]}` |
 
 O `user_id` do vínculo tem que existir no roster da imagem, senão vem 404 —
 é o que impede um número de assento virar vínculo fantasma.
+
+O vínculo gravado tem `bound_at` e `by` (do servidor) e `source` (quem
+afirmou: o valor mandado, ou `service:<nome>` para chave de serviço e
+`console` para o resto). `at` do cliente vira `client_at` — o instante do
+login no juiz, por exemplo —, `boot_id` diz em qual boot e `note` é texto
+livre. Toda mudança vai para o histórico da máquina (`bindings.log`, com
+teto): `history` devolve as últimas `n` linhas, `bound` e `unbound`, a
+última com o vínculo desfeito. É o que permite ao MOJ publicar o elo no
+momento do login e a qualquer consumidor ler `binding` em vez de reconstruir.
 
 > **`GET /bindings` percorre as máquinas CONHECIDAS**, não os vínculos
 > gravados: uma máquina passa a existir quando reporta status pela primeira
@@ -396,14 +406,26 @@ O `user_id` do vínculo tem que existir no roster da imagem, senão vem 404 —
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
 | POST | `/api/v1/site-images/{img}/machines/{mac}/status` | M | JSON livre da telemetria (teto de 256 kB) | `{pending_commands, lock}` |
-| GET | `/api/v1/site-images/{img}/machines` | C, I, S`machines:read` | — | `{machines:[…]}` |
+| GET | `/api/v1/site-images/{img}/machines?active_since=` | C, I, S`machines:read` | — | `{machines:[…]}` (`active_since`: só quem reportou desde aquele epoch) |
 | GET | `/api/v1/site-images/{img}/machines/{mac}` | C, I, S`machines:read` | — | estado completo da máquina |
 | GET | `/api/v1/site-images/{img}/seeders` | C, I | — | `{seeders:[{ip, last_seen, ttl_left, released}]}` |
 | DELETE | `/api/v1/site-images/{img}/seeders/{ip}` | C, I | libera o seeder: marca `released`; a máquina vê no próximo heartbeat, sai do modo seed e termina o boot | `204` |
 
 Cada máquina devolve `online`, `seconds_since_contact`, `status` (última
-telemetria), `binding`, `lock`, `pending`, `logs` e `alerts`. O MAC é aceito
-com `:` ou `-` e normalizado para minúsculas com hífen.
+telemetria), `binding`, `lock`, `pending`, `logs` e `alerts`, e o que o
+servidor deduz do que viu: `boot_id`, `boots` (quantos boots distintos),
+`boot_seen_at`, `last_boot` (o instante do boot, mandado pelo agente novo ou
+o primeiro contato daquele boot) e `editors_reset_at` (o ack do último
+`resetcontaeditores`/`precontest` — é desde então que `editors_time` conta).
+O MAC é aceito com `:` ou `-` e normalizado para minúsculas com hífen.
+
+O agente novo manda, além do que sempre mandou, `t_agent` (relógio da
+máquina) no topo, `hwinfo.{mac, hostname, dmi_uuid, product_name,
+product_vendor, uptime_s, last_boot}`, `sysresources.{psi_mem, psi_cpu,
+psi_io, oom_kills, idle_s}` e `operations.editors_time_since`. Tudo
+opcional: máquina com agente antigo continua válida. Quando duas máquinas da
+sede reportam o mesmo `hwinfo.machine_id`, a segunda ganha um alerta
+`identity.duplicate` (com `other_mac`) — home clonada por imagem de disco.
 
 O corpo do `status` é JSON livre de propósito: um coletor novo em
 `parts.d/` no cliente entra sem mudança no servidor. Livre não é infinito —
@@ -415,14 +437,35 @@ acima de 256 kB a resposta é **413**.
 |---|---|---|---|---|
 | POST | `/api/v1/site-images/{img}/machines/{mac}/logs?origem=` | M | `text/plain`, até 1 MiB | `{ok, stored, at}` |
 | GET | `/api/v1/site-images/{img}/machines/{mac}/logs?tail=500` | C, I, S`machines:read` | — | `{bytes, journal, acks}` |
-| GET | `/api/v1/site-images/{img}/machines/{mac}/samples?since=&until=` | C, I, S`machines:read` | — | `{mac, points, truncated}` |
+| GET | `/api/v1/site-images/{img}/machines/{mac}/samples?since=&until=&limit=` | C, I, S`machines:read` | — | `{mac, points, native_points, resampled, interval_s, since, until, truncated}` |
+| GET | `/api/v1/site-images/{img}/samples?since=&until=&limit=&active_since=` | C, I, S`machines:read` | — | NDJSON: uma linha por máquina, no mesmo formato |
 
 Os `points` são a série que o `samples.jsonl` guarda por máquina (uma amostra
-por telemetria, ~45 s): `t` epoch, `mem` % de RAM, `ld` load1, `sw` MB de
-swap, `hd` % do `/home`. A resposta tem teto de 400 pontos (janela longa sai
-com passo maior); `truncated` avisa que o arquivo já chegou ao cap de 2 MiB e
-o começo mais antigo foi descartado. É o que alimenta os gráficos do duplo
-clique no hotconfig.
+por telemetria, a cada 40 a 59 s): `t` epoch (relógio do servidor), `mem` %
+de RAM, `ld` load1, `sw` MB de swap, `hd` % do `/home`, `ed` editores abertos
+(até 8), `fw` 0/1, `lk` 1 quando a tela está bloqueada — e, quando o agente
+manda, `psi_mem`/`psi_cpu`/`psi_io` (pressão, `some avg60`), `oom` (OOM
+kills desde o boot), `idle` (segundos sem teclado/mouse), `edm` (minutos
+acumulados de editor), `eds` (desde quando `edm` conta) e `skew` (relógio do
+servidor menos o do agente, em segundos).
+
+`limit` (1 a 5000, padrão 400) reamostra com passo uniforme mantendo sempre
+o primeiro e o último ponto; `resampled` diz se isso aconteceu,
+`native_points` quantos pontos a janela tinha e `interval_s` a mediana do
+intervalo nativo — sem isso ninguém distingue a cadência do agente do passo
+do reamostrador. `truncated` só é verdadeiro quando o teto de 2 MiB do
+arquivo cortou de fato e o que sobrou começa depois de `since`. É o que
+alimenta os gráficos do duplo clique no hotconfig.
+
+A rota em lote (`/site-images/{img}/samples`) responde `application/x-ndjson`:
+uma linha por máquina conhecida, no mesmo formato, gerada máquina a máquina;
+`active_since` pula quem não reportou desde aquele instante. Um request por
+sede em vez de um por máquina:
+
+```bash
+curl -sN "$SERVER/api/v1/site-images/26brbr/samples?since=$SINCE&until=$UNTIL&limit=1000&active_since=$SINCE" \
+    -H "Authorization: Bearer $NB3S" | while IFS= read -r linha; do echo "$linha" | jq -c '{mac, n: .native_points}'; done
+```
 
 O agente manda o journal do boot na partida e, a cada 5 minutos, só o que
 apareceu desde o envio anterior (usando `journalctl --cursor-file`, que não
@@ -695,7 +738,7 @@ ganha um sufixo aleatório no nome por causa da chave que carrega.
 
 | Método | Caminho | Cred. | Resposta |
 |---|---|---|---|
-| GET | `/api/v1/site-images/{img}/report?since=&until=&format=&lang=` | C, I | HTML autocontido (padrão) ou JSON com `format=json` |
+| GET | `/api/v1/site-images/{img}/report?since=&until=&format=&lang=` | C, I, S`machines:read` | HTML autocontido (padrão) ou JSON com `format=json` |
 
 `since`/`until` em epoch. `lang` é `pt`, `en` ou `es`. O HTML **não busca nada
 de fora** — CSS embutido e gráficos em SVG desenhados pelo servidor —, então
@@ -804,6 +847,18 @@ Resposta (a chave aparece **uma única vez**):
 {"name":"moj","key":"nb3s_…","scopes":["machines:read","…"],"images":["26*"]}
 ```
 
+### 1b. O que a chave dá
+
+`machines:read` lê máquinas, `samples` (por máquina e em lote:
+`GET /site-images/{img}/samples?since&until&limit&active_since`, NDJSON) e o
+relatório; `bindings:write` publica o elo máquina ↔ time no momento do login:
+
+```bash
+curl -sS -X PUT https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/machines/52-54-00-12-34-56/binding \
+  -H "Authorization: Bearer $NB3S" -H 'Content-Type: application/json' \
+  -d '{"user_id": "team-001", "source": "moj-login", "at": 1788026460, "boot_id": "2172579592"}'
+```
+
 ### 2. Enviar o roster dos times
 
 ```bash
@@ -880,12 +935,17 @@ curl -sS https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/machi
     "online": true,
     "seconds_since_contact": 12,
     "lock": {"locked": false, "since": 1785620000, "by": "moj"},
-    "binding": {"user_id": "team-001", "seat": "012"},
+    "binding": {"user_id": "team-001", "seat": "012", "source": "moj-login", "bound_at": 1785620100, "by": "moj"},
     "pending": 0,
+    "boot_id": "2172579592", "boots": 3, "last_boot": 1785619000, "editors_reset_at": 1785620400,
     "status": {
-      "hwinfo": {"processor": "…", "cores": 8, "memtotal_mb": 15900},
-      "sysresources": {"mem_pct": 41, "loadavg": [0.6, 0.4, 0.3], "alerts": []},
-      "operations": {"firewall": true, "screen_lock": false, "editors": ["code"]}
+      "t_agent": 1785620500,
+      "hwinfo": {"processor": "…", "cores": 8, "memtotal_mb": 15900,
+                 "machine_id": "3f2…", "boot_id": "2172579592", "image": "26brbr",
+                 "mac": "52-54-00-12-34-56", "dmi_uuid": "…", "product_name": "OptiPlex 3090", "uptime_s": 1500, "last_boot": 1785619000},
+      "sysresources": {"mem_pct": 41, "loadavg": [0.6, 0.4, 0.3], "alerts": [], "psi_mem": 0.4, "oom_kills": 0, "idle_s": 12},
+      "operations": {"firewall": true, "screen_lock": false, "editors": ["code"],
+                     "editors_time": {"code": 40, "total": 42}, "editors_time_since": 1785620400}
     }
   }
 ]}

@@ -170,6 +170,7 @@
   "home_guide_title": "Como conseguir minhas chaves",
   "home_intro": "Um pendrive liga o computador e ele baixa um sistema pronto do servidor — com telemetria, bloqueio de tela e configuração por sala. Serve para provas, laboratórios de ensino e salas gerenciadas (a Maratona de Programação é um dos usos). Escolha abaixo por onde começar.",
   "home_tagline": "Gestão de laboratórios com boot em rede",
+  "identity_duplicate": "IDENTIDADE DUPLICADA (machine-id repetido em outra máquina)",
   "image": "Imagem",
   "image_id": "Identificador",
   "image_id_help": "Letras minúsculas, números, ponto, hífen. Nomes começando por número são reservados à administração da maratona.",

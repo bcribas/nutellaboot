@@ -6,7 +6,7 @@ O que ele simula é o que a máquina real faz, na mesma proporção:
 
   * **boot** — busca `stuff`, `manifest` e a checagem de pendrive, tudo de uma
     vez no começo (é assim que uma sala liga: no mesmo minuto);
-  * **telemetria** — um POST de status a cada ~45 s por máquina;
+  * **telemetria** — um POST de status a cada 40 a 59 s por máquina;
   * **long-poll** — uma conexão presa por máquina, o tempo todo, esperando
     comando. É este que dimensiona o servidor: são milhares de conexões
     OCIOSAS, e conexão ociosa também custa descritor e memória.

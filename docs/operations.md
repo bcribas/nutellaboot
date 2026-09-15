@@ -143,8 +143,14 @@ export NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br
 export NB3_ADMIN_KEY=nb3a_...
 
 tools/nb3-camada-telemetria --dry-run                       # ver antes
-tools/nb3-camada-telemetria --model maratonalinux2604 --publish
+tools/nb3-camada-telemetria --model maratona2026 --publish
 ```
+
+Na produção, rode como o usuário `nutellaboot` com
+`NB3_DATA_ROOT=/var/lib/nutellaboot3`: o blob vai para `blobs/` do diretório
+de dados e o envio ao servidor de arquivos usa a chave ssh dele. É um
+`--model` por modelo em uso com camada `telemetry` (`GET /api/v1/models`
+lista; `replace_role` tira a anterior de cada um).
 
 Não precisa de root: o `-all-root` do `mksquashfs` grava tudo como `root:root`
 sem privilégio nenhum.
@@ -825,7 +831,7 @@ O **pendrive de boot não dispara o alarme** (é reconhecido pela label
 conectado quando a máquina liga também é reportado.
 
 A detecção é feita por regra de `udev`, não por varredura: o ciclo de
-telemetria é de ~45 segundos e um pendrive espetado por dez segundos passaria
+telemetria é de ~50 segundos e um pendrive espetado por dez segundos passaria
 batido.
 
 Para ver tudo o que já apareceu numa máquina, incluindo o que foi dispensado:
@@ -930,6 +936,25 @@ o próximo.
 Se o serviço reiniciar no meio da geração, o painel mostra a falha depois de
 meia hora e o botão volta a funcionar — a passada não continua de onde parou,
 é só pedir de novo.
+
+### Chave de serviço para o MOJ
+
+O juiz consome a API com uma chave `nb3s_` de escopos limitados, criada uma
+vez pela administração (`docs/api.md`, seção "Integração com o MOJ"):
+
+```bash
+curl -sS -X POST "$SERVER/api/v1/service-keys" -H "Authorization: Bearer $ADMIN_KEY" \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"moj","scopes":["machines:read","commands:write","bindings:write","roster:read","roster:write"],"images":["26*"]}'
+```
+
+Com `machines:read` ele lê as máquinas (`?active_since=` pula quem não
+reportou), as séries em lote (`GET …/site-images/<sede>/samples?since&until&
+limit&active_since`, uma linha NDJSON por máquina, com `resampled`,
+`native_points` e `interval_s` para saber o que foi reamostrado) e o
+relatório. Com `bindings:write` ele publica o elo máquina ↔ time no login
+(`PUT …/binding` com `source`, `at` e `boot_id`); o histórico fica em
+`GET …/binding/history`.
 
 ### Vínculo time ↔ máquina
 
@@ -1206,7 +1231,7 @@ painel. Se estiver offline, o comando será entregue quando ela voltar.
 ## Capacidade: o que a máquina aguenta
 
 Medido, não estimado — `tools/nb3-carga` simula o ciclo de vida real de N
-máquinas (boot, telemetria a cada 45 s e long-poll contínuo) e mede o que a
+máquinas (boot, telemetria a cada ~50 s e long-poll contínuo) e mede o que a
 sala sente.
 
 **1600 máquinas, um worker uvicorn**, em servidor de 16 núcleos:

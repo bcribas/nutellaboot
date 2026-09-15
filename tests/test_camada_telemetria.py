@@ -197,3 +197,145 @@ def test_a_parte_de_disco_emite_json_valido(tmp_path):
     for campo in ("home_used_mb", "home_free_mb", "home_pct", "root_free_mb"):
         assert campo in disco, f"faltou {campo}"
     assert 0 <= disco["home_pct"] <= 100
+
+
+# --- os coletores novos: pressão, OOM, ociosidade, hardware, relógio ---------
+#
+# Rodam DE VERDADE contra arquivos falsos (variáveis NB_*), como o 25-disco.
+# Tudo que não dá para medir fica AUSENTE: o servidor trata como opcional.
+
+PARTS = REPO / "client" / "telemetry" / "usr" / "share" / "mlog" / "parts.d"
+
+
+def _parte(nome, tmp_path, **env):
+    import json
+    import os
+    import subprocess
+
+    r = subprocess.run(
+        ["bash", str(PARTS / nome)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, **{k: str(v) for k, v in env.items()}},
+        timeout=30,
+    )
+    assert r.returncode == 0, r.stderr
+    return json.loads("{" + r.stdout + "}")
+
+
+def test_a_parte_de_recursos_le_psi_oom_e_ociosidade(tmp_path):
+    pressure = tmp_path / "pressure"
+    pressure.mkdir()
+    for nome, avg in (("memory", "1.25"), ("cpu", "0.10"), ("io", "3.50")):
+        (pressure / nome).write_text(
+            f"some avg10=0.00 avg60={avg} avg300=0.50 total=123\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
+        )
+    (tmp_path / "vmstat").write_text("nr_free_pages 1\noom_kill 3\n")
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    (fakebin / "runuser").write_text("#!/bin/sh\necho '(uint64 42000,)'\n")
+    (fakebin / "runuser").chmod(0o755)
+    import os
+
+    res = _parte(
+        "20-recursos.sh",
+        tmp_path,
+        NB_PROC_PRESSURE=pressure,
+        NB_PROC_VMSTAT=tmp_path / "vmstat",
+        PATH=f"{fakebin}:{os.environ['PATH']}",
+    )["sysresources"]
+    assert res["psi_mem"] == 1.25 and res["psi_cpu"] == 0.1 and res["psi_io"] == 3.5
+    assert res["oom_kills"] == 3
+    assert res["idle_s"] == 42
+    for campo in ("mem_pct", "swap_used_mb", "loadavg", "alerts"):
+        assert campo in res
+
+
+def test_sem_psi_os_campos_ficam_ausentes(tmp_path):
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    for nome in ("runuser", "loginctl"):
+        (fakebin / nome).write_text("#!/bin/sh\nexit 1\n")
+        (fakebin / nome).chmod(0o755)
+    res = _parte(
+        "20-recursos.sh",
+        tmp_path,
+        NB_PROC_PRESSURE=tmp_path / "nao-existe",
+        NB_PROC_VMSTAT=tmp_path / "nao-existe",
+        PATH=f"{fakebin}:/usr/bin:/bin",
+    )["sysresources"]
+    for campo in ("psi_mem", "psi_cpu", "psi_io", "oom_kills", "idle_s"):
+        assert campo not in res, campo
+
+
+def test_a_parte_de_hardware_leva_mac_dmi_e_uptime(tmp_path):
+    import time
+
+    dmi = tmp_path / "dmi"
+    dmi.mkdir()
+    (dmi / "product_uuid").write_text("4C4C4544-0042-3010-8034-B4C04F4B4E31\n")
+    (dmi / "product_name").write_text("OptiPlex 3090\n")
+    (dmi / "sys_vendor").write_text("Dell Inc.\n")
+    (tmp_path / "uptime").write_text("1234.56 4000.00\n")
+    (tmp_path / "mac").write_text("58-11-22-99-fc-6a\n")
+    hw = _parte(
+        "10-hardware.sh",
+        tmp_path,
+        NB_DMI_DIR=dmi,
+        NB_PROC_UPTIME=tmp_path / "uptime",
+        NB_MAC_ARQ=tmp_path / "mac",
+    )["hwinfo"]
+    assert hw["mac"] == "58-11-22-99-fc-6a"
+    assert hw["dmi_uuid"] == "4c4c4544-0042-3010-8034-b4c04f4b4e31"
+    assert hw["product_name"] == "OptiPlex 3090" and hw["product_vendor"] == "Dell Inc."
+    assert hw["uptime_s"] == 1234
+    assert abs(hw["last_boot"] - (time.time() - 1234)) < 3
+    assert hw["hostname"]
+    for campo in ("processor", "cores", "memtotal_mb"):
+        assert campo in hw
+
+
+def test_hardware_sem_os_arquivos_novos_nao_inventa_campo(tmp_path):
+    hw = _parte(
+        "10-hardware.sh",
+        tmp_path,
+        NB_DMI_DIR=tmp_path / "nao",
+        NB_PROC_UPTIME=tmp_path / "nao",
+        NB_MAC_ARQ=tmp_path / "nao",
+    )["hwinfo"]
+    for campo in ("mac", "dmi_uuid", "product_name", "uptime_s", "last_boot"):
+        assert campo not in hw, campo
+
+
+def test_o_relogio_do_agente_e_chave_de_topo(tmp_path):
+    import time
+
+    d = _parte("05-relogio.sh", tmp_path)
+    assert abs(d["t_agent"] - time.time()) < 3
+
+
+def test_o_status_inteiro_e_json_valido_com_o_relogio_no_topo(tmp_path):
+    """O collect() concatena as partes com vírgula e envolve em chaves: uma
+    parte que imprima uma chave escalar entra no topo sem mudar o agente."""
+    import json
+    import os
+    import subprocess
+
+    saidas = []
+    for parte in sorted(PARTS.glob("*.sh")):
+        r = subprocess.run(
+            ["bash", str(parte)],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "NB_PROC_PRESSURE": str(tmp_path / "nao"), "NB_DMI_DIR": str(tmp_path / "nao"),
+                 "NB_DISCO_HOME": str(tmp_path), "NB_DISCO_ROOT": str(tmp_path),
+                 "NB_EDITORES_ARQ": str(tmp_path / "nao")},
+            timeout=60,
+        )
+        assert r.returncode == 0, (parte.name, r.stderr)
+        saidas.append(r.stdout.strip())
+    status = json.loads("{" + ",".join(saidas) + "}")
+    assert isinstance(status["t_agent"], int)
+    for bloco in ("hwinfo", "sysresources", "sysdisk", "operations"):
+        assert bloco in status
+    assert "editors_time_since" in status["operations"]

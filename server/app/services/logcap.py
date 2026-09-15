@@ -13,16 +13,20 @@ from pathlib import Path
 DEFAULT_CAP = 1 * 1024 * 1024
 
 
-def append_capped(path: Path | str, line: str, cap: int = DEFAULT_CAP) -> None:
+def append_capped(path: Path | str, line: str, cap: int = DEFAULT_CAP) -> bool:
+    """Anexa a linha. Devolve True quando o teto estourou e a metade antiga
+    foi descartada — quem guarda série temporal precisa saber disso, porque
+    o tamanho do arquivo depois do corte (metade do teto) não conta a
+    história."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(line.rstrip("\n") + "\n")
     try:
         if path.stat().st_size <= cap:
-            return
+            return False
     except FileNotFoundError:
-        return
+        return False
 
     # mantém a metade final e recomeça o arquivo de forma atômica
     with open(path, "rb") as fh:
@@ -32,3 +36,4 @@ def append_capped(path: Path | str, line: str, cap: int = DEFAULT_CAP) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_bytes(tail)
     os.replace(tmp, path)
+    return True

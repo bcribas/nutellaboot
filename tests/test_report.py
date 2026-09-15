@@ -169,11 +169,15 @@ def test_avisa_quando_o_historico_foi_descartado(client, data_root, sede):
     não ter relatório."""
     agora = time.time()
     alimenta("sala1", MAC1, inicio=agora - 600, n=3)
-    # o arquivo bateu no teto: é o sinal de que a metade antiga foi descartada
+    # o teto cortou de verdade e o que sobrou começa depois do pedido: é o
+    # meta do corte que diz isso — o tamanho do arquivo depois de um corte
+    # (metade do teto) não conta a história
     from server.app.services import samples as s
 
-    p = machines.machine_dir("sala1", MAC1) / s.ARQUIVO
-    fsdb.write_text(p, p.read_text() + "\n".join(["#" * 100] * 20000) + "\n")
+    fsdb.write_json(
+        machines.machine_dir("sala1", MAC1) / s.META,
+        {"cuts": 1, "first_t": int(agora - 600), "cut_at": int(agora)},
+    )
 
     d = report.coletar("sala1", agora - 86400, agora)
     assert d["corte"] > 0
@@ -296,3 +300,21 @@ def test_a_amostra_e_curta(client, data_root, sede):
 def test_status_sem_recursos_nao_quebra(client, data_root, sede):
     machines.record_status("sala1", MAC1, {"hwinfo": {"processor": "x"}})
     assert samples.series("sala1", MAC1)[0].keys() >= {"t"}
+
+
+def test_chave_de_servico_precisa_de_machines_read(client, data_root, sede, admin_key):
+    """O relatório é a telemetria inteira; uma chave nb3s_ com escopo nenhum
+    lia tudo — a única rota de leitura de máquinas sem checar escopo."""
+    hs = {"Authorization": f"Bearer {admin_key}"}
+
+    def chave(scopes):
+        return client.post(
+            "/api/v1/service-keys", json={"name": f"k-{len(scopes)}", "scopes": scopes, "images": []}, headers=hs
+        ).json()["key"]
+
+    fraca = chave(["roster:read"])
+    forte = chave(["roster:read", "machines:read"])
+    assert client.get("/api/v1/site-images/sala1/report?format=json", headers={"Authorization": f"Bearer {fraca}"}).status_code == 403
+    assert client.get("/api/v1/site-images/sala1/report?format=json", headers={"Authorization": f"Bearer {forte}"}).status_code == 200
+    hi = {"Authorization": f"Bearer {sede['token']}"}
+    assert client.get("/api/v1/site-images/sala1/report?format=json", headers=hi).status_code == 200

@@ -96,13 +96,17 @@ data/
 │   ├── wallpaper.png            arquivo enviado pelo configureitor
 │   ├── wallpaper.json           {md5, size, filename, content_type}
 │   ├── seeders.json             {"<ip>": {"last_seen": epoch}}
+│   ├── machineids.json          {machine_id: mac} — para alertar o clone (identity.duplicate)
 │   ├── roster.json              times/usuários (nome, organização, país, lugar)
 │   ├── roster/logos/<org>.svg   logotipos das instituições (svg ou png)
 │   ├── webhooks.json            destinos de eventos (0600, guarda o segredo)
 │   └── machines/<mac>/
-│       ├── machine.json         mac, first_seen, last_seen, logs_at, logs_bytes
+│       ├── machine.json         mac, first_seen, last_seen, logs_*, boot_id, boots, boot_seen_at, last_boot, editors_reset_at
 │       ├── status.json          última telemetria recebida (sobrescrita, teto 256 kB)
-│       ├── binding.json         vínculo com o roster (user_id, seat)
+│       ├── binding.json         vínculo atual (bound_at, by, source, user_id|name, seat, boot_id?, client_at?, note?)
+│       ├── bindings.log         histórico de vínculos (bound/unbound), JSONL com teto
+│       ├── samples.jsonl        série da telemetria (um ponto por status), teto 2 MiB
+│       ├── samples.meta.json    {cuts, first_t, cut_at} — quando o teto cortou de fato
 │       ├── lockstate.json       {locked, since, by}
 │       ├── queue/<ts>-<cid>.json  comandos pendentes (um arquivo cada)
 │       ├── acks.log             confirmações, JSONL com teto de tamanho
@@ -139,8 +143,28 @@ baixadas de lá; o estado de cada envio fica em `publish/`, que é o que aliment
 o botão de reenviar quando o servidor está fora do ar. Falha de publicação não
 quebra o boot: a camada continua sendo servida pela máquina de gestão.
 
-O MAC é normalizado para minúsculas com hífen (`52-54-00-12-34-56`), que é o
-formato entregue pelo `BOOTIF` na linha de comando do kernel.
+O MAC é normalizado para minúsculas com hífen (`52-54-00-12-34-56`).
+
+### Identidade da máquina
+
+A chave da máquina é o **MAC estável** que o initrd escolhe
+(`client/stuff/10-identidade.sh`) e grava em `/etc/mac-icpc`: a primeira
+placa cabeada interna; sem cabeada, a primeira wifi interna; adaptador USB
+nunca, porque pode não estar lá no próximo boot; `BOOTIF` (a placa por onde
+bootou) só como reserva. O agente e a tela de bloqueio leem o arquivo. Antes
+a chave era o `BOOTIF`, e a mesma máquina que bootava por cabo, wifi e USB
+aparecia como três — e sem `BOOTIF` (boot por wifi) a tela de bloqueio nem
+consultava o estado.
+
+O `/etc/machine-id` é `md5(MAC estável)`, sobrescrito a cada boot: único por
+placa, reproduzível na mão (`printf '%s' 'aa-bb-cc-dd-ee-ff' | md5sum`),
+imune a home clonada e a `cleanhome`. O `boot_id` é o `NBUID` que o servidor
+sorteia a cada stuff. O user-agent do Firefox e do Epiphany leva
+`MLinux/<imagem>/<machine_id>/<boot_id>/<mac>` (o MAC no fim, para quem lê a
+tupla por posição continuar lendo), e a mesma linha fica em
+`/etc/moj/user-agent` para a CLI do juiz. O servidor alerta
+`identity.duplicate` quando duas máquinas da sede reportam o mesmo
+`machine_id`.
 
 ## Invariantes
 
@@ -218,7 +242,7 @@ em outra rota não identifica ninguém.
 ### Logs e alertas: dois canais, dois comportamentos
 
 A telemetria (`status.json`) é um **retrato do agora**: sobrescrita a cada
-~45 s, sem histórico. Isso resolve "como está a sala neste momento" e não
+a cada 40 a 59 s, sem histórico. Isso resolve "como está a sala neste momento" e não
 resolve mais nada — e havia dois casos que precisavam de outra coisa.
 
 **Logs** (`journal.log`) são histórico: a máquina manda o journal do boot na
@@ -240,7 +264,7 @@ registro. Consequências que caem dela:
 - **a máquina não dispensa o próprio alerta** (a chave de máquina não serve na
   rota de dispensa): adulterar o agente não apaga o rastro;
 - a detecção é por regra de `udev`, não por varredura — o ciclo de telemetria
-  é de ~45 s e um pendrive espetado por dez segundos passaria batido.
+  é de ~50 s e um pendrive espetado por dez segundos passaria batido.
 
 O `kind` do alerta não é validado contra uma lista fechada: o cliente pode
 ganhar um detector novo sem esperar uma versão do servidor. A lista conhecida

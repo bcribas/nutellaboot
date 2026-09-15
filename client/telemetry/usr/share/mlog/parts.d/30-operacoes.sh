@@ -2,6 +2,8 @@
 python3 - <<'PY'
 import json, os, subprocess
 
+EDITORES_ARQ = os.environ.get("NB_EDITORES_ARQ", "/home/.nb3/editores")
+
 def firewall():
     try:
         r = subprocess.run(["systemctl", "is-active", "maratona-firewall.service"],
@@ -30,23 +32,31 @@ def acumulado():
     "usado/amostrado"; isso se perdeu na reescrita, junto com o sentido do
     botão `resetcontaeditores`, que apagava um arquivo que ninguém escrevia.
     """
-    dados = {}
+    dados, since = {}, None
     try:
-        with open("/home/.nb3/editores") as fh:
+        with open(EDITORES_ARQ) as fh:
             for linha in fh:
                 chave, _, valor = linha.strip().partition("=")
-                if chave and valor.isdigit():
+                if not valor.isdigit():
+                    continue
+                if chave == "since":
+                    # desde quando a contagem vale: o reset apaga o arquivo e o
+                    # laço recomeça com um `since` novo
+                    since = int(valor)
+                elif chave:
                     dados[chave] = int(valor)
     except OSError:
-        return None
-    return dados or None
+        return None, None
+    return (dados or None), since
 
+tempo, desde = acumulado()
 print(json.dumps({
     "operations": {
         "firewall": firewall(),
         "screen_lock": os.path.exists("/home/.nb3/locked"),
         "editors": editores(),
-        "editors_time": acumulado(),
+        "editors_time": tempo,
+        "editors_time_since": desde,
     }
 }, ensure_ascii=False)[1:-1])
 PY

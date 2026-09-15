@@ -7,7 +7,7 @@
 #                segundos com ~1 requisição por máquina a cada 25 s.
 #                (O envia.sh fazia polling a cada 5-30 s e ainda somava o
 #                atraso configurado no servidor: passava de 30 s até travar.)
-#   telemetria — envia o estado da máquina a cada ~45 s.
+#   telemetria — envia o estado da máquina a cada 40 a 59 s (jitter de propósito).
 #
 # Configuração vem de /etc/.nb3, escrito pelo stuff durante o boot.
 
@@ -59,7 +59,21 @@ nb3_detect_mac() {
     return 1
 }
 
-MAC=$(sed -n 's/.*BOOTIF=01-\([0-9a-f-]*\).*/\1/p' /proc/cmdline)
+# A chave é o MAC ESTÁVEL escolhido pelo initrd (stuff/10-identidade.sh), não
+# o da placa por onde bootou: a mesma máquina boota por cabo, wifi ou USB e
+# precisa continuar sendo a mesma máquina no painel. O BOOTIF e a detecção
+# ficam de reserva para um initrd antigo, que não grava o arquivo.
+NB3_MAC_ARQ=${NB3_MAC_ARQ:-/etc/mac-icpc}
+
+nb3_mac_do_boot() {
+    _m=$(tr -d '[:space:]' < "$NB3_MAC_ARQ" 2> /dev/null) || return 1
+    case "$_m" in
+        [0-9a-f][0-9a-f]-[0-9a-f][0-9a-f]-[0-9a-f][0-9a-f]-[0-9a-f][0-9a-f]-[0-9a-f][0-9a-f]-[0-9a-f][0-9a-f]*) printf '%s' "$_m" ;;
+        *) return 1 ;;
+    esac
+}
+
+MAC=$(nb3_mac_do_boot) || MAC=$(sed -n 's/.*BOOTIF=01-\([0-9a-f-]*\).*/\1/p' /proc/cmdline)
 [ -n "$MAC" ] || MAC=$(nb3_detect_mac) || MAC=""
 export MAC
 
@@ -134,7 +148,7 @@ ensure_locked() {
         NB_BOOT_KEY='$NB_BOOT_KEY' \
         /usr/bin/maratona-wait --image '$IMAGEROOT' --server '$NB_SERVER' \
         --theme '${NB_LOCK_THEME:-classico}' --lang '${NB_LANGUAGE:-pt}' \
-        --fifo '$NB_UNLOCK_FIFO'" &
+        --mac '$MAC' --fifo '$NB_UNLOCK_FIFO'" &
     disown
 }
 
@@ -231,24 +245,35 @@ EDITORES_ARQ="$STATE_DIR/editores"
 EDITORES_INTERVALO=${NB_EDITORES_INTERVAL:-60}
 EDITORES_LISTA="emacs vim geany clion code pycharm idea gedit codeblocks sublime"
 
+# Uma passada da contagem (separada do laço para ser testável).
+editors_tick() {
+    abertos=$(ps -U icpc -o comm= 2> /dev/null | tr 'A-Z' 'a-z')
+    # `since` é quando a contagem começou: o resetcontaeditores apaga o
+    # arquivo e a próxima passada recomeça daqui — é o que diz "desde o
+    # precontest", sem o qual o acumulado não tem data (o MOJ viu 7.972
+    # minutos e nenhuma)
+    since=$(sed -n 's/^since=//p' "$EDITORES_ARQ" 2> /dev/null | sed -n 1p)
+    # `total` é o denominador: sem ele, "vim=142" não diz se são 142 de 150
+    # amostras ou de 1000
+    {
+        echo "since=${since:-$(date +%s)}"
+        for ed in $EDITORES_LISTA; do
+            atual=$(sed -n "s/^$ed=//p" "$EDITORES_ARQ" 2> /dev/null | sed -n 1p)
+            case "$abertos" in
+                *"$ed"*) atual=$((${atual:-0} + 1)) ;;
+                *) atual=${atual:-0} ;;
+            esac
+            [ "$atual" -gt 0 ] && echo "$ed=$atual"
+        done
+        total=$(sed -n "s/^total=//p" "$EDITORES_ARQ" 2> /dev/null | sed -n 1p)
+        echo "total=$((${total:-0} + 1))"
+    } > "$EDITORES_ARQ.tmp" && mv "$EDITORES_ARQ.tmp" "$EDITORES_ARQ"
+}
+
 editors_loop() {
     while :; do
         sleep "$EDITORES_INTERVALO"
-        abertos=$(ps -U icpc -o comm= 2> /dev/null | tr 'A-Z' 'a-z')
-        # `total` é o denominador: sem ele, "vim=142" não diz se são 142 de 150
-        # amostras ou de 1000
-        {
-            for ed in $EDITORES_LISTA; do
-                atual=$(sed -n "s/^$ed=//p" "$EDITORES_ARQ" 2> /dev/null | sed -n 1p)
-                case "$abertos" in
-                    *"$ed"*) atual=$((${atual:-0} + 1)) ;;
-                    *) atual=${atual:-0} ;;
-                esac
-                [ "$atual" -gt 0 ] && echo "$ed=$atual"
-            done
-            total=$(sed -n "s/^total=//p" "$EDITORES_ARQ" 2> /dev/null | sed -n 1p)
-            echo "total=$((${total:-0} + 1))"
-        } > "$EDITORES_ARQ.tmp" && mv "$EDITORES_ARQ.tmp" "$EDITORES_ARQ"
+        editors_tick
     done
 }
 
@@ -283,7 +308,7 @@ telemetry_loop() {
 # naquela máquina às 14h32" depois que a prova acabou.
 #
 # NÃO vai em parts.d/: aquela saída é concatenada dentro do status.json, que é
-# sobrescrito a cada 45 s. Log precisa de histórico, então tem canal próprio.
+# sobrescrito a cada ~50 s. Log precisa de histórico, então tem canal próprio.
 
 LOG_CURSOR="$STATE_DIR/journal.cursor"
 LOG_MAX_BYTES=${NB_LOG_MAX_BYTES:-524288}

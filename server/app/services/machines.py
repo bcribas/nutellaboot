@@ -111,15 +111,39 @@ def list_macs(image_id: str) -> list[str]:
     return sorted(p.name for p in base.iterdir() if (p / "machine.json").is_file())
 
 
+def _hwinfo(status) -> dict:
+    hw = status.get("hwinfo") if isinstance(status, dict) else None
+    return hw if isinstance(hw, dict) else {}
+
+
+def _epoch(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f > 0 else None
+
+
 def record_status(image_id: str, mac: str, status: dict) -> dict:
     d = machine_dir(image_id, mac)
     now = time.time()
+    hw = _hwinfo(status)
     with fsdb.locked(d):
         info = fsdb.read_json(d / "machine.json", {}) or {}
         first = not info
         info.setdefault("mac", mac)
         info.setdefault("first_seen", now)
         info["last_seen"] = now
+        # o boot_id (NBUID do stuff) muda a cada boot: é o que dá "quantas
+        # vezes ligou" e "desde quando está de pé" sem depender do agente
+        boot = str(hw.get("boot_id") or "").strip()[:64]
+        if boot and boot != info.get("boot_id"):
+            info["boot_id"] = boot
+            info["boots"] = int(info.get("boots") or 0) + 1
+            info["boot_seen_at"] = now
+            # o agente novo manda o instante real do boot; senão vale o
+            # primeiro contato deste boot (±1 ciclo de telemetria)
+            info["last_boot"] = _epoch(hw.get("last_boot")) or now
         fsdb.write_json(d / "machine.json", info)
         fsdb.write_json(d / "status.json", status)
     # o status.json é sobrescrito a cada envio: sem esta linha, memória, carga
@@ -127,7 +151,47 @@ def record_status(image_id: str, mac: str, status: dict) -> dict:
     from . import samples
 
     samples.record(image_id, mac, status)
-    return {"first_seen": first, "info": info}
+    # fora do lock da máquina: o índice trava o diretório da IMAGEM
+    alerta = _indexa_identidade(image_id, mac, hw)
+    return {"first_seen": first, "info": info, "alert": alerta}
+
+
+def _indexa_identidade(image_id: str, mac: str, hw: dict) -> dict | None:
+    """machine_id → mac por sede (padrão do record_rejected: lock do
+    diretório da imagem). Devolve o alerta criado quando o id já era de OUTRA
+    máquina — duas máquinas com o mesmo /etc/machine-id (home clonada, imagem
+    de disco) confundem tudo que usa o id como chave, e o MOJ usou.
+
+    Custa 1 leitura + 1 escrita por status, contra varrer a sede inteira."""
+    mid = str(hw.get("machine_id") or "").strip()[:64]
+    if not mid:
+        return None
+    base = site_image_dir(image_id)
+    with fsdb.locked(base):
+        idx = fsdb.read_json(base / "machineids.json", {}) or {}
+        outro = idx.get(mid)
+        if outro == mac:
+            return None
+        idx[mid] = mac
+        fsdb.write_json(base / "machineids.json", idx)
+    if not outro:
+        return None
+    from . import alerts  # import local: alerts importa daqui
+
+    # um alerta aberto por máquina e id; sem isto A e B alternando gerariam
+    # um alerta por status até alguém dispensar
+    if any(
+        a.get("kind") == alerts.IDENTIDADE and a.get("machine_id") == mid
+        for a in alerts.open_alerts(image_id, mac)
+    ):
+        return None
+    return alerts.raise_alert(
+        image_id,
+        mac,
+        alerts.IDENTIDADE,
+        f"machine-id tambem reportado por {outro}",
+        {"machine_id": mid, "other_mac": outro},
+    )
 
 
 def get_machine(image_id: str, mac: str) -> dict:
@@ -156,8 +220,18 @@ def get_machine(image_id: str, mac: str) -> dict:
     }
 
 
-def list_machines(image_id: str) -> list[dict]:
-    return [get_machine(image_id, mac) for mac in list_macs(image_id)]
+def list_machines(image_id: str, active_since: float = 0) -> list[dict]:
+    out = []
+    for mac in list_macs(image_id):
+        if active_since:
+            # só o machine.json antes das outras 4 leituras e do glob da fila
+            # (padrão de labs.resumo_de): numa sede grande é a diferença
+            # entre 1 e 6 leituras por máquina que não interessa
+            info = fsdb.read_json(machine_dir(image_id, mac) / "machine.json", {}) or {}
+            if (info.get("last_seen") or 0) < active_since:
+                continue
+        out.append(get_machine(image_id, mac))
+    return out
 
 
 # --- fila de comandos ---
@@ -241,18 +315,33 @@ def ready_commands(image_id: str, mac: str) -> list[dict]:
     return [c for c in pending_commands(image_id, mac) if c.get("not_before", 0) <= now]
 
 
+# comandos cujo ack marca "a contagem de editores recomeçou aqui"
+RESET_EDITORES = ("resetcontaeditores", "precontest")
+
+
 def ack(image_id: str, mac: str, cid: str, result: dict) -> bool:
-    q = machine_dir(image_id, mac) / "queue"
-    found = False
+    d = machine_dir(image_id, mac)
+    q = d / "queue"
+    found, comando = False, None
     for f in list(q.glob(f"*-{cid}.json")) if q.is_dir() else []:
+        # o nome do comando só existe no arquivo da fila: ler ANTES de apagar,
+        # senão o acks.log diz que "algo" foi confirmado sem dizer o quê
+        entry = fsdb.read_json(f, {}) or {}
+        comando = comando or entry.get("command")
         f.unlink(missing_ok=True)
         found = True
-    line = json.dumps(
-        {"id": cid, "mac": mac, "at": time.time(), **result}, ensure_ascii=False
-    )
+    linha = {"id": cid, "mac": mac, "at": time.time(), **result}
+    if comando:
+        linha["command"] = comando
     from .logcap import append_capped
 
-    append_capped(machine_dir(image_id, mac) / "acks.log", line)
+    append_capped(d / "acks.log", json.dumps(linha, ensure_ascii=False))
+    if comando in RESET_EDITORES and str(result.get("status", "done")) not in ("error", "failed"):
+        # quem lê `editors_time` precisa saber desde quando ele conta
+        with fsdb.locked(d):
+            info = fsdb.read_json(d / "machine.json", {}) or {}
+            info["editors_reset_at"] = time.time()
+            fsdb.write_json(d / "machine.json", info)
     return found
 
 
