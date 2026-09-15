@@ -136,10 +136,16 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
     variável de laço que `nb_fatal_screen` usava para o tempo de espera, e o
     resultado era `sleep RAM` — a tela sumia antes de alguém ler. Há teste.
 
-17. **O alerta de dispositivo fica até alguém dispensar.** Não some quando o
-    pendrive é removido, e a chave de máquina **não** dispensa alerta —
-    adulterar o agente não pode apagar o rastro. Está em
-    `services/alerts.py`, com teste.
+17. **O alerta de dispositivo fica até alguém dispensar — e é de MUDANÇA de
+    estado.** Não some quando o pendrive é removido, e a chave de máquina
+    **não** dispensa alerta — adulterar o agente não pode apagar o rastro.
+    Mas o que já estava conectado no boot não alarma (o agente descarta a
+    fila do coldplug ao subir; não há mais "varredura de presente no boot"),
+    a regra de udev só olha nós com `ID_FS_USAGE` (no nó do disco inteiro a
+    label `NB3CFG` da partição ainda não estava no udev durante o boot — o
+    pendrive de boot alarmava a cada ligada, e a faixa virou ruído na
+    Maratona 2026), e alerta igual ainda aberto não repete (`repeated`).
+    Está em `services/alerts.py`, com teste.
 
 18. **O código de convite nunca é gravado dentro da site-image.** Ele é a
     credencial do console de sub-admin; se ficasse no `image.json`, quem

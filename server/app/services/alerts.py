@@ -51,8 +51,19 @@ def open_alerts(image_id: str, mac: str) -> list[dict]:
     return fsdb.read_json(_path(image_id, mac), []) or []
 
 
+def _mesmo(a: dict, b: dict) -> bool:
+    return all(a.get(k) == b.get(k) for k in ("kind", "detail", "vendor"))
+
+
 def raise_alert(image_id: str, mac: str, kind: str, detail: str = "", extra: dict | None = None) -> dict:
-    """Registra um alerta novo. Devolve o alerta criado."""
+    """Registra um alerta novo. Devolve o alerta criado.
+
+    Um alerta IGUAL (kind, detail, vendor) ainda aberto na mesma máquina não
+    é repetido: devolve o que já existe, com `repeated: True` (só na
+    resposta; nada é gravado). O alerta é um estado que espera ação humana —
+    o mesmo pendrive reconectado, ou um celular que renegocia o MTP a cada
+    minuto, não é uma mudança de estado nova enquanto ninguém dispensou o
+    anterior; era assim que a faixa vermelha virava uma parede."""
     kind = str(kind or "usb.other")[:40]
     alerta = {
         "id": secrets.token_hex(6),
@@ -65,6 +76,9 @@ def raise_alert(image_id: str, mac: str, kind: str, detail: str = "", extra: dic
     d = machine_dir(image_id, mac)
     with fsdb.locked(d):
         abertos = fsdb.read_json(d / "alerts.json", []) or []
+        igual = next((a for a in abertos if _mesmo(a, alerta)), None)
+        if igual is not None:
+            return {**igual, "repeated": True}
         abertos.append(alerta)
         fsdb.write_json(d / "alerts.json", abertos[-MAX_ABERTOS:])
     append_capped(

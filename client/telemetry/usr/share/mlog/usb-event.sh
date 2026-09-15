@@ -28,6 +28,9 @@ DETALHE=${4:-}
 # faz, e resolver isso num lugar so.
 case "$TIPO" in
     storage)
+        # a regra ja exclui pela label, e o udev exporta as propriedades do
+        # proprio no para o RUN: esta e a checagem que nao depende de tempo
+        [ "${ID_FS_LABEL:-}" = NB3CFG ] && exit 0
         if [ -b "/dev/$DETALHE" ] &&
             lsblk -no LABEL "/dev/$DETALHE" 2> /dev/null | grep -q '^NB3CFG$'; then
             exit 0

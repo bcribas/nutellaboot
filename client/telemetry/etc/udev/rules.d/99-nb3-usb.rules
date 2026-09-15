@@ -10,13 +10,21 @@
 
 # --- armazenamento (pendrive, HD externo, leitor de cartao) ---
 # O proprio pendrive de boot NAO pode disparar o alarme: em muitas salas ele
-# fica espetado o dia todo. A label NB3CFG so existe no no da PARTICAO, entao a
-# checagem de verdade e feita no usb-event.sh, que enxerga as particoes filhas.
+# fica espetado o dia todo.
+#
+# ID_FS_USAGE=="?*": so o no que TEM conteudo sondado (a particao com o
+# sistema de arquivos, ou o disco inteiro quando nao ha tabela de particoes).
+# O no do disco particionado (sdb, sem label) ficava de fora dessa exclusao,
+# e o usb-event.sh perguntava ao lsblk pela label das filhas — que vem do
+# banco do udev, ainda VAZIO naquele instante durante o coldplug do boot.
+# Resultado: alerta a cada ligada com o pendrive de boot espetado. No no da
+# particao o builtin blkid do udev ja rodou antes do RUN, e ID_FS_LABEL e
+# confiavel; o disco inteiro nem gera evento.
 #
 # ID_CDROM!="1": um gravador de DVD USB VAZIO nao e alarme. Poe-se um disco
 # nele e a regra de midia, mais abaixo, dispara.
 ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_CDROM}!="1", \
-    ENV{ID_FS_LABEL}!="NB3CFG", \
+    ENV{ID_FS_USAGE}=="?*", ENV{ID_FS_LABEL}!="NB3CFG", \
     RUN+="/usr/share/mlog/usb-event.sh storage $env{ID_MODEL} $env{ID_VENDOR} $kernel"
 
 # --- disco optico: NAO alarma, de proposito ---

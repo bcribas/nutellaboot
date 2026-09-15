@@ -207,8 +207,10 @@ async def post_event(
         str(body.get("detail", "")),
         {"vendor": str(body.get("vendor", ""))[:120]} if body.get("vendor") else None,
     )
-    publicar_evento(image, "alert.raised", {"mac": mac, **alerta})
-    return {"ok": True, "id": alerta["id"]}
+    # o mesmo dispositivo com alerta ainda aberto não é mudança de estado
+    if not alerta.get("repeated"):
+        publicar_evento(image, "alert.raised", {"mac": mac, **alerta})
+    return {"ok": True, "id": alerta["id"], "repeated": bool(alerta.get("repeated"))}
 
 
 @router.get("/site-images/{image}/alerts")

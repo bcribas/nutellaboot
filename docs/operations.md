@@ -826,9 +826,14 @@ O que é detectado, e como:
 | Celular em modo de transferência (MTP/PTP) | propriedade `ID_MTP_DEVICE` ou interface de câmera |
 | Tethering pelo celular (RNDIS/CDC/NCM) | interface de rede que aparece no barramento USB |
 
-O **pendrive de boot não dispara o alarme** (é reconhecido pela label
-`NB3CFG`), porque em muitas salas ele fica espetado o dia todo. Dispositivo já
-conectado quando a máquina liga também é reportado.
+O alerta é de **mudança de estado**: alguém espetou algo com a máquina já
+de pé. O que já estava conectado quando ela ligou — o pendrive de boot (label
+`NB3CFG`), um leitor de cartão embutido — **não** é reportado; e o mesmo
+dispositivo com alerta ainda aberto (um pendrive tirado e recolocado, um
+celular que renegocia o MTP a cada minuto) não gera outra linha até alguém
+dispensar a primeira. Na Maratona 2026 toda máquina que ficava com o
+pendrive de boot espetado aparecia na faixa a cada boot, e a faixa virou
+ruído — era uma corrida entre a regra de udev e a label da partição.
 
 A detecção é feita por regra de `udev`, não por varredura: o ciclo de
 telemetria é de ~50 segundos e um pendrive espetado por dez segundos passaria

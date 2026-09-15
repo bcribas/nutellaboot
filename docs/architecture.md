@@ -264,7 +264,15 @@ registro. Consequências que caem dela:
 - **a máquina não dispensa o próprio alerta** (a chave de máquina não serve na
   rota de dispensa): adulterar o agente não apaga o rastro;
 - a detecção é por regra de `udev`, não por varredura — o ciclo de telemetria
-  é de ~50 s e um pendrive espetado por dez segundos passaria batido.
+  é de ~50 s e um pendrive espetado por dez segundos passaria batido;
+- é **mudança de estado**: a fila que o agente encontra ao subir (o coldplug
+  do boot reemite `add` para tudo que já estava lá, pendrive de boot
+  inclusive) é descartada com registro no log, e um alerta igual ainda aberto
+  na mesma máquina (`kind`, `detail`, `vendor`) não é repetido — o servidor
+  devolve o existente com `repeated: true` e não emite evento. A regra de
+  udev só olha nós com conteúdo sondado (`ID_FS_USAGE`): no nó do disco
+  inteiro a label da partição ainda não estava no banco do udev durante o
+  boot, e o pendrive de boot alarmava a cada ligada.
 
 O `kind` do alerta não é validado contra uma lista fechada: o cliente pode
 ganhar um detector novo sem esperar uma versão do servidor. A lista conhecida

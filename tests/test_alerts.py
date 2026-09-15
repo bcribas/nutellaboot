@@ -120,8 +120,8 @@ def test_alerta_sobrevive_a_recarga_da_pagina(client, imagem, hm, ha):
 
 
 def test_dispensar_tudo_de_uma_maquina(client, imagem, hm, ha):
-    for _ in range(3):
-        espeta(client, hm)
+    for i in range(3):
+        espeta(client, hm, detail=f"dev{i}")  # dispositivos distintos: o igual não repete
     r = client.post(
         f"/api/v1/site-images/sala1/machines/{MAC}/alerts/dismiss-all", headers=ha
     )
@@ -178,8 +178,8 @@ def test_texto_do_dispositivo_e_limitado(client, imagem, hm, ha):
 
 
 def test_muitos_alertas_nao_crescem_sem_limite(client, imagem, hm, ha):
-    for _ in range(alerts.MAX_ABERTOS + 20):
-        espeta(client, hm)
+    for i in range(alerts.MAX_ABERTOS + 20):
+        espeta(client, hm, detail=f"dev{i}")  # dispositivos distintos: o igual não repete
     assert len(alerts.open_alerts("sala1", MAC)) == alerts.MAX_ABERTOS
 
 
@@ -209,6 +209,12 @@ def test_regra_udev_ignora_o_pendrive_de_boot():
     disparasse o alarme, ninguém olharia mais para a faixa vermelha."""
     regra = (CLIENTE / "etc/udev/rules.d/99-nb3-usb.rules").read_text()
     assert 'ENV{ID_FS_LABEL}!="NB3CFG"' in regra
+    # só o nó com conteúdo sondado: no disco inteiro (sem label) a exclusão
+    # não vale e a label das filhas ainda não está no banco do udev durante o
+    # coldplug — era daí que vinha o alerta a cada boot
+    linha = next(l for l in regra.splitlines() if "usb-event.sh storage" in l or 'SUBSYSTEM=="block"' in l)
+    bloco = regra[regra.index('SUBSYSTEM=="block"') : regra.index("usb-event.sh storage")]
+    assert 'ENV{ID_FS_USAGE}=="?*"' in bloco
 
 
 def test_regra_udev_cobre_pendrive_celular_e_tethering():
@@ -244,101 +250,44 @@ def test_agente_monta_o_json_com_escape():
 
 # --- o que é alerta e o que não é ---------------------------------------------
 #
-# "Máquinas com CDROM e/ou FLOPPY não precisam alertar, só se colocarem um
-# cdrom ou pendrive ou celular na máquina." O critério da varredura de boot era
-# só `removable == 1`, e isso inclui leitor de CD e drive de disquete, vazios,
-# em qualquer barramento: toda máquina com um deles alarmava "PENDRIVE
-# CONECTADO" a cada boot — e o alerta fica na tela até um fiscal dispensar.
+# Reclamação da sala: toda máquina que ficava com o pendrive de boot espetado
+# aparecia na faixa vermelha. Alerta é MUDANÇA de estado — alguém espetou algo
+# durante a prova. O que já estava conectado quando a máquina ligou (o
+# pendrive de boot, o leitor de cartão embutido) não é.
 
 
-def varredura(tmp_path, discos):
-    """Roda a varredura de boot do agente de verdade contra um /sys de mentira.
+def _funcao_do_agente(nome: str) -> str:
+    texto = (CLIENTE / "usr/share/mlog/agent.sh").read_text()
+    inicio = texto.index(f"{nome}() {{")
+    fim = texto.index("\n}\n", inicio) + 3
+    return texto[inicio:fim]
 
-    `discos` é {nome: {"removable": "1", "size": "0", "usb": True, ...}}.
-    """
+
+def test_o_que_ja_estava_conectado_no_boot_nao_alerta(tmp_path):
+    """O udev reemite `add` para tudo que está presente (coldplug) antes de o
+    agente existir; a fila que o agente encontra ao subir é estado, não
+    mudança, e é descartada — com registro no log da máquina."""
     import subprocess
 
-    sysblock = tmp_path / "sys" / "block"
-    devices = tmp_path / "devices"
-    fila = tmp_path / "fila"
-    fila.mkdir(parents=True)
-    for nome, d in discos.items():
-        # o caminho real é o que diz se está pendurado no USB
-        real = devices / ("pci0000:00/usb1/1-1" if d.get("usb") else "pci0000:00/ata1") / nome
-        real.mkdir(parents=True)
-        (real / "removable").write_text(d.get("removable", "1") + "\n")
-        (real / "size").write_text(d.get("size", "0") + "\n")
-        (real / "device").mkdir()
-        (real / "device" / "model").write_text(d.get("model", nome) + "\n")
-        sysblock.mkdir(parents=True, exist_ok=True)
-        (sysblock / nome).symlink_to(real)
-
-    fake = tmp_path / "bin"
-    fake.mkdir()
-    (fake / "lsblk").write_text(
-        "#!/bin/sh\n"
-        # só o pendrive de boot tem a label
-        'case "$*" in *bootpen*) echo NB3CFG ;; *) echo ;; esac\n'
-    )
-    (fake / "lsblk").chmod(0o755)
-
-    corpo = f"""
-        USB_FILA="{fila}"
-        {_trecho_varredura()}
-    """
-    r = subprocess.run(
-        ["bash", "-c", corpo],
-        capture_output=True,
-        text=True,
-        env={"PATH": f"{fake}:/usr/bin:/bin", "SYSBLOCK": str(sysblock)},
-    )
+    fila = tmp_path / "usb-events"
+    fila.mkdir()
+    (fila / "100-1").write_text("kind=usb.storage\nvendor=SanDisk Ultra\ndetail=sdb1\n")
+    (fila / "101-2").write_text("kind=usb.phone\nvendor=Samsung\ndetail=mtp\n")
+    corpo = f'USB_FILA="{fila}"\nlog() {{ echo "LOG: $*"; }}\n{_funcao_do_agente("usb_descarta_estado_inicial")}\nusb_descarta_estado_inicial\n'
+    r = subprocess.run(["bash", "-c", corpo], capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"})
     assert r.returncode == 0, r.stderr
-    return {p.name: p.read_text() for p in fila.iterdir()}
+    assert list(fila.iterdir()) == []
+    assert "SanDisk Ultra" in r.stdout and "sem alerta" in r.stdout
 
 
-def _trecho_varredura() -> str:
-    """O laço de varredura do agente, com /sys/block parametrizado."""
-    texto = (CLIENTE / "usr/share/mlog/agent.sh").read_text()
-    inicio = texto.index("    for dev in /sys/block/*/removable; do")
-    fim = texto.index("\n    done\n", inicio) + len("\n    done\n")
-    return texto[inicio:fim].replace("/sys/block", '$SYSBLOCK')
-
-
-def test_leitor_de_cd_vazio_nao_alerta(tmp_path):
-    """Ter leitor de CD não é evento: a maioria das máquinas de laboratório
-    tem um, e ele nasce `removable=1`."""
-    assert varredura(tmp_path, {"sr0": {"size": "0", "model": "DVD-RAM GH24"}}) == {}
-
-
-def test_disco_no_leitor_tambem_nao_alerta(tmp_path):
-    """Nem com mídia dentro.
-
-    Houve uma versão que alarmava quando o sysfs reportava tamanho — leitor com
-    disco. Saiu por decisão de operação: aparecia demais. Some o aviso E o
-    rastro, e é isso que este teste prende, para que voltar atrás seja uma
-    escolha e não um acidente."""
-    assert varredura(tmp_path, {"sr0": {"size": "1400000", "model": "DVD-RAM GH24"}}) == {}
-
-
-def test_drive_de_disquete_nunca_alerta(tmp_path):
-    """O kernel não emite troca de mídia para fd0 e o tamanho é fixo: não há o
-    que detectar, então nem o drive vazio nem com disquete geram ruído."""
-    assert varredura(tmp_path, {"fd0": {"size": "2880"}}) == {}
-
-
-def test_pendrive_no_boot_alerta(tmp_path):
-    fila = varredura(tmp_path, {"sdb": {"usb": True, "model": "SanDisk Ultra"}})
-    assert "kind=usb.storage" in fila["boot-sdb"]
-    assert "SanDisk Ultra" in fila["boot-sdb"]
-
-
-def test_pendrive_de_boot_nao_alerta(tmp_path):
-    assert varredura(tmp_path, {"bootpen": {"usb": True}}) == {}
-
-
-def test_disco_removivel_interno_nao_alerta(tmp_path):
-    """Gaveta hot-swap SATA é hardware da sala, não algo que alguém espetou."""
-    assert varredura(tmp_path, {"sdc": {"usb": False, "model": "ST1000"}}) == {}
+def test_a_varredura_de_boot_sumiu_de_proposito():
+    """Ela alarmava "presente no boot" para o que não é mudança nenhuma —
+    inclusive leitor de cartão embutido e o próprio pendrive de boot quando o
+    lsblk ainda não sabia a label."""
+    agente = (CLIENTE / "usr/share/mlog/agent.sh").read_text()
+    assert "/sys/block/*/removable" not in agente
+    assert "present at boot" not in agente
+    assert "usb_descarta_estado_inicial" in agente[agente.index("usb_loop() {") :]
 
 
 # --- o udev ---
@@ -364,6 +313,8 @@ def test_o_script_do_udev_descarta_o_pendrive_de_boot():
     inteiro (sem label) escapava e alarmava a cada boot."""
     script = (CLIENTE / "usr/share/mlog/usb-event.sh").read_text()
     assert "NB3CFG" in script and "lsblk" in script
+    # e a checagem sem corrida: a label do próprio nó, exportada pelo udev
+    assert '"${ID_FS_LABEL:-}" = NB3CFG' in script
 
 
 def test_o_tipo_de_cd_nao_e_usb():
@@ -371,3 +322,34 @@ def test_o_tipo_de_cd_nao_e_usb():
     tela dizer que alguém espetou um pendrive."""
     script = (CLIENTE / "usr/share/mlog/usb-event.sh").read_text()
     assert "media.cd" in script
+
+
+# --- o mesmo dispositivo não vira uma parede de alertas -----------------------
+
+
+def _espeta(client, hm, **kw):
+    r = client.post(f"/api/v1/site-images/sala1/machines/{MAC}/events", json={"kind": "usb.storage", **kw}, headers=hm)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_o_mesmo_dispositivo_com_alerta_aberto_nao_repete(client, imagem, hm, ha, monkeypatch):
+    from server.app.services import webhook_push
+
+    vistos = []
+    monkeypatch.setattr(webhook_push, "emit", lambda image, event, data: vistos.append(event))
+    a = _espeta(client, hm, vendor="Kingston DT", detail="sdb1")
+    b = _espeta(client, hm, vendor="Kingston DT", detail="sdb1")
+    assert b["id"] == a["id"] and b["repeated"] is True and a["repeated"] is False
+    assert vistos.count("alert.raised") == 1
+    abertos = client.get("/api/v1/site-images/sala1/alerts", headers=ha).json()["alerts"]
+    assert len(abertos) == 1
+
+
+def test_dispositivo_diferente_ou_depois_de_dispensar_alerta_de_novo(client, imagem, hm, ha):
+    a = _espeta(client, hm, vendor="Kingston DT", detail="sdb1")
+    _espeta(client, hm, vendor="Samsung", detail="mtp", kind="usb.phone")
+    assert len(client.get("/api/v1/site-images/sala1/alerts", headers=ha).json()["alerts"]) == 2
+    client.post(f"/api/v1/site-images/sala1/machines/{MAC}/alerts/{a['id']}/dismiss", headers=ha)
+    c = _espeta(client, hm, vendor="Kingston DT", detail="sdb1")
+    assert c["id"] != a["id"] and c["repeated"] is False

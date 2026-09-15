@@ -386,50 +386,24 @@ send_usb_event() {
         > /dev/null
 }
 
-usb_loop() {
+# O que ja estava conectado quando o agente sobe nao e alerta. O alerta e
+# de MUDANCA de estado — alguem espetou algo durante a prova —, e o que a fila
+# tem antes do agente existir e o coldplug do boot: o udev reemite `add` para
+# todo dispositivo presente, inclusive o pendrive de boot e o leitor de
+# cartao da maquina. Uma varredura de "presente no boot" alarmava isso em
+# toda sala com pendrive espetado o dia todo, e o fiscal parava de olhar a
+# faixa vermelha.
+usb_descarta_estado_inicial() {
     mkdir -p "$USB_FILA"
-    # O que já estava conectado quando a máquina ligou: o udev não dispara
-    # "add" para isso, e ligar com o pendrive espetado é justamente o jeito
-    # mais fácil de escapar da regra.
-    #
-    # O critério era só `removable == 1`, e isso inclui LEITOR DE CD e DRIVE DE
-    # DISQUETE, vazios, em qualquer barramento: toda máquina que tem um deles
-    # alarmava "PENDRIVE CONECTADO" a cada boot, e o alerta fica na tela até um
-    # fiscal dispensar. Ter o drive não é o problema — pôr mídia nele é.
-    for dev in /sys/block/*/removable; do
-        [ -r "$dev" ] || continue
-        [ "$(cat "$dev")" = 1 ] || continue
-        nome=$(basename "$(dirname "$dev")")
-        caminho=$(readlink -f "/sys/block/$nome" 2> /dev/null || echo "")
-        modelo=$(cat "/sys/block/$nome/device/model" 2> /dev/null || echo "$nome")
-
-        case "$nome" in
-            sr* | scd*)
-                # disco óptico não alarma, nem vazio nem com mídia dentro:
-                # decisão de operação, tomada depois de o alerta aparecer em
-                # toda máquina de laboratório que tem leitor. Some o aviso E o
-                # rastro — um CD posto durante a prova deixa de virar registro.
-                continue
-                ;;
-            fd*)
-                # disquete não gera evento de troca de mídia no Linux e o
-                # tamanho é fixo com ou sem disco: não há o que detectar
-                continue
-                ;;
-        esac
-
-        # o resto só interessa se estiver pendurado no barramento USB
-        case "$caminho" in
-            */usb*) ;;
-            *) continue ;;
-        esac
-        # o pendrive de boot é o único removível esperado
-        if ! lsblk -no LABEL "/dev/$nome" 2> /dev/null | grep -q NB3CFG; then
-            printf 'kind=usb.storage\nvendor=%s\ndetail=present at boot\n' \
-                "$modelo" > "$USB_FILA/boot-$nome"
-        fi
+    for arq in "$USB_FILA"/*; do
+        [ -f "$arq" ] || continue
+        log "USB ja conectado no boot, sem alerta: $(sed -n 's/^vendor=//p' "$arq" | sed -n 1p)"
+        rm -f "$arq"
     done
+}
 
+usb_loop() {
+    usb_descarta_estado_inicial
     while :; do
         for arq in "$USB_FILA"/*; do
             [ -f "$arq" ] || continue

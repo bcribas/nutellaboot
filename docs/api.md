@@ -498,7 +498,9 @@ Sobrevive a reboot da máquina, a recarga da página e a reinício do servidor
 (está em disco). Dispensar grava quem foi e quando, no histórico.
 
 A máquina **não** dispensa o próprio alerta: adulterar o agente não apaga o
-rastro. O evento `alert.raised` também vai por webhook, para o MOJ.
+rastro. O evento `alert.raised` também vai por webhook, para o MOJ — só para
+alerta novo: um evento igual (`kind`, `detail`, `vendor`) a um alerta ainda
+aberto da máquina devolve o existente com `repeated: true` e não emite nada.
 
 ### Frota: todas as sedes de uma vez
 
