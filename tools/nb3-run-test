@@ -8,6 +8,10 @@
 # máquina hospedeira é sempre 10.0.2.2, e o nome do servidor de teste resolve
 # só em IPv6 — por isso fixamos o nome no /etc/hosts do initrd (NB_HOSTS) em
 # vez de mexer em DNS. O certificado continua sendo validado normalmente.
+#
+# --netboot troca o pendrive pelo boot pela rede de uma sede com iPXE: BIOS com
+# a ROM iPXE do qemu, TFTP do próprio SLIRP servindo kernel, initrd e o
+# nutellaboot.conf como segundo initrd com nome.
 
 set -euo pipefail
 
@@ -20,6 +24,7 @@ MEM=${NB3_TEST_MEM:-8G}
 TAM_DISCO=${NB3_TEST_DISK_SIZE:-40G}
 GRAFICO=1
 SO_GERAR=0
+REDE=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -28,8 +33,9 @@ while [ $# -gt 0 ]; do
         --headless) GRAFICO=0; shift ;;
         --build-only) SO_GERAR=1; shift ;;
         --fresh-disk) rm -f "$DISCO"; shift ;;
+        --netboot) REDE=1; shift ;;
         -h | --help)
-            sed -n '2,12p' "$0"
+            sed -n '2,14p' "$0"
             exit 0
             ;;
         *) echo "opção desconhecida: $1" >&2; exit 1 ;;
@@ -38,21 +44,44 @@ done
 
 NOME_HOST=$(echo "$SERVIDOR" | sed -e 's,^https\?://,,' -e 's,/.*,,' -e 's,:.*,,')
 
-echo ">> gerando o pendrive de teste (sem root)"
 # a chave de boot da imagem local: sem ela o initrd para na tela NO CONF
 # (é a partição lida, mas o conf sem NB_BOOT_KEY), que é o certo em campo e
 # inútil aqui
 CHAVE=""
 [ -f "$REPO/data/site-images/$IMAGEM/boot.key" ] &&
     CHAVE=$(tr -d '\n' < "$REPO/data/site-images/$IMAGEM/boot.key")
-"$REPO/tools/nb3-genusb" \
-    --output "$USB" \
-    --imageroot "$IMAGEM" \
-    --server "$SERVIDOR" \
-    --hosts "$NOME_HOST=10.0.2.2" \
-    ${CHAVE:+--boot-key "$CHAVE"} \
-    > /dev/null
-echo "   $USB"
+
+if [ "$REDE" = 1 ]; then
+    echo ">> preparando o boot pela rede (TFTP do qemu)"
+    TFTP=$REPO/data/netboot-test
+    mkdir -p "$TFTP"
+    ln -sf "$REPO/client/build/vmlinuz" "$REPO/client/build/initrd.img" "$TFTP/"
+    # o mesmo conf do pendrive de teste, que aqui viaja dentro do initrd
+    {
+        echo "set IMAGEROOT=\"$IMAGEM\""
+        echo "set NB_SERVER=\"$SERVIDOR\""
+        echo "set NB_HOSTS=\"$NOME_HOST 10.0.2.2\""
+        [ -z "$CHAVE" ] || echo "set NB_BOOT_KEY=\"$CHAVE\""
+    } > "$TFTP/nutellaboot.conf"
+    cat > "$TFTP/boot.ipxe" << 'EOF'
+#!ipxe
+kernel vmlinuz boot=nutellaboot noresume pcie_aspm=off net.ifnames=0 persistenthome=y
+initrd initrd.img
+initrd nutellaboot.conf /nutellaboot.conf
+boot
+EOF
+    echo "   $TFTP"
+else
+    echo ">> gerando o pendrive de teste (sem root)"
+    "$REPO/tools/nb3-genusb" \
+        --output "$USB" \
+        --imageroot "$IMAGEM" \
+        --server "$SERVIDOR" \
+        --hosts "$NOME_HOST=10.0.2.2" \
+        ${CHAVE:+--boot-key "$CHAVE"} \
+        > /dev/null
+    echo "   $USB"
+fi
 
 if [ ! -f "$DISCO" ]; then
     echo ">> criando o 'disco da máquina' ($TAM_DISCO, esparso)"
@@ -69,20 +98,32 @@ fi
 
 [ "$SO_GERAR" = 1 ] && exit 0
 
-OVMF=$(ls /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE.fd 2> /dev/null | head -n1)
-VARS=$(ls /usr/share/edk2/ovmf/OVMF_VARS.fd /usr/share/OVMF/OVMF_VARS.fd 2> /dev/null | head -n1)
-[ -n "$OVMF" ] || { echo "OVMF não encontrado (instale edk2-ovmf)" >&2; exit 1; }
-cp "$VARS" "$REPO/data/OVMF_VARS.test.fd"
+if [ "$REDE" = 1 ]; then
+    # BIOS de propósito: o PXE do OVMF é o da própria UEFI, que baixa o
+    # boot.ipxe como se fosse executável EFI e o recusa. UEFI com iPXE exige
+    # encadear um snponly.efi (docs/testing.md).
+    ARGS=(
+        -m "$MEM" -smp 4
+        -drive "file=$DISCO,format=raw,if=ide"
+        -netdev "user,id=n0,tftp=$TFTP,bootfile=boot.ipxe" -device virtio-net-pci,netdev=n0
+        -boot order=n
+    )
+else
+    OVMF=$(ls /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE.fd 2> /dev/null | head -n1)
+    VARS=$(ls /usr/share/edk2/ovmf/OVMF_VARS.fd /usr/share/OVMF/OVMF_VARS.fd 2> /dev/null | head -n1)
+    [ -n "$OVMF" ] || { echo "OVMF não encontrado (instale edk2-ovmf)" >&2; exit 1; }
+    cp "$VARS" "$REPO/data/OVMF_VARS.test.fd"
 
-ARGS=(
-    -m "$MEM" -smp 4
-    -drive "if=pflash,format=raw,readonly=on,file=$OVMF"
-    -drive "if=pflash,format=raw,file=$REPO/data/OVMF_VARS.test.fd"
-    -drive "file=$DISCO,format=raw,if=ide"
-    -drive "file=$USB,format=raw,if=ide"
-    -netdev user,id=n0 -device virtio-net-pci,netdev=n0
-    -boot menu=on
-)
+    ARGS=(
+        -m "$MEM" -smp 4
+        -drive "if=pflash,format=raw,readonly=on,file=$OVMF"
+        -drive "if=pflash,format=raw,file=$REPO/data/OVMF_VARS.test.fd"
+        -drive "file=$DISCO,format=raw,if=ide"
+        -drive "file=$USB,format=raw,if=ide"
+        -netdev user,id=n0 -device virtio-net-pci,netdev=n0
+        -boot menu=on
+    )
+fi
 [ -e /dev/kvm ] && ARGS+=(-enable-kvm -cpu host)
 [ "$GRAFICO" = 1 ] && ARGS+=(-vga virtio) || ARGS+=(-display none)
 

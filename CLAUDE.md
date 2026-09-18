@@ -50,7 +50,11 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
 
 9. **O pendrive é liberado cedo.** O initrd copia a configuração para a RAM e
    desmonta antes de qualquer coisa de rede, avisando na tela. Não adicione
-   leituras do pendrive depois desse ponto.
+   leituras do pendrive depois desse ponto. No boot pela rede não há pendrive:
+   o carregador (iPXE) põe o conf dentro do initrd, em `/nutellaboot.conf`; o
+   initrd não procura a NB3CFG e marca `NB_NETBOOT`, que faz o
+   `25-usbupdate.sh` avisar em vez de regravar. Quem liga `NB_NETBOOT` é o
+   arquivo, nunca a cmdline. Há teste.
 
 10. **`/api/v1/images/...` continua respondendo, para sempre.** O agente de
     telemetria (`client/telemetry/usr/share/mlog/agent.sh`) monta
@@ -342,6 +346,14 @@ O ambiente de teste tem um nginx externo que faz proxy de
   o MAC no fim); quem lê por posição não pode assumir três. Campos novos de
   telemetria (`t_agent`, PSI, `hwinfo.mac`…) são OPCIONAIS nos dois lados: a
   frota é heterogênea e um agente antigo continua válido (invariante 10).
+- **O `/run` do initrd vai inteiro para o sistema montado** (`mount -n -o
+  move /run ${rootmnt}/run` no `/init` do initramfs-tools). A cópia do
+  `nutellaboot.conf` em `/run/nutellaboot` chegava ao sistema da prova com a
+  chave de boot em 644, ao lado do `/etc/.nb3` em 600 que existe justamente
+  para ninguém lê-la; o `wifi.conf` ia junto com as senhas. O initrd apaga o
+  conf assim que o lê e o stuff apaga os dois no fim (`nb3_limpa_run`, que
+  cobre initrd antigo). Arquivo com segredo no initrd: `/tmp` ou apagar antes
+  do fim, nunca largar em `/run`. Há teste.
 - **`truncated` das séries vem de `samples.meta.json`, não do tamanho do
   arquivo.** O `append_capped` corta para a METADE do teto, então um limiar
   de "90% do teto" dizia `false` por dias com histórico comprovadamente

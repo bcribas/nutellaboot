@@ -68,6 +68,11 @@ São três camadas:
    └────────────────────────────────────────────────────────────────┘
 ```
 
+Sala sem pendrive boota pela rede: o iPXE da sede carrega o mesmo kernel e o
+mesmo initrd e põe o `nutellaboot.conf` dentro deste, em `/nutellaboot.conf`. O
+passo 1 usa esse arquivo e não procura a partição (`docs/boot-flow.md`, *Boot
+pela rede*).
+
 ## O banco-filesystem
 
 Não há banco de dados. O estado é um diretório, `data/`, e cada arquivo tem

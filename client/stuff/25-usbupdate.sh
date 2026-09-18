@@ -144,6 +144,15 @@ nb_usb_update() {
     nb_usb_server_build || return 0
     [ "$NB_USB_BUILD" = "$NB_INITRD_BUILD" ] && return 0
 
+    # Boot pela rede (o initrd achou o conf entregue pelo carregador): não há
+    # pendrive nenhum. Kernel e initrd vêm do servidor de boot da sede, e só
+    # quem cuida dele pode trocá-los — seguir daqui procuraria a NB3CFG e
+    # pararia a sala inteira na tela OLD USB.
+    if [ -n "${NB_NETBOOT:-}" ]; then
+        nb_warn "the network boot files are out of date (${NB_INITRD_BUILD} -> ${NB_USB_BUILD}): copy the new vmlinuz and initrd.img to the boot server"
+        return 0
+    fi
+
     nb_warn "this USB drive is out of date (${NB_INITRD_BUILD} -> ${NB_USB_BUILD})"
 
     # Uma tentativa de ESCRITA por versão. O marcador vive no disco local, que

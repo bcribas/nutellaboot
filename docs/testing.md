@@ -19,7 +19,7 @@ São 481 testes em cerca de 36 s. O que cada arquivo cobre:
 | `test_auth.py` | as classes de credencial (admin, imagem, serviço, máquina) e seus limites |
 | `test_health.py` | o endpoint de saúde |
 | `test_boot_endpoints.py` | manifest com todos os seeders vivos e o CDN por último, TTL de seeder, geração do stuff, chave de boot, criação e criação em massa de imagens |
-| `test_bootstrap_shell.py` | a lógica shell do initrd: precedência de configuração, geração do `wpa_supplicant.conf`, pin de `/etc/hosts`. Inclui três testes de regressão que **falham se alguém**: usar `read` interativo no caminho de boot, desligar a verificação de certificado, ou redefinir as funções de rede dentro do stuff |
+| `test_bootstrap_shell.py` | a lógica shell do initrd: precedência de configuração, o conf entregue pelo carregador de rede (netboot) e que ele não chega ao `/run` do sistema montado, geração do `wpa_supplicant.conf`, pin de `/etc/hosts`. Inclui três testes de regressão que **falham se alguém**: usar `read` interativo no caminho de boot, desligar a verificação de certificado, ou redefinir as funções de rede dentro do stuff |
 | `test_config.py` | validação do formulário, campos bloqueados, senha guardada só como hash, upload de wallpaper |
 | `test_commands.py` | ciclo de vida do comando (enfileirar, buscar, confirmar), lista de comandos permitidos, bloqueio de tela, teto de tamanho dos logs |
 | `test_longpoll_async.py` | a latência real do long-poll no mesmo event loop: bloqueio chega em menos de 1,5 s, e 50 máquinas simultâneas em menos de 3 s |
@@ -150,6 +150,45 @@ esparso se ainda não existir, e sobe o qemu em UEFI com os dois discos. Opçõe
 | `--fresh-disk` | descarta o disco e começa do zero |
 | `--build-only` | só gera o pendrive, não sobe a VM |
 | `--headless` | sem janela gráfica |
+| `--netboot` | sem pendrive: boot pela rede, como numa sede com iPXE (abaixo) |
+
+### Boot pela rede (iPXE)
+
+O `--netboot` troca o pendrive pelo que uma sede com PXE faz: o qemu sobe em
+BIOS, a ROM iPXE da placa de rede pega o DHCP do próprio SLIRP e baixa por TFTP
+o `data/netboot-test/boot.ipxe`, que carrega `vmlinuz`, `initrd.img` e o
+`nutellaboot.conf` como segundo initrd com nome. Na tela deve aparecer
+`configuration read from the network boot loader`, e nada de "PODE RETIRAR O
+PENDRIVE".
+
+Em UEFI o PXE é o do OVMF, que não roda script iPXE — ele baixa o `boot.ipxe`
+como se fosse um executável EFI e o recusa. Para testar esse caminho, encadeie
+o iPXE: sirva o `snponly.efi` oficial (<https://boot.ipxe.org/x86_64-efi/snponly.efi>)
+como arquivo de boot do SLIRP (`bootfile=snponly.efi`) e o script como
+`autoexec.ipxe`, com `dhcp` na primeira linha e URLs absolutas
+(`tftp://10.0.2.2/vmlinuz`). O iPXE busca o `autoexec.ipxe` no mesmo servidor
+TFTP de onde foi carregado. O kernel recebe os initrds pelo LoadFile2
+(`efi: … INITRD=` no dmesg), sem `initrd=` na linha de comando.
+
+### Testar uma mudança no bootstrap sem reconstruir o initrd
+
+O `nb3-build-initrd` precisa de root. Para testar uma mudança em
+`client/initramfs-tools/scripts/nutellaboot` antes disso, ponha um cpio com o
+arquivo novo **depois** do initrd atual: o kernel desempacota os arquivos em
+ordem, e o que vem depois sobrescreve.
+
+```bash
+mkdir -p /tmp/ov/scripts && cp client/initramfs-tools/scripts/nutellaboot /tmp/ov/scripts/
+(cd /tmp/ov && find . -mindepth 1 | cpio -o -H newc -R 0:0) > /tmp/overlay.cpio
+```
+
+No iPXE, é uma linha `initrd overlay.cpio` depois do `initrd initrd.img`. Para
+o pendrive, concatene (`cat client/build/initrd.img /tmp/overlay.cpio`, com o
+primeiro alinhado em 4 bytes) e passe o resultado ao `nb3-genusb --initrd`. Com
+um `etc/nutellaboot-build` diferente no mesmo cpio, a máquina se vê
+desatualizada — é como se testa o `25-usbupdate.sh` de ponta a ponta. Um
+console serial (`console=tty0 console=ttyS0,115200` na linha do kernel e
+`-serial file:boot.log` no qemu) deixa o boot inteiro num arquivo de texto.
 
 ### O detalhe do `10.0.2.2`
 

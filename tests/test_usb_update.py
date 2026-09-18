@@ -265,6 +265,34 @@ def test_a_escotilha_da_linha_de_comando(cenario):
     assert cenario.pendrive.joinpath("vmlinuz").read_bytes() == b"kernel velho"
 
 
+def test_boot_pela_rede_avisa_e_nao_toca_em_pendrive(cenario):
+    """Kernel e initrd vieram do servidor de boot da sede, não de um pendrive:
+    a versão velha é dele, e só quem cuida dele pode trocá-la. Um pendrive
+    NB3CFG espetado por acaso não é o de onde a máquina bootou — regravá-lo
+    com base no initrd da rede seria mexer no que não é nosso."""
+    r = roda(cenario, extra="NB_NETBOOT=1")
+    assert "SAIU=0" in r.stdout, r.stdout
+    assert "network boot files are out of date" in r.stdout
+    assert cenario.pendrive.joinpath("vmlinuz").read_bytes() == b"kernel velho"
+    assert not cenario.acoes.exists(), "reiniciou uma máquina que boota pela rede"
+
+
+def test_boot_pela_rede_sem_pendrive_nao_para_na_tela_old_usb(cenario):
+    """O caso normal da sala que boota por iPXE: pendrive nenhum. Seguir o
+    caminho do pendrive pararia TODAS as máquinas na tela OLD USB."""
+    (cenario.tmp / "plugado").unlink()
+    r = roda(cenario, extra="NB_NETBOOT=1")
+    assert "SAIU=0" in r.stdout, r.stdout
+    assert "OLD USB" not in r.stdout
+    assert not cenario.acoes.exists()
+
+
+def test_boot_pela_rede_em_dia_nao_avisa(cenario):
+    r = roda(cenario, build="novo-1", extra="NB_NETBOOT=1")
+    assert "SAIU=0" in r.stdout, r.stdout
+    assert "out of date" not in r.stdout
+
+
 # --- o lado do servidor ---
 
 

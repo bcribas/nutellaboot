@@ -266,6 +266,42 @@ Depois de gravado, o pendrive é uma partição FAT normal: monte em qualquer
 computador e edite `nutellaboot.conf` (sede, chave de boot) e `wifi.conf`
 (redes) com um editor de texto.
 
+#### Sala que boota pela rede (PXE/iPXE)
+
+Sede com DHCP + iPXE não precisa de pendrive. Ela serve três arquivos do
+próprio servidor PXE — `vmlinuz`, `initrd.img` e o `nutellaboot.conf` da sala
+(o mesmo do pendrive) — e o conf entra como **segundo initrd, com nome**:
+
+```
+#!ipxe
+dhcp
+kernel vmlinuz boot=nutellaboot noresume pcie_aspm=off net.ifnames=0 persistenthome=y
+initrd initrd.img
+initrd nutellaboot.conf /nutellaboot.conf
+boot
+```
+
+O kernel e o initrd saem com a chave de boot da sala (a linha `NB_BOOT_KEY` do
+conf):
+
+```bash
+for f in vmlinuz initrd.img; do
+    curl -fO -H "X-NB-Boot-Key: nb3b_..." "$SERVER/boot/v3/26spsp/usbfile/$f"
+done
+```
+
+As opções do menu do pendrive são parâmetros da mesma linha `kernel`:
+`cleanhome=y`, `persistenthome=n` (modo live), `factoryreset=y`. O porquê e o
+que muda no boot estão em `docs/boot-flow.md`, seção *Boot pela rede*; a página
+para as sedes é a de instalação na wiki.
+
+**Reconstruir o initrd deixa essas sedes para trás**: os pendrives se
+atualizam sozinhos, o servidor PXE da sede não. As máquinas continuam bootando
+e avisam no console (`the network boot files are out of date`). Avise as sedes
+de netboot para baixarem os dois arquivos de novo — e, se o **kernel** da camada
+base mudou, antes da prova: com o `vmlinuz` velho o sistema montado fica sem os
+módulos do kernel.
+
 ### 1.6 Publicação de arquivos (files.mdp)
 
 Camadas têm vários GB e imagens de pendrive têm centenas de MB. Servir isso
@@ -1068,6 +1104,15 @@ tools/nb3-qemu-shot maratona2026.img /tmp/tela.png --wait 8
 
 Se o menu do GRUB aparecer no screenshot, o pendrive está bom e o problema é da
 máquina (Secure Boot, ordem de boot, porta USB).
+
+### "NO CONF" numa sala que boota pela rede
+
+O iPXE carregou o kernel e o initrd, mas não o `nutellaboot.conf` com nome. A
+linha tem que ser `initrd nutellaboot.conf /nutellaboot.conf` — sem o segundo
+argumento o kernel recebe texto onde espera um cpio, e o arquivo não aparece.
+O motivo na tela diz `the NB3CFG partition did not show up`: sem o conf, o
+initrd não tem como saber que a máquina não usa pendrive. Se a linha estiver
+certa, o iPXE da sede é antigo demais para dar nome a um initrd; atualize-o.
 
 ### "IMAGEROOT não definido"
 

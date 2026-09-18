@@ -2,7 +2,8 @@
 # NutellaBoot 3 — bootstrap do initrd (selecionado por boot=nutellaboot).
 #
 # Responsabilidades, nesta ordem:
-#   1. ler a configuração da partição do pendrive (label NB3CFG);
+#   1. ler a configuração: a que o carregador de boot da rede entregou dentro
+#      do initrd (netboot) ou a da partição do pendrive (label NB3CFG);
 #   2. subir a rede — WIFI INCLUSIVE, com espera real de associação;
 #   3. acertar o relógio (RTC errado invalida certificado);
 #   4. baixar o stuff do servidor por HTTPS VERIFICADO e executá-lo.
@@ -17,6 +18,10 @@ NB_RUN=${NB_RUN:-/run/nutellaboot}
 # exercitada fora do initramfs (tests/test_bootstrap_shell.py).
 NB_CFGMNT=${NB_CFGMNT:-/mnt/nb3cfg}
 NB_CFG_BYLABEL=${NB_CFG_BYLABEL:-/dev/disk/by-label/NB3CFG}
+# Boot pela rede: o carregador (iPXE, GRUB, PXELINUX) entrega o
+# nutellaboot.conf como um arquivo a mais no initrd — no iPXE,
+# `initrd nutellaboot.conf /nutellaboot.conf`.
+NB_NETCONF=${NB_NETCONF:-/nutellaboot.conf}
 # marcador "o pendrive já pode sair" (o stuff o consulta); parametrizado para
 # o teste do ramo de sucesso da leitura não escrever em /run
 NB_USB_LIVRE_MARK=${NB_USB_LIVRE_MARK:-/run/nutellaboot-usb-livre}
@@ -63,10 +68,11 @@ nb_fatal() {
     panic=60 panic "$*"
 }
 
-# --- 1. configuração vinda do pendrive -------------------------------------
+# --- 1. configuração vinda da rede ou do pendrive --------------------------
 
-# Monta a partição de configuração (FAT, label NB3CFG) e lê os arquivos.
-# Precedência: linha de comando do kernel > pendrive > padrão embutido.
+# Monta a partição de configuração (FAT, label NB3CFG) e lê os arquivos — a
+# menos que o carregador de boot da rede já tenha entregado o conf.
+# Precedência: linha de comando do kernel > conf > padrão embutido.
 # O pendrive só é necessário até aqui: o GRUB já carregou kernel e initrd na
 # memória, e acabamos de copiar a configuração para a RAM. Avisar isso cedo
 # importa de verdade numa sala com dezenas de máquinas — um pendrive por
@@ -98,8 +104,10 @@ nb_conf_value() {
     # menu de boot, sem um segundo arquivo para o operador copiar. O prefixo é
     # OPCIONAL para que pendrive já gravado, no formato antigo, continue
     # bootando.
+    # O `\r` sai junto com as aspas: arquivo salvo no Windows chega com CRLF, e
+    # o `\r` grudado no valor vira IMAGEROOT e chave que o servidor não conhece.
     sed -n "s/^\(set \)\{0,1\}$1=//p" "$NB_RUN/nutellaboot.conf" 2> /dev/null |
-        tr -d "\"'" | sed -n '1p'
+        tr -d "\"'\r" | sed -n '1p'
 }
 
 # Acha a partição de configuração. Primeiro o link que o udev cria a partir do
@@ -116,14 +124,22 @@ nb_cfg_device() {
     blkid -L NB3CFG 2> /dev/null
 }
 
-nb_read_usbconfig() {
-    mkdir -p "$NB_RUN" "$NB_CFGMNT"
-    # a cmdline do GRUB chega como variável de ambiente do init; guardada
-    # antes do source do defaults, que também define NB_SERVER
-    _cmd_server=$NB_SERVER
+# O conf veio com o kernel, pelo carregador de boot da rede, e não há pendrive
+# na sala. Procurar a NB3CFG aqui eram 40 s por máquina e, no fim, a tela NO
+# CONF — foi o que uma sede que boota por iPXE encontrou.
+nb_read_netconfig() {
+    NB_NETBOOT=1
+    if [ -s "$NB_NETCONF" ]; then
+        cp "$NB_NETCONF" "$NB_RUN/nutellaboot.conf"
+        nb_log "configuration read from the network boot loader ($NB_NETCONF)"
+    else
+        _cfg_reason="the nutellaboot.conf loaded over the network is empty"
+    fi
+}
+
+nb_read_usbpartition() {
     _try=0
     _dev=
-    _cfg_reason=
     while :; do
         # dá ao udev a chance de fechar o evento do pendrive; 1 s no máximo
         command -v udevadm > /dev/null 2>&1 && udevadm settle --timeout=1 > /dev/null 2>&1
@@ -150,6 +166,22 @@ nb_read_usbconfig() {
         nb_usb_livre
         [ -f "$NB_RUN/nutellaboot.conf" ] || _cfg_reason="mounted $_dev but nutellaboot.conf is missing"
     fi
+}
+
+nb_read_usbconfig() {
+    mkdir -p "$NB_RUN" "$NB_CFGMNT"
+    # a cmdline do GRUB chega como variável de ambiente do init; guardada
+    # antes do source do defaults, que também define NB_SERVER
+    _cmd_server=$NB_SERVER
+    _cfg_reason=
+    # Quem diz que o boot foi pela rede é o arquivo, nunca a cmdline: é o que
+    # desliga a regravação do pendrive (25-usbupdate.sh).
+    NB_NETBOOT=
+    if [ -e "$NB_NETCONF" ]; then
+        nb_read_netconfig
+    else
+        nb_read_usbpartition
+    fi
     # Sem o arquivo na RAM não há sede, chave nem servidor: parar AQUI, com a
     # causa na tela, em vez de seguir para 10 tentativas de rede contra o
     # servidor padrão e uma tela NO NETWORK que não tem nada a ver.
@@ -158,7 +190,8 @@ nb_read_usbconfig() {
     # shellcheck disable=SC1090
     [ -f "$NB_DEFAULTS_FILE" ] && . "$NB_DEFAULTS_FILE"
 
-    # Precedência: linha de comando do kernel > pendrive > padrão embutido.
+    # Precedência: linha de comando do kernel > conf (da rede ou do pendrive)
+    # > padrão embutido.
     [ -z "$IMAGEROOT" ] && IMAGEROOT=$(nb_conf_value IMAGEROOT)
     # Chave de boot: autentica este pendrive no servidor. Sem ela, o servidor
     # não entrega manifest nem script de boot — e um conf sem ela é um
@@ -180,11 +213,16 @@ nb_read_usbconfig() {
     # (usado no ambiente de teste em qemu, onde o host é 10.0.2.2, e em
     # espelhos locais durante a prova).
     if [ -f "$NB_RUN/nutellaboot.conf" ]; then
-        sed -n 's/^\(set \)\{0,1\}NB_HOSTS=//p' "$NB_RUN/nutellaboot.conf" | tr -d "\"'" |
+        sed -n 's/^\(set \)\{0,1\}NB_HOSTS=//p' "$NB_RUN/nutellaboot.conf" | tr -d "\"'\r" |
             while read -r _name _ip; do
                 [ -n "$_name" ] && [ -n "$_ip" ] && echo "$_ip $_name" >> "$NB_HOSTS_FILE"
             done
     fi
+    # Tudo lido; a chave segue na variável. O /run do initrd é MOVIDO para o
+    # sistema montado (`mount -o move` no /init do initramfs-tools), e esta
+    # cópia ficaria legível por qualquer usuário na máquina de prova — a mesma
+    # chave que o /etc/.nb3 guarda em 600.
+    rm -f "$NB_RUN/nutellaboot.conf"
     [ -z "$IMAGEROOT" ] && nb_fatal_screen "NO IMAGE" \
         "!This USB drive does not say which image to boot." \
         "" \
@@ -790,25 +828,28 @@ nb_no_server_screen() {
 # A partição do pendrive não foi lida: sem sede, chave e servidor não há o que
 # tentar na rede. Parar aqui com a causa é o que evita a tela NO NETWORK que
 # mandou a sala procurar cabo quando o problema era um disco SATA morrendo.
+# O passo 4 é para quem boota pela rede e esqueceu o conf no carregador: sem
+# o arquivo, esta máquina é indistinguível de uma com o pendrive fora.
 nb_no_config_screen() {
     nb_fatal_screen "NO CONF" \
-        "!USB CONFIG - the boot drive configuration was not read." \
+        "!CONFIG - nutellaboot.conf (site, boot key, server) was not read." \
         "" \
         "Reason: $1" \
         "" \
-        "The drive started the kernel, but the partition that holds" \
-        "nutellaboot.conf (site, boot key, server) could not be read." \
+        "The file comes from the USB drive, or from the boot loader when" \
+        "the machine boots over the network (PXE)." \
         "" \
         "!What to do:" \
         "  1. Unplug the USB drive, plug it back in and power on again" \
         "  2. Check that the drive was written with the site image, or" \
         "     that nutellaboot.conf was copied onto it" \
         "  3. A failing internal disk can hold the scan for a long time:" \
-        "     look for disk errors on the screen and replace the disk"
+        "     look for disk errors on the screen and replace the disk" \
+        "  4. Network boot: load nutellaboot.conf as a second initrd"
 }
 
 mountroot() {
-    nb_phase "NUTELLABOOT - reading the configuration from the USB drive"
+    nb_phase "NUTELLABOOT - reading the configuration"
     nb_read_usbconfig
 
     nb_phase "NETWORK - connecting to the network"

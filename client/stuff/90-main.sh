@@ -49,7 +49,22 @@ nb3_mountroot() {
 
     nb_phase "SETUP - applying this site's configuration"
     runpostmountconfigs
+    nb3_limpa_run
     umount -l "$BLOCKROOT" 2>/dev/null
+}
+
+# O /run do initrd é MOVIDO para o sistema montado (`mount -o move` no /init do
+# initramfs-tools), e com ele iam o nutellaboot.conf — a chave de boot que o
+# /etc/.nb3 guarda em 600 — e o wifi.conf, com as senhas que os perfis do
+# NetworkManager guardam em 600: os dois legíveis por qualquer usuário na
+# máquina de prova. O initrd novo já apaga o conf ao lê-lo; este cobre os
+# pendrives com initrd antigo. Os consumidores (o bootstrap e o 80-nm-wifi.sh)
+# já passaram.
+nb3_limpa_run() {
+    _nlr_d=${NB_RUN:-/run/nutellaboot}
+    rm -f "$_nlr_d/nutellaboot.conf" "$_nlr_d/wifi.conf"
+    rmdir "$_nlr_d" 2> /dev/null
+    return 0
 }
 
 # Devolve a rede ao NetworkManager do sistema instalado.

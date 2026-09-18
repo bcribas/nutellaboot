@@ -71,6 +71,8 @@ def sh(tmp_path):
             "NB_FATAL_WAIT": "0",
             "NB_USB_LIVRE_MARK": str(tmp_path / "usb-livre"),
             "NB_USB_LIVRE_WAIT": "0",
+            # o conf do netboot, que só existe quando o teste o cria
+            "NB_NETCONF": str(tmp_path / "netboot" / "nutellaboot.conf"),
             **{k: str(v) for k, v in env.items()},
         }
         r = subprocess.run(["sh", "-c", full], capture_output=True, text=True, env=e)
@@ -135,6 +137,7 @@ def test_le_o_pendrive_sem_head_no_caminho(tmp_path):
             "NB_RUN": str(run_dir),
             "NB_HOSTS_FILE": str(tmp_path / "hosts"),
             "NB_DEFAULTS_FILE": str(tmp_path / "defaults"),
+            "NB_NETCONF": str(tmp_path / "sem-netboot"),
             "NB_CFG_TRIES": "1",
             "NB_CFG_WAIT": "0",
         },
@@ -543,8 +546,121 @@ def test_usbconfig_cmdline_beats_pendrive_no_servidor(sh):
     (sh.run_dir / "nutellaboot.conf").write_text(CONF_BOM)
     out = sh('NB_SERVER=https://cmdline.test; nb_read_usbconfig; echo "S=$NB_SERVER"')
     assert "S=https://cmdline.test" in out
+    # a leitura consome a cópia em RAM (é o que tira a chave do /run)
+    (sh.run_dir / "nutellaboot.conf").write_text(CONF_BOM)
     out = sh('nb_read_usbconfig; echo "S=$NB_SERVER"')
     assert "S=https://conf.test" in out
+
+
+# --- boot pela rede ---------------------------------------------------------
+#
+# Uma sede que boota por DHCP + iPXE, como fazia no nb2, parava na tela NO CONF
+# depois de 40 s procurando um pendrive que não existe. O carregador agora
+# entrega o nutellaboot.conf como um arquivo a mais dentro do initrd.
+
+
+def _netconf(sh, texto: str) -> Path:
+    alvo = sh.tmp / "netboot" / "nutellaboot.conf"
+    alvo.parent.mkdir(exist_ok=True)
+    alvo.write_text(texto)
+    return alvo
+
+
+def test_netboot_le_o_conf_do_initrd_sem_procurar_o_pendrive(sh):
+    _netconf(sh, CONF_BOM)
+    contador = sh.tmp / "busca.count"
+    sh.stub("blkid", f'echo x >> "{contador}"; exit 2\n')
+    sh.stub("udevadm", f'echo x >> "{contador}"; exit 0\n')
+    out = sh(
+        'nb_read_usbconfig; echo "I=$IMAGEROOT K=$NB_BOOT_KEY S=$NB_SERVER NET=$NB_NETBOOT"',
+        NB_CFG_TRIES="3",
+        NB_CFG_BYLABEL=str(sh.tmp / "nao-existe"),
+    )
+    assert "I=sala9 K=nb3b_abc S=https://conf.test NET=1" in out
+    assert not contador.exists(), "procurou o pendrive num boot pela rede"
+    # nem a faixa de "pode retirar o pendrive": não há pendrive
+    assert not (sh.tmp / "usb-livre").exists()
+    assert "REBOOT-CHAMADO" not in out
+
+
+def test_netboot_a_cmdline_continua_vencendo_o_conf(sh):
+    _netconf(sh, CONF_BOM)
+    out = sh(
+        "IMAGEROOT=daCmdline; NB_SERVER=https://cmdline.test; nb_read_usbconfig; "
+        'echo "I=$IMAGEROOT S=$NB_SERVER"'
+    )
+    assert "I=daCmdline S=https://cmdline.test" in out
+
+
+def test_netboot_conf_vazio_para_com_a_causa(sh):
+    """Arquivo vazio é carregador mal configurado. Cair no caminho do pendrive
+    diria, 40 s depois, que a NB3CFG não apareceu — verdade que não ajuda."""
+    _netconf(sh, "")
+    out = sh("nb_read_usbconfig; echo NAO-DEVERIA-CHEGAR-AQUI")
+    assert "loaded over the network is empty" in out
+    assert "REBOOT-CHAMADO" in out
+    assert "NAO-DEVERIA-CHEGAR-AQUI" not in out
+
+
+def test_a_cmdline_nao_liga_o_netboot(sh):
+    """`NB_NETBOOT=1` na linha do kernel chega como variável de ambiente e
+    desligaria a regravação do pendrive em silêncio. Quem diz que o boot foi
+    pela rede é o arquivo."""
+    (sh.run_dir / "nutellaboot.conf").write_text(CONF_BOM)
+    out = sh('NB_NETBOOT=1; nb_read_usbconfig; echo "NET=[$NB_NETBOOT]"')
+    assert "NET=[]" in out
+
+
+def test_a_chave_de_boot_nao_fica_no_run(sh):
+    """O /run do initrd é movido para o sistema montado: a cópia do conf ali
+    era a chave de boot legível por qualquer usuário da máquina de prova."""
+    _netconf(sh, CONF_BOM)
+    out = sh('nb_read_usbconfig; echo "K=$NB_BOOT_KEY"')
+    assert "K=nb3b_abc" in out
+    assert not (sh.run_dir / "nutellaboot.conf").exists()
+
+    # o mesmo pelo pendrive
+    _pendrive_de_mentira(sh)
+    sh.stub("blkid", "echo /dev/falso\n")
+    (sh.tmp / "netboot" / "nutellaboot.conf").unlink()
+    out = sh('nb_read_usbconfig; echo "K=$NB_BOOT_KEY"', NB_CFG_BYLABEL=str(sh.tmp / "nao-existe"))
+    assert "K=nb3b_abc" in out
+    assert not (sh.run_dir / "nutellaboot.conf").exists()
+
+
+def test_conf_salvo_no_windows(sh):
+    """CRLF: o `\\r` grudado no valor vira IMAGEROOT e chave que o servidor não
+    conhece. O conf do netboot mora num servidor que a sede mesma edita."""
+    _netconf(
+        sh,
+        'set IMAGEROOT="sala9"\r\nset NB_BOOT_KEY="nb3b_abc"\r\n'
+        'set NB_HOSTS="nome.test 10.0.2.2"\r\n',
+    )
+    out = sh('nb_read_usbconfig; echo "I=[$IMAGEROOT] K=[$NB_BOOT_KEY]"')
+    assert "I=[sala9] K=[nb3b_abc]" in out
+    assert (sh.tmp / "hosts").read_text() == "10.0.2.2 nome.test\n"
+
+
+def test_o_stuff_tira_os_segredos_do_run(tmp_path):
+    """Pendrive com initrd antigo ainda deixa o conf (chave de boot) e o
+    wifi.conf (senhas) no /run, que vai inteiro para o sistema montado. O
+    stuff apaga os dois depois do último consumidor, o 80-nm-wifi.sh."""
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "nutellaboot.conf").write_text(CONF_BOM)
+    (run / "wifi.conf").write_text("Rede\tsenha-boa\n")
+    main = REPO / "client" / "stuff" / "90-main.sh"
+    r = subprocess.run(
+        ["sh", "-c", f'. "{main}"; nb3_limpa_run'],
+        env={"NB_RUN": str(run), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert not run.exists()
+
+    texto = main.read_text()
+    assert texto.index("    runpostmountconfigs\n") < texto.index("    nb3_limpa_run\n")
 
 
 NB2 = "https://nutellaboot.naquadah.com.br"
