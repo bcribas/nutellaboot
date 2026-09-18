@@ -57,7 +57,18 @@ trap cleanup EXIT
 
 echo ">> montando $RAW"
 LOOP=$(losetup --show -fP "$RAW")
-mount "${LOOP}p2" "$MNT"
+# O `losetup -P` volta antes de o udev criar o nó da partição: montar em
+# seguida falha com "No such file or directory" (no dmesg, "Can't lookup
+# blockdev"), e só às vezes, que é o pior tipo de falha. Espera o nó aparecer.
+PART="${LOOP}p2"
+n=0
+while [ ! -b "$PART" ] && [ "$n" -lt 50 ]; do
+    udevadm settle --timeout=2 2> /dev/null || true
+    [ -b "$PART" ] || sleep 0.2
+    n=$((n + 1))
+done
+[ -b "$PART" ] || { echo "a partição $PART não apareceu (a imagem tem a partição 2?)" >&2; exit 1; }
+mount "$PART" "$MNT"
 
 echo ">> instalando initramfs-tools do nutellaboot3"
 rm -rf "$MNT/etc/initramfs-tools/scripts/nutellaboot" \

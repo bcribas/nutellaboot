@@ -34,9 +34,18 @@ ExecStart=/opt/nutellaboot3/.venv/bin/uvicorn server.app.main:app \
     --host 127.0.0.1 --port 8890 \
     --backlog 4096 \
     --timeout-keep-alive 65 \
+    --timeout-graceful-shutdown 10 \
     --proxy-headers --forwarded-allow-ips 127.0.0.1 \
     --log-level warning \
     --no-access-log
+
+# O long-poll e o SSE são conexões que nunca terminam sozinhas. Sem o
+# --timeout-graceful-shutdown acima, o uvicorn espera por elas para sempre, o
+# `systemctl restart` estoura os 90 s do TimeoutStopSec padrão e acaba em
+# SIGKILL: um minuto e meio fora do ar a cada deploy. Com ele, o uvicorn corta
+# as conexões em 10 s; as máquinas e os painéis reconectam sozinhos. O teto
+# abaixo é só a rede de segurança caso nem isso baste.
+TimeoutStopSec=20
 
 Restart=always
 RestartSec=2

@@ -1488,3 +1488,10 @@ curl -s https://nutellaboot.mdp.naquadah.com.br/api/v1/health
 
 O `stuff` é lido do disco a cada boot, então mudança em `client/stuff/` chega às
 máquinas sem reiniciar o serviço. Rota nova, sim, precisa de reinício.
+
+O reinício leva uns 10 s: o long-poll das máquinas e o SSE dos painéis são
+conexões que nunca terminam sozinhas, e o uvicorn as corta depois do
+`--timeout-graceful-shutdown 10` da unidade. Máquinas e painéis reconectam
+sozinhos. Se o `systemctl restart` demorar 90 s e o journal mostrar `Failed with
+result 'timeout'`, a unidade instalada em `/etc/systemd/system/` é a antiga:
+refaça o `install` e o `daemon-reload` acima.

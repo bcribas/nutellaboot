@@ -682,3 +682,26 @@ def test_nenhum_padrao_do_cliente_aponta_para_o_servidor_do_nb2():
     base = re.search(r"NB3_BASE_URL=(\S+)", servico).group(1)
     assert f"NB_DEFAULT_SERVER='{base}'" in BOOTSTRAP.read_text()
     assert f"NB_SERVER={base}" in (REPO / "client" / "initramfs-tools" / "nutellaboot.defaults").read_text()
+
+
+def test_build_initrd_espera_o_no_da_particao_antes_de_montar():
+    """Na produção o `losetup -P` voltou antes de o udev criar o /dev/loopNp2 e
+    o mount falhou com "No such file or directory": o deploy parou sem initrd
+    novo. A ferramenta tem de esperar o nó aparecer."""
+    ferramenta = (REPO / "tools" / "nb3-build-initrd").read_text(encoding="utf-8")
+    losetup = ferramenta.index("losetup --show -fP")
+    monta = ferramenta.index('mount "$PART" "$MNT"')
+    espera = ferramenta[losetup:monta]
+    assert '[ ! -b "$PART" ]' in espera, "monta sem esperar o nó da partição"
+    assert "udevadm settle" in espera
+    assert 'mount "${LOOP}p2"' not in ferramenta, "sobrou um mount direto, sem espera"
+
+
+def test_servico_para_rapido_apesar_do_long_poll():
+    """Long-poll e SSE nunca terminam sozinhos: sem teto no desligamento
+    gracioso, cada `systemctl restart` levou 90 s e acabou em SIGKILL."""
+    servico = (REPO / "systemd" / "nutellaboot3.service").read_text()
+    gracioso = int(re.search(r"--timeout-graceful-shutdown (\d+)", servico).group(1))
+    teto = int(re.search(r"^TimeoutStopSec=(\d+)$", servico, re.M).group(1))
+    assert gracioso <= 15
+    assert gracioso < teto <= 30, "o systemd tem de dar tempo ao uvicorn, mas não 90 s"
