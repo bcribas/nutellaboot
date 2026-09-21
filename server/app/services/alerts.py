@@ -131,6 +131,26 @@ def list_open(image_id: str) -> list[dict]:
     return sorted(todos, key=lambda a: a.get("at", 0), reverse=True)
 
 
+def history_da_sede(image_id: str, since: float = 0, linhas: int = 500) -> list[dict]:
+    """O histórico de TODAS as máquinas da sede, do mais recente para o mais
+    antigo. É a prova documental de um incidente (quem dispensou o quê, quando)
+    que só saía no CSV do relatório da frota."""
+    from .machines import list_macs
+
+    # a linha "dismissed" guarda o `at` do alerta; o instante dela é `dismissed_at`
+    def quando(a):
+        return float(a.get("dismissed_at") if a.get("event") == "dismissed" else a.get("at") or 0)
+
+    out = []
+    for mac in list_macs(image_id):
+        for a in history(image_id, mac, linhas):
+            if since and quando(a) < since:
+                continue
+            out.append({"mac": mac, **a})
+    out.sort(key=quando, reverse=True)
+    return out[:linhas]
+
+
 def history(image_id: str, mac: str, linhas: int = 200) -> list[dict]:
     p = machine_dir(image_id, mac) / "alerts.log"
     if not p.is_file():

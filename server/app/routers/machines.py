@@ -318,6 +318,18 @@ async def alerts_history(
     return {"history": alerts.history(image, m.normalize_mac(mac))}
 
 
+@router.get("/site-images/{image}/alerts/history")
+def alerts_history_da_sede(
+    image: str,
+    since: float = Query(0, ge=0),
+    n: int = Query(500, ge=1, le=5000),
+    p=Depends(auth.require_image_access(service_scope="machines:read")),
+) -> dict:
+    """Todos os alertas da sede, abertos e dispensados, com quem dispensou.
+    `def`: varre o alerts.log de cada máquina."""
+    return {"history": alerts.history_da_sede(image, since, n)}
+
+
 @router.get("/site-images/{image}/machines/{mac}/commands")
 async def poll_commands(
     image: str,

@@ -421,6 +421,18 @@ O ambiente de teste tem um nginx externo que faz proxy de
 - Os mapas em memória do processo (`keyusage`, `presence`, `ratelimit`) valem
   entre testes: `conftest.data_root` zera os dois primeiros; teste que mexe em
   limite de taxa chama `ratelimit.reset()`.
+- **As telas são módulos ES, e o navegador guarda módulo em cache.** Depois
+  de um deploy, um `app.js` novo importando um `times.js` antigo (ou um CSS
+  velho) abre a tela em branco ou torta, sem erro. O nginx manda
+  `Cache-Control: no-cache` para `web/` (revalida por ETag; nada trafega quando
+  não mudou); `tests/test_web_ids.py` confere TODOS os `.js` de cada tela e que
+  todo `import` aponta para arquivo existente. Ao testar no navegador, recarregue
+  sem cache antes de concluir que o CSS está errado.
+- O no-undef caseiro de `tests/test_web_js.py` não entende: método abreviado em
+  objeto (`{ ack() {} }`), função usada antes da declaração (hoisting), regex
+  com aspa dentro de classe (`/[",]/`). Escreva `const f = () => …` e
+  `{ acompanhar, ack }`, declare antes de usar, e monte a aspa com
+  `String.fromCharCode(34)`.
 
 ## Estilo
 

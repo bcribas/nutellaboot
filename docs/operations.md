@@ -910,11 +910,27 @@ não há botão de recarregar):
 - **contorno vermelho + 🔌**: dispositivo USB conectado nesta máquina
 
 O cartão mostra o time vinculado, o lugar, uso de memória, carga e estado do
-firewall. Clique duplo abre o detalhe, com duas abas: **Estado agora** (a
-telemetria completa) e **Logs** (o journal que a máquina envia).
+firewall. Clique duplo abre o detalhe, com seis abas: **Gráficos** (memória,
+carga e editores no período), **Estado** (a telemetria completa), **Logs** (o
+journal que a máquina envia), **Time** (vincular, mover, desvincular, e o
+histórico: "trocou de time" aparece marcado), **Alertas** (o histórico da
+máquina, com "dispensar todos") e **Ordens** (cada comando que ela confirmou,
+com a saída, e os que caducaram).
 
 Filtros rápidos: todas, com dispositivo, bloqueadas, em alerta, sem time,
-offline.
+offline. O seletor "vistas nas últimas N h" tira da grade quem não reporta há
+mais tempo (fica lembrado no navegador).
+
+Depois de mandar uma ordem, a barra acima da grade acompanha quem confirmou,
+quem ainda espera e quem caducou (10 minutos), com o detalhe por máquina. Ela
+vive dos eventos do painel e da rota `GET …/commands/{id}`.
+
+A tela tem quatro visões, no alto: **Máquinas** (a grade), **Times** (o
+roster e os vínculos), **Sala** (as máquinas comparadas entre si no período:
+ranking pelo pico de memória, swap, carga, pressão ou disco, ou miniaturas na
+mesma escala; clique abre o detalhe) e **Alertas** (o histórico da sede
+inteira, com quem dispensou o quê, e o CSV). A faixa vermelha fica visível em
+todas.
 
 ### Pendrive e celular: a faixa vermelha
 
@@ -1108,9 +1124,18 @@ relatório. Com `bindings:write` ele publica o elo máquina ↔ time no login
 
 ### Vínculo time ↔ máquina
 
-O roster (lista de times, com nome, organização, país e lugar) vem do MOJ ou é
-enviado pela API, junto com os logotipos das instituições. O vínculo aponta
-para uma entrada do roster:
+A visão **Times** do hotconfig faz tudo pela tela: acrescentar um time,
+corrigir, tirar, importar uma lista colada ou de arquivo (CSV/TSV com as
+colunas `user_id, name, display_name, org_id, org_name, country, seat`, ou
+JSON; **Mesclar** acrescenta e atualiza, **Substituir tudo** troca a lista),
+exportar, subir o logotipo de cada instituição, e ver quem está sem máquina e
+que máquina está sem time. O vínculo se faz na aba **Time** do detalhe da
+máquina (busca pelo nome, ou um nome livre para quem não está na lista); mover
+um time de uma máquina para outra desfaz o vínculo antigo antes.
+
+O MOJ também escreve aqui (o roster e o vínculo no login do time): a tela mexe
+em uma entrada por vez, então os dois convivem. Pela API, o vínculo aponta para
+uma entrada do roster:
 
 ```bash
 curl -X PUT "$SERVER/api/v1/site-images/26spsp/machines/$MAC/binding" \
@@ -1120,7 +1145,7 @@ curl -X PUT "$SERVER/api/v1/site-images/26spsp/machines/$MAC/binding" \
 ```
 
 A tela de bloqueio da máquina passa a mostrar o logotipo da instituição, o nome
-do time, a bandeira do país e o lugar. Esses dados são cacheados em disco no
+do time e o lugar. Esses dados são cacheados em disco no
 momento do bloqueio: se a rede cair, a tela continua correta.
 
 ### Quando uma máquina some do painel
@@ -1376,9 +1401,13 @@ NutellaBoot 2, agora com o relançamento automático.
 
 ### O comando não chegou na máquina
 
+Primeiro a barra de progresso do hotconfig (ou dos laboratórios): ela diz, por
+máquina, quem confirmou, quem espera e quem caducou. A aba **Ordens** do detalhe
+da máquina mostra cada confirmação com a saída.
+
 Se a máquina estava desligada quando o comando foi mandado e ligou mais de 10
-minutos depois, o comando caducou de propósito (aparece como `expired` nos
-logs dela): mande de novo.
+minutos depois, o comando caducou de propósito (aparece como `expired` na aba
+Ordens e em `GET …/commands/{id}`): mande de novo.
 
 O agente fica pendurado numa requisição de até 25 segundos; se a rede oscilar,
 ele reconecta e recebe o que ficou pendente — comandos não se perdem, ficam na

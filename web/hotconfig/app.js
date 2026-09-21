@@ -4,6 +4,11 @@
 import * as api from "/common/api.js";
 import { init, t, apply, currentLang } from "/common/i18n.js";
 import { esc } from "/common/ui.js";
+import { graficoTempo } from "./grafico.js";
+import { criarRastreador } from "/common/ordens.js";
+import { carregarRoster, renderTimes, informarMaquinas, nomeDoTime, abaTime, iniciarTimes } from "./times.js";
+import * as alertas from "./alertas.js";
+import * as sala from "./sala.js";
 
 const $ = (s) => document.querySelector(s);
 let machines = [];
@@ -123,14 +128,7 @@ function renderAlerts() {
   }
 }
 
-const KIND_LABEL = {
-  "usb.storage": "usb_storage",
-  "identity.duplicate": "identity_duplicate",
-  "usb.phone": "usb_phone",
-  "usb.network": "usb_network",
-  "usb.other": "usb_other",
-  "media.cd": "media_cd",
-};
+const KIND_LABEL = alertas.KIND_LABEL;
 
 function toast(msg, isError = false) {
   const el = document.createElement("div");
@@ -161,7 +159,22 @@ function state(m) {
 function teamLabel(m) {
   const b = m.binding;
   if (!b) return null;
-  return b.name || b.user_id || null;
+  return b.name || nomeDoTime(b.user_id) || b.user_id || null;
+}
+
+// --- as visões da tela ---
+let visao = "maquinas";
+
+function mostrarVisao(nome) {
+  visao = nome;
+  for (const b of document.querySelectorAll("#views button")) b.classList.toggle("on", b.dataset.view === nome);
+  for (const v of ["maquinas", "times", "sala", "alertas"]) {
+    $(`#pane_${v}`).classList.toggle("hidden", v !== nome);
+  }
+  if (nome === "times") renderTimes();
+  if (nome === "sala") sala.carregarSala();
+  if (nome === "alertas") alertas.carregarHistorico();
+  if (location.hash !== `#${nome}`) history.replaceState(null, "", `#${nome}`);
 }
 
 function matches(m) {
@@ -263,70 +276,9 @@ function render() {
 // quando duas amostras distam mais de 5 min), não um segmento esticado — e os
 // ticks de hora no eixo dizem de quando é cada trecho. SVG à mão, como tudo
 // aqui: as telas são autocontidas, sem CDN.
-function graficoTempo(pontos, series, maxY, refY, extra) {
-  if (pontos.length < 2) return `<p class="muted">${t("samples_none")}</p>`;
-  const W = 580;
-  const H = 130;
-  const PAD = 6;
-  const HX = 18; // a faixa dos rótulos de hora, abaixo do traçado
-  const t0 = pontos[0].t;
-  const t1 = pontos[pontos.length - 1].t;
-  const dur = Math.max(1, t1 - t0);
-  const x = (tt) => PAD + ((tt - t0) * (W - 2 * PAD)) / dur;
-  const y = (v) => H - PAD - (Math.min(v, maxY) * (H - 2 * PAD)) / maxY;
-  let corpo = "";
-  for (const frac of [0.25, 0.5, 0.75]) {
-    const yy = H - PAD - frac * (H - 2 * PAD);
-    corpo += `<line x1="${PAD}" y1="${yy}" x2="${W - PAD}" y2="${yy}"
-      stroke="var(--line)" stroke-width="1"/>`;
-  }
-  // 5 marcas de tempo; janela maior que um dia ganha o dia junto da hora
-  const comDia = dur > 86400;
-  for (let i = 0; i <= 4; i++) {
-    const tt = t0 + (dur * i) / 4;
-    const xx = PAD + ((W - 2 * PAD) * i) / 4;
-    corpo += `<line x1="${xx}" y1="${PAD}" x2="${xx}" y2="${H - PAD}"
-      stroke="var(--line)" stroke-width="1" stroke-dasharray="2 4"/>`;
-    const dt = new Date(tt * 1000);
-    const hh = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const rot = comDia ? `${dt.getDate()}/${dt.getMonth() + 1} ${hh}` : hh;
-    const anchor = i === 0 ? "start" : i === 4 ? "end" : "middle";
-    corpo += `<text x="${xx}" y="${H + HX - 6}" text-anchor="${anchor}" class="gtick">${rot}</text>`;
-  }
-  if (refY != null && refY > 0 && refY <= maxY) {
-    corpo += `<line x1="${PAD}" y1="${y(refY)}" x2="${W - PAD}" y2="${y(refY)}"
-      stroke="var(--warn)" stroke-width="1" stroke-dasharray="6 4"/>`;
-  }
-  for (const s of series) {
-    let tracado = "";
-    let caneta = false;
-    let tAnt = 0;
-    for (const p of pontos) {
-      const v = p[s.campo];
-      if (v == null) {
-        caneta = false;
-        continue;
-      }
-      const cmd = caneta && p.t - tAnt < 300 ? "L" : "M";
-      tracado += `${cmd}${x(p.t).toFixed(1)} ${y(v).toFixed(1)} `;
-      caneta = true;
-      tAnt = p.t;
-    }
-    corpo += `<path d="${tracado}" fill="none" stroke="${s.cor}"
-      stroke-width="2" stroke-linejoin="round"/>`;
-  }
-  const ult = pontos[pontos.length - 1];
-  const agora = series
-    .filter((s) => ult[s.campo] != null)
-    .map((s) => `<b style="color:${s.cor}">${ult[s.campo]}${s.suf || ""}</b>`)
-    .join(" ");
-  const leg = series.map((s) => `<span style="color:${s.cor}">● ${s.rot}</span>`).join(" ");
-  return `<div class="gtempo"><div class="gcab"><span class="gleg">${leg}${
-    extra ? ` <span class="muted">${extra}</span>` : ""}</span><span class="gval">${agora}</span></div>
-    <svg viewBox="0 0 ${W} ${H + HX}">${corpo}</svg></div>`;
-}
+const ACK_LABEL = { done: "ack_done", error: "ack_error", failed: "ack_failed", expired: "ack_expired" };
 
-function showDetail(m) {
+function showDetail(m, abrirNaAba) {
   const box = document.createElement("div");
   box.className = "detail";
   const inner = document.createElement("div");
@@ -420,10 +372,66 @@ function showDetail(m) {
     }
   };
 
+  const recarregaEFecha = () => {
+    box.remove();
+    loadAll();
+  };
+  const mostrarTime = () => abaTime(m, painel, recarregaEFecha);
+  const mostrarAlertas = () => alertas.abaAlertas(m, painel, recarregaEFecha);
+  const mostrarOrdens = async () => {
+    // os acks vêm junto com os logs; tail=1 é o mínimo que a rota aceita
+    painel.innerHTML = `<p class="muted">${t("loading")}</p>`;
+    let d;
+    try {
+      d = await api.get(`/api/v1/site-images/${api.imageId}/machines/${m.mac}/logs?tail=1`);
+    } catch (e) {
+      painel.innerHTML = `<p class="muted">${t("error")}: ${esc(e.message)}</p>`;
+      return;
+    }
+    painel.innerHTML = "";
+    if (m.pending) {
+      const p = document.createElement("p");
+      p.textContent = t("orders_pending", { n: m.pending });
+      painel.appendChild(p);
+    }
+    const acks = (d.acks || []).slice().reverse();
+    if (!acks.length) {
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = t("orders_none");
+      painel.appendChild(p);
+      return;
+    }
+    const tabela = document.createElement("table");
+    for (const a of acks) {
+      const tr = document.createElement("tr");
+      const rot = ACK_LABEL[a.status] ? t(ACK_LABEL[a.status]) : String(a.status || "");
+      tr.innerHTML = `<td class="muted">${new Date(a.at * 1000).toLocaleString()}</td>
+        <td class="mono">${esc(a.command || a.id)}</td>
+        <td><span class="pill ${a.status === "expired" ? "bad" : a.status === "done" ? "ok" : "warn"}">${esc(rot)}</span></td>`;
+      const td = document.createElement("td");
+      if (a.output) {
+        const det = document.createElement("details");
+        const sum = document.createElement("summary");
+        sum.textContent = t("ack_output");
+        const pre = document.createElement("pre");
+        pre.textContent = String(a.output).slice(0, 4000);
+        det.append(sum, pre);
+        td.appendChild(det);
+      }
+      tr.appendChild(td);
+      tabela.appendChild(tr);
+    }
+    painel.appendChild(tabela);
+  };
+
   for (const [chave, acao] of [
     ["tab_charts", mostrarGraficos],
     ["tab_state", mostrarEstado],
     ["tab_logs", mostrarLogs],
+    ["tab_team", mostrarTime],
+    ["tab_alerts", mostrarAlertas],
+    ["tab_orders", mostrarOrdens],
   ]) {
     const b = document.createElement("button");
     b.className = "small";
@@ -431,6 +439,7 @@ function showDetail(m) {
       chave === "tab_logs" && m.logs?.bytes
         ? `${t(chave)} (${Math.round(m.logs.bytes / 1024)} kB)`
         : t(chave);
+    b.dataset.tab = chave;
     b.onclick = () => {
       abas.querySelectorAll("button").forEach((x) => x.classList.remove("on"));
       b.classList.add("on");
@@ -438,8 +447,9 @@ function showDetail(m) {
     };
     abas.appendChild(b);
   }
-  abas.firstChild.classList.add("on");
-  mostrarGraficos();
+  const inicial = abrirNaAba || "tab_charts";
+  [...abas.children].find((b) => b.dataset.tab === inicial).classList.add("on");
+  ({ tab_team: mostrarTime, tab_alerts: mostrarAlertas, tab_orders: mostrarOrdens }[inicial] || mostrarGraficos)();
   inner.append(abas, painel);
 
   const close = document.createElement("button");
@@ -516,6 +526,8 @@ function confirmarPrecontest(n) {
   });
 }
 
+let rastreador = null;
+
 async function sendCommand(cmd) {
   const macs = [...selected];
   if (!macs.length) return;
@@ -527,11 +539,16 @@ async function sendCommand(cmd) {
   }
   try {
     if (cmd === "lock" || cmd === "unlock") {
-      await Promise.all(
+      const rs = await Promise.all(
         macs.map((mac) => api.post(`/api/v1/site-images/${api.imageId}/machines/${mac}/${cmd}`))
       );
+      // cada trava é um comando por máquina: acompanha o primeiro id como amostra
+      for (const [i, r] of rs.entries()) {
+        if (r && r.command_id) rastreador.acompanhar(api.imageId, r.command_id, cmd, [macs[i]]);
+      }
     } else {
-      await api.post(`/api/v1/site-images/${api.imageId}/commands`, { command: cmd, target: macs });
+      const r = await api.post(`/api/v1/site-images/${api.imageId}/commands`, { command: cmd, target: macs });
+      if (r && r.command_id) rastreador.acompanhar(api.imageId, r.command_id, cmd, macs);
     }
     toast(t("command_sent", { n: macs.length }));
     loadAll();
@@ -542,10 +559,14 @@ async function sendCommand(cmd) {
 
 async function loadAll() {
   try {
-    const data = await api.get(`/api/v1/site-images/${api.imageId}/machines`);
+    const horas = Number($("#vistas").value) || 0;
+    const q = horas ? `?active_since=${Math.floor(Date.now() / 1000) - horas * 3600}` : "";
+    const data = await api.get(`/api/v1/site-images/${api.imageId}/machines${q}`);
     machines = data.machines;
     rejeitadas = data.rejected || [];
+    informarMaquinas(machines);
     render();
+    if (visao === "times") renderTimes();
   } catch (e) {
     toast(`${t("error")}: ${e.message}`, true);
   }
@@ -594,6 +615,13 @@ function connectEvents() {
     loadAll();
   });
   source.addEventListener("alert.dismissed", bump);
+  source.addEventListener("command.acked", (ev) => {
+    try {
+      rastreador.ack(JSON.parse(ev.data));
+    } catch {
+      /* dado malformado: a reconciliação cobre */
+    }
+  });
 
   for (const ev of [
     "machine.status",
@@ -660,6 +688,41 @@ async function main() {
       }
     }, { once: true });
   }
+  rastreador = criarRastreador($("#cmdprogress"), { nomeDoTime: (mac) => teamLabel(machines.find((x) => x.mac === mac) || {}) });
+  iniciarTimes();
+  alertas.iniciarAlertas();
+  alertas.usarNomes((mac) => teamLabel(machines.find((x) => x.mac === mac) || {}) || "");
+  sala.iniciarSala();
+  sala.usarNomes(
+    (mac) => teamLabel(machines.find((x) => x.mac === mac) || {}) || "",
+    (mac) => {
+      const m = machines.find((x) => x.mac === mac);
+      if (m) showDetail(m);
+    });
+  for (const b of document.querySelectorAll("#views button")) b.onclick = () => mostrarVisao(b.dataset.view);
+  document.addEventListener("nb3:abrir-time", (ev) => {
+    const m = machines.find((x) => x.mac === ev.detail);
+    if (m) showDetail(m, "tab_team");
+  });
+  document.addEventListener("nb3:roster-mudou", render);
+  try {
+    localStorage.setItem("nb3-lab-vistas", $("#vistas").value = localStorage.getItem("nb3-lab-vistas") || "0");
+  } catch {
+    /* sem storage: fica em "todas" */
+  }
+  $("#vistas").onchange = () => {
+    try {
+      localStorage.setItem("nb3-lab-vistas", $("#vistas").value);
+    } catch {
+      /* idem */
+    }
+    loadAll();
+  };
+  try {
+    await carregarRoster();
+  } catch {
+    /* sem roster (ou sem escopo): o cartão mostra o user_id */
+  }
   $("#selall").onclick = () => {
     machines.filter(matches).forEach((m) => selected.add(m.mac));
     render();
@@ -680,6 +743,8 @@ async function main() {
 
   await loadAll();
   connectEvents();
+  const inicial = location.hash.replace("#", "");
+  if (["times", "sala", "alertas"].includes(inicial)) mostrarVisao(inicial);
   setInterval(loadAll, 30000); // rede de segurança se o SSE cair
 }
 

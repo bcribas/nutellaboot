@@ -150,6 +150,35 @@ export function reportUrl(image, since, until, lang) {
   return `/api/v1/site-images/${encodeURIComponent(image)}/report?${q}`;
 }
 
+export function rosterLogoUrl(image, org, versao) {
+  // <img> não manda cabeçalho: token na URL, como o wallpaper
+  const q = new URLSearchParams();
+  if (versao) q.set("v", versao);
+  const tk = imageToken();
+  if (tk) q.set("tk", tk);
+  const s = q.toString();
+  return `/api/v1/site-images/${encodeURIComponent(image)}/roster/logos/${encodeURIComponent(org)}${s ? `?${s}` : ""}`;
+}
+
+// NDJSON (o lote de samples): uma linha por máquina. O `parse()` de sempre
+// tentaria um JSON.parse do texto inteiro.
+export async function ndjson(path, o = {}) {
+  const headers = { ...CONSOLE_HEADER };
+  if (o.kind !== "admin" && imageToken()) headers.Authorization = `Bearer ${imageToken()}`;
+  const resp = await fetch(path, { headers, credentials: "same-origin" });
+  const texto = await resp.text();
+  if (!resp.ok) {
+    let corpo;
+    try {
+      corpo = JSON.parse(texto);
+    } catch {
+      corpo = null;
+    }
+    throw new ApiError(resp.status, corpo && corpo.detail ? corpo.detail : texto, corpo && corpo.code);
+  }
+  return texto.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+}
+
 // A tela irmã da sede: do configureitor para o hotconfig e vice-versa.
 //
 // Quem coordena recebe dois links por mensagem e, uma vez dentro de um, não

@@ -224,3 +224,29 @@
 .gval b { margin-left: 8px; font-variant-numeric: tabular-nums; }
 .gperiodo { display: flex; gap: 6px; margin: 8px 0; }
 .gperiodo button.on { border-color: var(--accent); color: var(--accent); }
+
+/* --- as visões do hotconfig --- */
+.views { display: inline-flex; gap: 4px; margin-left: 14px; }
+.views button { background: transparent; border: 1px solid var(--line); color: var(--muted); padding: 4px 10px; border-radius: 999px; font-size: 13px; cursor: pointer; }
+.views button.on { color: var(--fg); border-color: var(--accent); }
+.pane { padding: 14px 18px; }
+.pane h2 { margin: 6px 0 4px; }
+.pane h3 { margin: 16px 0 6px; font-size: 14px; color: var(--muted); }
+.twocol { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+@media (max-width: 900px) { .twocol { grid-template-columns: 1fr; } }
+.rostable td, .altable td { padding: 4px 8px; vertical-align: top; }
+.altable tr.aberto td:first-child { border-left: 3px solid var(--bad); }
+.logorow { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.logothumb { width: 32px; height: 32px; object-fit: contain; background: #fff; border-radius: 4px; }
+.cmdprogress { margin: 0 18px 8px; padding: 6px 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius); font-size: 13px; }
+.cmdrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cmdlist { flex-basis: 100%; margin-top: 4px; }
+.cmdlist.hidden { display: none; }
+.salagrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.salacard { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; cursor: pointer; }
+.salacard .salanome { font-size: 13px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+svg.mini { width: 100%; height: 56px; display: block; }
+.salacard svg.mini { aspect-ratio: 200 / 56; height: auto; }
+tr.clicavel { cursor: pointer; }
+tr.clicavel:hover td { background: var(--panel2); }
+tr.clicavel td svg.mini { width: 120px; height: 28px; }

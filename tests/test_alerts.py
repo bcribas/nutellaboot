@@ -353,3 +353,18 @@ def test_dispositivo_diferente_ou_depois_de_dispensar_alerta_de_novo(client, ima
     client.post(f"/api/v1/site-images/sala1/machines/{MAC}/alerts/{a['id']}/dismiss", headers=ha)
     c = _espeta(client, hm, vendor="Kingston DT", detail="sdb1")
     assert c["id"] != a["id"] and c["repeated"] is False
+
+
+def test_historico_da_sede_inteira(client, imagem, hm, ha):
+    """A prova documental de um incidente (quem dispensou o quê) só saía no CSV
+    do relatório da frota."""
+    for mac in ("52-54-00-00-00-01", "52-54-00-00-00-02"):
+        client.post(f"/api/v1/site-images/sala1/machines/{mac}/status", json={}, headers=hm)
+        r = client.post(f"/api/v1/site-images/sala1/machines/{mac}/events",
+                        json={"kind": "usb.storage", "detail": f"pen {mac[-1]}"}, headers=hm)
+        assert r.status_code == 200, r.text
+    client.post("/api/v1/site-images/sala1/machines/52-54-00-00-00-01/alerts/dismiss-all", headers=ha)
+    h = client.get("/api/v1/site-images/sala1/alerts/history", headers=ha).json()["history"]
+    assert [(x["mac"][-1], x["event"]) for x in h] == [("1", "dismissed"), ("2", "raised"), ("1", "raised")]
+    assert h[0]["dismissed_by"]
+    assert client.get("/api/v1/site-images/sala1/alerts/history?n=1", headers=ha).json()["history"][0]["event"] == "dismissed"

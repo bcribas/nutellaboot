@@ -14,6 +14,13 @@
   <span class="sub" data-i18n="machines"></span>
   <span id="counts" class="sub"></span>
   <span id="live" class="pill" title="SSE">●</span>
+  <!-- as visões da tela; a faixa de alerta fica fora delas, visível em todas -->
+  <nav class="views" id="views">
+    <button type="button" data-view="maquinas" class="on" data-i18n="view_machines"></button>
+    <button type="button" data-view="times" data-i18n="view_teams"></button>
+    <button type="button" data-view="sala" data-i18n="view_room"></button>
+    <button type="button" data-view="alertas" data-i18n="view_alerts"></button>
+  </nav>
   <span class="spacer"></span>
   <!-- o href sai do JS: leva o ?id=&tk= da tela atual -->
   <a id="goconfig" class="btn small" data-i18n="home_coord_open_config"></a>
@@ -25,8 +32,15 @@
 <!-- Alertas abertos. Não some sozinho: fica até um fiscal dispensar. -->
 <div id="alertbar" class="alertbar hidden"></div>
 
+<section id="pane_maquinas">
 <div class="toolbar">
   <div class="filters" id="filters"></div>
+  <select id="vistas" class="small">
+    <option value="0" data-i18n="seen_all"></option>
+    <option value="2">2 h</option>
+    <option value="12">12 h</option>
+    <option value="24">24 h</option>
+  </select>
   <span class="spacer"></span>
   <input type="text" id="search" data-i18n-placeholder="search">
   <button type="button" id="selall" class="small" data-i18n="select_all"></button>
@@ -50,11 +64,99 @@
   <button type="button" class="danger" data-cmd="mlpoweroff" data-i18n="poweroff"></button>
 </div>
 
+<!-- o progresso da última ordem: quem confirmou, quem caducou -->
+<div id="cmdprogress" class="cmdprogress hidden"></div>
+
 <main class="wide">
   <div id="grid" class="grid"></div>
   <p id="empty" class="muted" data-i18n="no_machines"></p>
   <p id="rejected" class="warn hidden"></p>
 </main>
+</section>
+
+<section id="pane_times" class="pane wide hidden">
+  <div class="twocol">
+    <div>
+      <h2 data-i18n="roster_title"></h2>
+      <p class="help muted" data-i18n="roster_help"></p>
+      <div class="toolbar">
+        <input type="text" id="ros_search" data-i18n-placeholder="search">
+        <select id="ros_filter" class="small">
+          <option value="all" data-i18n="roster_filter_all"></option>
+          <option value="nomachine" data-i18n="bind_teams_without_machine"></option>
+        </select>
+        <span class="spacer"></span>
+        <span id="ros_summary" class="muted"></span>
+      </div>
+      <div id="ros_table" class="muted"></div>
+      <details id="ros_form_box" style="margin-top:10px">
+        <summary data-i18n="roster_add"></summary>
+        <div class="actions" style="flex-wrap:wrap;gap:8px;align-items:flex-end" id="ros_form">
+          <label class="fld"><span>user_id</span><input type="text" id="ros_uid" spellcheck="false"></label>
+          <label class="fld"><span data-i18n="roster_name"></span><input type="text" id="ros_name"></label>
+          <label class="fld"><span data-i18n="roster_display_name"></span><input type="text" id="ros_display"></label>
+          <label class="fld"><span data-i18n="roster_org_id"></span><input type="text" id="ros_orgid"></label>
+          <label class="fld"><span data-i18n="roster_org_name"></span><input type="text" id="ros_orgname"></label>
+          <label class="fld" style="max-width:90px"><span data-i18n="roster_country"></span><input type="text" id="ros_country" maxlength="3"></label>
+          <label class="fld" style="max-width:90px"><span data-i18n="roster_seat"></span><input type="text" id="ros_seat"></label>
+          <button type="button" id="ros_save" class="primary small" data-i18n="save"></button>
+          <button type="button" id="ros_cancel" class="small" data-i18n="cancel"></button>
+        </div>
+      </details>
+      <details style="margin-top:10px">
+        <summary data-i18n="roster_import"></summary>
+        <p class="help muted" data-i18n="roster_import_help"></p>
+        <textarea id="ros_paste" rows="6" spellcheck="false" style="width:100%"></textarea>
+        <div class="actions">
+          <input type="file" id="ros_file" accept=".csv,.tsv,.txt,.json">
+          <button type="button" id="ros_merge" class="primary small" data-i18n="roster_merge"></button>
+          <button type="button" id="ros_replace" class="small danger" data-i18n="roster_replace"></button>
+        </div>
+        <div id="ros_preview" class="muted"></div>
+      </details>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" id="ros_export_csv" class="small" data-i18n="roster_export_csv"></button>
+        <button type="button" id="ros_export_json" class="small" data-i18n="roster_export_json"></button>
+      </div>
+      <h3 data-i18n="roster_logos"></h3>
+      <p class="help muted" data-i18n="roster_logos_help"></p>
+      <div id="ros_logos"></div>
+    </div>
+    <div>
+      <h2 data-i18n="bind_overview"></h2>
+      <h3 data-i18n="bind_machines_without_team"></h3>
+      <div id="bind_noteam" class="muted"></div>
+      <h3 data-i18n="bind_teams_without_machine"></h3>
+      <div id="bind_nomachine" class="muted"></div>
+    </div>
+  </div>
+</section>
+
+<section id="pane_sala" class="pane wide hidden">
+  <h2 data-i18n="room_title"></h2>
+  <p class="help muted" data-i18n="room_help"></p>
+  <div class="toolbar">
+    <div class="filters" id="sala_periodo"></div>
+    <select id="sala_metrica" class="small"></select>
+    <select id="sala_modo" class="small">
+      <option value="rank" data-i18n="room_mode_rank"></option>
+      <option value="grid" data-i18n="room_mode_grid"></option>
+    </select>
+    <button type="button" id="sala_refresh" class="small" data-i18n="refresh"></button>
+    <span class="spacer"></span>
+    <span id="sala_info" class="muted"></span>
+  </div>
+  <div id="sala_out" class="muted"></div>
+</section>
+
+<section id="pane_alertas" class="pane wide hidden">
+  <h2 data-i18n="alerts_history"></h2>
+  <div class="toolbar">
+    <button type="button" id="al_refresh" class="small" data-i18n="refresh"></button>
+    <button type="button" id="al_csv" class="small" data-i18n="alerts_csv"></button>
+  </div>
+  <div id="al_hist" class="muted"></div>
+</section>
 
 <script type="module" src="./app.js"></script>
 </body>

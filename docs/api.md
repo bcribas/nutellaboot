@@ -553,6 +553,7 @@ eram gravadas e não podiam ser lidas por rota nenhuma.
 |---|---|---|---|---|
 | POST | `/api/v1/site-images/{img}/machines/{mac}/events` | M | `{kind, detail?, vendor?}` | `{ok, id}` |
 | GET | `/api/v1/site-images/{img}/alerts` | C, I, S`machines:read` | — | `{alerts:[…]}` abertos da sede |
+| GET | `/api/v1/site-images/{img}/alerts/history?since=&n=` | C, I, S`machines:read` | — | `{history:[{mac, event, id, kind, at, dismissed_at?, dismissed_by?, …}]}`: toda a sede, do mais recente ao mais antigo |
 | POST | `/api/v1/site-images/{img}/machines/{mac}/alerts/{id}/dismiss` | C, I, S`alerts:write` (ou `commands:write`, legado) | — | `{ok, alert}` |
 | POST | `/api/v1/site-images/{img}/machines/{mac}/alerts/dismiss-all` | C, I, S`alerts:write` (ou `commands:write`, legado) | — | `{ok, dismissed}` |
 | GET | `/api/v1/site-images/{img}/machines/{mac}/alerts/history` | C, I, S`machines:read` | — | `{history:[…]}` datado |
