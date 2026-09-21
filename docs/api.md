@@ -11,6 +11,13 @@ Há ainda a documentação interativa gerada automaticamente em
 **`/api/v1/docs`** (OpenAPI navegável, com formulário para testar cada rota) e
 o esquema cru em `/api/v1/openapi.json`.
 
+As respostas que um integrador lê têm **formato publicado** no OpenAPI
+(máquina, ponto e janela de sample, vínculo, roster, webhook, comando, whoami, o
+corpo de erro e, na seção `webhooks`, o evento que o servidor envia). Todo
+esquema é aberto (`additionalProperties: true`) e todo campo é opcional: a
+frota é mista e um campo novo nosso não pode quebrar o validador de um cliente.
+Valide o que você lê, ignore o que não conhece.
+
 ## Credenciais
 
 | Classe | Prefixo | Como enviar |

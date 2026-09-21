@@ -398,6 +398,14 @@ O ambiente de teste tem um nginx externo que faz proxy de
   evento) e reenviado byte a byte nas tentativas. Montar dentro do laço de
   tentativas mudaria o `at` e a assinatura, e o destinatário deduplica por
   `delivery`.
+- **Formato de resposta é `server/app/schemas.py`, e NÃO é `response_model`.**
+  Ligar um modelo numa rota faz o FastAPI reescrever a resposta por ele: coage
+  tipos (`2.0` vira `2`), reordena chaves e engole campo desconhecido, e o
+  status da máquina é JSON livre de propósito. Os esquemas são injetados no
+  documento OpenAPI (`schemas.aplicar`); o fio continua sendo o dict do
+  serviço. Todo modelo é aberto e todo campo opcional. Rota nova que o MOJ lê:
+  acrescente em `schemas.DOCS`; `tests/test_openapi_shapes.py` valida respostas
+  reais e prende o contrato.
 
 ## Estilo
 

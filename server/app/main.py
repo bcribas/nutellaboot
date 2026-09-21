@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 
-from . import errors
+from . import errors, schemas
 
 from .routers import (
     boot,
@@ -124,6 +124,17 @@ def create_app() -> FastAPI:
         generate_unique_id_function=_operation_id,
     )
     errors.instalar(app)
+
+    gerar_openapi = app.openapi
+
+    def openapi_com_formatos() -> dict:
+        # os formatos das respostas entram no DOCUMENTO, não nas rotas: ver
+        # schemas.py para o porquê de não serem response_model
+        if app.openapi_schema is None:
+            schemas.aplicar(gerar_openapi())
+        return app.openapi_schema
+
+    app.openapi = openapi_com_formatos
     app.include_router(health.router)
     app.include_router(boot.router)
     app.include_router(models.router)
