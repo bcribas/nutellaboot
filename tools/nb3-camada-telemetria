@@ -35,6 +35,8 @@ PADRAO_ORIGEM = REPO / "client" / "telemetry"
 # telemetria nem comandos; sem o maratona-wait não há tela de bloqueio.
 OBRIGATORIOS = (
     "usr/share/mlog/agent.sh",
+    "usr/share/mlog/VERSION",
+    "usr/share/mlog/parts.d/00-agente.sh",
     "usr/bin/maratona-wait",
 )
 

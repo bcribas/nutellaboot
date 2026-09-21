@@ -339,3 +339,44 @@ def test_o_status_inteiro_e_json_valido_com_o_relogio_no_topo(tmp_path):
     for bloco in ("hwinfo", "sysresources", "sysdisk", "operations"):
         assert bloco in status
     assert "editors_time_since" in status["operations"]
+
+
+def test_o_agente_diz_a_versao_e_o_que_sabe_medir(tmp_path):
+    """A frota é mista (a camada chega por sede). O MOJ adivinhava o agente
+    novo pela presença de `t_agent`; agora o agente se declara."""
+    mac = tmp_path / "mac-icpc"
+    mac.write_text("52-54-00-12-34-56\n")
+    d = _parte("00-agente.sh", tmp_path, NB_AGENTE_DIR=PARTS.parent, NB_MAC_ARQ=mac)
+    assert d["agent_version"] == (PARTS.parent / "VERSION").read_text().strip() != ""
+    assert d["capabilities"] == ["psi", "oom", "idle", "skew", "editors_since", "ua_mac"]
+
+    sem = _parte("00-agente.sh", tmp_path, NB_AGENTE_DIR=PARTS.parent, NB_MAC_ARQ=tmp_path / "nao")
+    assert "ua_mac" not in sem["capabilities"]
+    # sem o arquivo de versão a parte ainda imprime: uma parte vazia no começo
+    # quebraria o JSON do status inteiro
+    assert _parte("00-agente.sh", tmp_path, NB_AGENTE_DIR=tmp_path)["agent_version"] == ""
+
+
+def test_cada_capacidade_anunciada_tem_quem_a_produza():
+    """Anunciar o que nenhuma parte emite é mentir para quem integra."""
+    produtor = {
+        "psi": ("20-recursos.sh", "psi_mem"),
+        "oom": ("20-recursos.sh", "oom_kills"),
+        "idle": ("20-recursos.sh", "idle_s"),
+        "skew": ("05-relogio.sh", "t_agent"),
+        "editors_since": ("30-operacoes.sh", "editors_time_since"),
+    }
+    anunciadas = (PARTS / "00-agente.sh").read_text(encoding="utf-8")
+    for cap, (arquivo, literal) in produtor.items():
+        assert f'"{cap}"' in anunciadas
+        assert literal in (PARTS / arquivo).read_text(encoding="utf-8"), (cap, arquivo)
+
+
+def test_o_servidor_devolve_a_versao_do_agente(client, image_testes3):
+    hm = {"X-NB-Machine-Key": image_testes3["machine_key"]}
+    hi = {"Authorization": f"Bearer {image_testes3['token']}"}
+    base = "/api/v1/site-images/testes3/machines"
+    client.post(f"{base}/52-54-00-12-34-56/status",
+                json={"agent_version": "2026.09.2", "capabilities": ["psi", "oom"], "t_agent": 1}, headers=hm)
+    st = client.get(base, headers=hi).json()["machines"][0]["status"]
+    assert st["agent_version"] == "2026.09.2" and st["capabilities"] == ["psi", "oom"]

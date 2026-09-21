@@ -152,6 +152,19 @@ de dados e o envio ao servidor de arquivos usa a chave ssh dele. É um
 `--model` por modelo em uso com camada `telemetry` (`GET /api/v1/models`
 lista; `replace_role` tira a anterior de cada um).
 
+**Mudou algo em `client/telemetry/`? Suba a versão** em
+`client/telemetry/usr/share/mlog/VERSION` (ano.mês.sequência) no mesmo commit. É
+o `agent_version` que cada máquina reporta, e o que responde "essa sede já está
+com o agente novo?" sem abrir máquina: `GET …/machines` traz
+`status.agent_version` e `status.capabilities`. A máquina só troca de agente no
+boot seguinte à publicação.
+
+Na produção o nome público não conecta de dentro do servidor (falta hairpin no
+NAT): use `NB3_BASE_URL=http://127.0.0.1:8890`. E a chave de admin está em
+`/root/nutellaboot3-admin.key` junto com outro texto na mesma linha: extraia
+com `grep -o "nb3a_[0-9a-f]*" /root/nutellaboot3-admin.key | head -1` (passar o
+arquivo cru dá `401`).
+
 Não precisa de root: o `-all-root` do `mksquashfs` grava tudo como `root:root`
 sem privilégio nenhum.
 

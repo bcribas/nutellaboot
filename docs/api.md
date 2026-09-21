@@ -464,7 +464,18 @@ O agente novo manda, além do que sempre mandou, `t_agent` (relógio da
 máquina) no topo, `hwinfo.{mac, hostname, dmi_uuid, product_name,
 product_vendor, uptime_s, last_boot}`, `sysresources.{psi_mem, psi_cpu,
 psi_io, oom_kills, idle_s}` e `operations.editors_time_since`. Tudo
-opcional: máquina com agente antigo continua válida. Quando duas máquinas da
+opcional: máquina com agente antigo continua válida.
+
+**Qual agente é este.** A frota é mista (o agente chega por uma camada, sede a
+sede), então não adivinhe a versão pela presença de um campo: o agente se
+declara no topo do status com `agent_version` (ex.: `"2026.09.2"`) e
+`capabilities`, a lista do que ele sabe medir: `psi`, `oom`, `idle`, `skew`
+(manda `t_agent`), `editors_since` e `ua_mac` (o User-Agent desta máquina leva
+o MAC no fim). Campo ausente num agente que o anuncia quer dizer "não deu para
+medir aqui" (kernel sem PSI, sessão sem monitor de ociosidade); sem
+`agent_version`, é o agente antigo.
+
+Quando duas máquinas da
 sede reportam o mesmo `hwinfo.machine_id`, a segunda ganha um alerta
 `identity.duplicate` (com `other_mac`) — home clonada por imagem de disco.
 
