@@ -15,7 +15,9 @@ router = APIRouter(prefix="/api/v1")
 
 
 @router.get("/whoami")
-async def whoami(p=Depends(auth.require_console)) -> dict:
+async def whoami(p=Depends(auth.require_console_or_service)) -> dict:
+    if p.kind == "service":
+        return ownership.whoami_servico(p)
     return ownership.whoami(p)
 
 

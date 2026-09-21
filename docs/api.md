@@ -72,6 +72,12 @@ token da site-image, **M** chave de máquina, **B** chave de boot, **—** abert
 > **401**, exista a imagem ou não; com credencial de outro dono, **404**.
 > A chave de **serviço** é a exceção: como é a administração que a emite, ela
 > recebe 403 de escopo ou de glob, que é o erro útil para quem integra.
+>
+> **401 × 403 para a chave de serviço.** `401` é só para credencial que não
+> vale (ausente, errada, revogada). Uma chave de serviço **válida** que bate
+> numa rota do console recebe `403` com `code: "console_only"`; sem o escopo,
+> `insufficient_scope`; fora do glob, `image_out_of_scope`. Ela também não
+> gasta o limitador de tentativas do console.
 
 ---
 
@@ -181,10 +187,10 @@ ALLOWNETWORKCHANGE='f'
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| POST | `/api/v1/site-images` | C | `{id, fullname, model, unlocked?, wallpaper_locked?, dashboard_hidden?}` | imagem criada **com as credenciais em claro** (única vez) |
+| POST | `/api/v1/site-images` | C | `{id, fullname, model, unlocked?, wallpaper_locked?, dashboard_hidden?, country?}` (`dashboard_hidden` só a administração; `country` é ISO alpha-2) | imagem criada **com as credenciais em claro** (única vez) |
 | POST | `/api/v1/site-images/bulk` | A | TSV ou `{rows:[…]}` | `{results:[…]}`; com `?format=csv`, CSV das credenciais |
-| GET | `/api/v1/site-images?prefix=` | C | — | `{images:[…]}` (o sub-admin vê só as dele) |
-| GET | `/api/v1/site-images/{img}` | C, I | — | `image.json` **sem o `owner` cru** para quem não é o console dono (ver abaixo); sempre com `owner_kind`, `owner_label`, `owner_ref` |
+| GET | `/api/v1/site-images?prefix=` | C, S (qualquer escopo) | — | `{images:[…]}` (o sub-admin vê só as dele). Para a chave de serviço: só as imagens do glob, como `{id, fullname, country?, machines_total}` |
+| GET | `/api/v1/site-images/{img}` | C, I, S (qualquer escopo, dentro do glob) | — | `image.json` **sem o `owner` cru** para quem não é o console dono (ver abaixo); sempre com `owner_kind`, `owner_label`, `owner_ref` |
 | PATCH | `/api/v1/site-images/{img}` | C | `{fullname?, unlocked?, model?, wallpaper_locked?, dashboard_hidden?}` | imagem atualizada |
 | DELETE | `/api/v1/site-images/{img}` | C | — | `204` (apaga também o pendrive gerado em `data/usb/` e o estado de publicação) |
 | POST | `/api/v1/site-images/{img}/token/rotate` | C | — | `{token}` |
@@ -286,7 +292,7 @@ Notas que economizam depuração:
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/whoami` | C | — | `{kind, label, owner, can_create_reserved, can_publish_models, can_manage_invites, quotas, usage}` |
+| GET | `/api/v1/whoami` | C, S (qualquer escopo) | — | console: `{kind, label, owner, can_create_reserved, can_publish_models, can_manage_invites, quotas, usage}`; chave de serviço: `{kind:"service", name, label, scopes, image_globs, images}` |
 | GET | `/api/v1/owners` | A | — | `{owners:[{id, label, quotas, usage, console_ok}]}` |
 | POST | `/api/v1/owners/{id}/disable` | A | `{disabled?: true}` | suspende (ou reativa) o console |
 | PATCH | `/api/v1/owners/{id}/quotas` | A | `{max_models?, max_images?, build_quota?}` | `{id, quotas, usage}` |
@@ -492,8 +498,8 @@ eram gravadas e não podiam ser lidas por rota nenhuma.
 |---|---|---|---|---|
 | POST | `/api/v1/site-images/{img}/machines/{mac}/events` | M | `{kind, detail?, vendor?}` | `{ok, id}` |
 | GET | `/api/v1/site-images/{img}/alerts` | C, I, S`machines:read` | — | `{alerts:[…]}` abertos da sede |
-| POST | `/api/v1/site-images/{img}/machines/{mac}/alerts/{id}/dismiss` | C, I, S`commands:write` | — | `{ok, alert}` |
-| POST | `/api/v1/site-images/{img}/machines/{mac}/alerts/dismiss-all` | C, I, S`commands:write` | — | `{ok, dismissed}` |
+| POST | `/api/v1/site-images/{img}/machines/{mac}/alerts/{id}/dismiss` | C, I, S`alerts:write` (ou `commands:write`, legado) | — | `{ok, alert}` |
+| POST | `/api/v1/site-images/{img}/machines/{mac}/alerts/dismiss-all` | C, I, S`alerts:write` (ou `commands:write`, legado) | — | `{ok, dismissed}` |
 | GET | `/api/v1/site-images/{img}/machines/{mac}/alerts/history` | C, I, S`machines:read` | — | `{history:[…]}` datado |
 
 `kind` conhecido: `usb.storage` (pendrive, HD externo), `usb.phone` (MTP/PTP),
@@ -866,6 +872,13 @@ Resposta (a chave aparece **uma única vez**):
 ```
 
 ### 1b. O que a chave dá
+
+A chave se enxerga: `GET /api/v1/whoami` devolve os escopos, os globs crus
+(`image_globs`; lista vazia = todas) e as imagens que eles cobrem **agora**
+(`images`), e `GET /api/v1/site-images` lista essas imagens com `fullname`,
+`country` (quando se sabe) e `machines_total`. É o preflight: prova que a chave
+vale, diz que escopo falta sem sondar com 403 e dispensa digitar os ids.
+`alerts:write` dispensa alertas sem dar o poder de comando.
 
 `machines:read` lê máquinas, `samples` (por máquina e em lote:
 `GET /site-images/{img}/samples?since&until&limit&active_since`, NDJSON) e o

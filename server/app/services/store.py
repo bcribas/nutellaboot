@@ -469,13 +469,47 @@ def patch_site_image(image_id: str, fields: dict) -> dict:
     d = site_image_dir(image_id)
     with fsdb.locked(d):
         info = fsdb.read_json(d / "image.json") or {}
-        for k in ("fullname", "unlocked", "model", "wallpaper_locked", "build_quota", "dashboard_hidden"):
+        for k in (
+            "fullname", "unlocked", "model", "wallpaper_locked", "build_quota",
+            "dashboard_hidden", "country",
+        ):
             if k in fields and fields[k] is not None:
                 if k == "model" and not model_exists(fields[k]):
                     raise ImageError(f"modelo '{fields[k]}' não existe")
                 info[k] = fields[k]
         fsdb.write_json(d / "image.json", info)
     return info
+
+
+# ISO 3166-1 alpha-2. Lista fechada de propósito: o país derivado do id só vale
+# se as duas letras forem mesmo um país (`26tete` e `26icpclatamtest` dariam
+# "TE" e "IC", que não existem).
+_PAISES = frozenset(
+    "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS "
+    "BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE "
+    "EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM "
+    "HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC "
+    "LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA "
+    "NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW "
+    "SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO "
+    "TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW".split()
+)
+_PAIS_NO_ID = re.compile(r"^\d{2}([a-z]{2})")
+
+
+def country_of(info: dict) -> str:
+    """País da sede (alpha-2), ou "" quando não dá para saber. O campo
+    explícito vence; senão, o id das sedes da competição (`26brspsp`) o traz
+    depois do ano. Imagem pessoal sem o campo fica sem país: inventar um é
+    pior que não dizer."""
+    explicito = str(info.get("country") or "").upper()
+    if explicito in _PAISES:
+        return explicito
+    if info.get("namespace") == "contest":
+        m = _PAIS_NO_ID.match(str(info.get("id", "")))
+        if m and m.group(1).upper() in _PAISES:
+            return m.group(1).upper()
+    return ""
 
 
 def site_image_visivel_na_frota(info: dict) -> bool:

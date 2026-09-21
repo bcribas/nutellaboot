@@ -142,6 +142,42 @@ def visible_site_images(p: auth.Principal, prefix: str = "") -> list[dict]:
     return store.list_site_images(prefix, owner=p.owner)
 
 
+def imagem_para_servico(info: dict, *, completa: bool = False) -> dict:
+    """O que uma chave de serviço vê de uma sede: o bastante para se localizar
+    (id, nome, país, quantas máquinas), nunca o dono nem os cadeados."""
+    from . import machines
+
+    out = {"id": info.get("id", ""), "fullname": info.get("fullname", "")}
+    pais = store.country_of(info)
+    if pais:
+        out["country"] = pais
+    out["machines_total"] = len(machines.list_macs(out["id"])) if out["id"] else 0
+    if completa:
+        for k in ("model", "namespace", "unlocked", "created_at"):
+            if k in info:
+                out[k] = info[k]
+    return out
+
+
+def imagens_para_servico(p: auth.Principal, prefix: str = "") -> list[dict]:
+    return [imagem_para_servico(i) for i in visible_site_images(p, prefix)]
+
+
+def whoami_servico(p: auth.Principal) -> dict:
+    """A chave de serviço se enxergando: sem isto o MOJ provava a chave batendo
+    em `GET machines` e pedia os ids das imagens à mão."""
+    return {
+        "kind": "service",
+        "name": p.name,
+        "label": p.name,
+        "scopes": sorted(p.scopes),
+        # cru, para mostrar a quem administra o que a chave cobre; [] = todas
+        "image_globs": list(p.images),
+        # resolvido AGORA: uma sede criada depois entra sozinha se o glob casar
+        "images": [i["id"] for i in visible_site_images(p)],
+    }
+
+
 # --- criação ---
 
 

@@ -194,7 +194,8 @@ def test_a_chave_le_as_tres_rotas(cliente, frota, ha, chave_dash):
 def test_a_chave_nao_abre_hotconfig_nem_comanda(cliente, frota, ha, chave_dash):
     """As duas promessas do compartilhamento. O hotconfig vive de
     GET /machines (exige machines:read → 403) e comandos exigem console
-    (serviço → 401)."""
+    (serviço → 403 `console_only`: a chave VALE, só não entra ali; 401 fazia o
+    integrador concluir que a chave estava errada)."""
     hb = {"Authorization": f"Bearer {chave_dash}"}
     r = cliente.get("/api/v1/site-images/sala1/machines", headers=hb)
     assert r.status_code == 403
@@ -209,7 +210,7 @@ def test_a_chave_nao_abre_hotconfig_nem_comanda(cliente, frota, ha, chave_dash):
         json={"command": "mlreboot", "targets": {"sala1": "all"}},
         headers={**hb, "X-NB-Console": "1"},
     )
-    assert r.status_code == 401
+    assert r.status_code == 403 and r.json()["code"] == "console_only"
 
 
 def test_servico_sem_o_escopo_nao_le_a_frota(cliente, frota, ha):
@@ -219,7 +220,8 @@ def test_servico_sem_o_escopo_nao_le_a_frota(cliente, frota, ha):
         headers=ha,
     )
     chave = r.json()["key"]
-    assert cliente.get(f"/api/v1/labs?tk={chave}").status_code == 401
+    r = cliente.get(f"/api/v1/labs?tk={chave}")
+    assert r.status_code == 403 and r.json()["code"] == "insufficient_scope"
 
 
 def test_o_glob_da_chave_limita_as_sedes(cliente, frota, ha):

@@ -37,6 +37,9 @@ EVENTOS = [
 ESCOPOS = [
     "machines:read",
     "commands:write",
+    # dispensar alerta, sem o poder de mandar comando (commands:write também
+    # dispensa, por compatibilidade)
+    "alerts:write",
     "bindings:write",
     "roster:read",
     "roster:write",

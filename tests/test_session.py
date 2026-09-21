@@ -117,7 +117,9 @@ def test_chave_de_servico_nao_abre_sessao(client, base, ha):
         json={"name": "moj", "scopes": ["machines:read"]},
         headers=ha,
     ).json()["key"]
-    assert entrar(client, chave).status_code == 401
+    r = entrar(client, chave)
+    assert r.status_code == 403 and r.json()["code"] == "console_only"
+    assert "set-cookie" not in r.headers
 
 
 # --- sair ---

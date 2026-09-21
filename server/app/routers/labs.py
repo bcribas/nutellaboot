@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from .. import auth
+from ..errors import erro
 from ..services import fleet_report, labs, labs_series, ownership, store
 from ..services import machines as m
 from .machines import comandos_bloqueados, publicar_evento
@@ -32,8 +33,10 @@ def _principal_da_frota(request: Request, tk: str = ""):
         raise HTTPException(401, "credencial ausente ou inválida")
     if p.kind in ("admin", "subadmin"):
         return p
-    if p.kind == "service" and "labs:read" in p.scopes:
-        return p
+    if p.kind == "service":
+        if "labs:read" in p.scopes:
+            return p
+        raise erro(403, "insufficient_scope", "a frota pede o escopo labs:read")
     raise HTTPException(401, "credencial ausente ou inválida")
 
 
@@ -227,7 +230,7 @@ async def baixar_do_relatorio(nome: str, request: Request):
     """
     p = auth.principal_de_link(request)
     if p is None or p.kind != "admin":
-        raise HTTPException(401, "credencial ausente ou inválida")
+        raise auth.recusa_de_console(p)
     caminho = fleet_report.caminho_de(nome)
     if caminho is None:
         raise HTTPException(404, "arquivo não existe")

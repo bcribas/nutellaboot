@@ -221,12 +221,18 @@ async def list_alerts(
     return {"alerts": alerts.list_open(image)}
 
 
+# Dispensar alerta tinha o escopo de COMANDO: quem podia limpar a faixa vermelha
+# podia, por tabela, desligar a sala. `alerts:write` separa; `commands:write`
+# continua aceito para não quebrar a chave que o MOJ já tem.
+ESCOPO_DISPENSA = ("alerts:write", "commands:write")
+
+
 @router.post("/site-images/{image}/machines/{mac}/alerts/{alert_id}/dismiss")
 async def dismiss_alert(
     image: str,
     mac: str,
     alert_id: str,
-    p=Depends(auth.require_image_access(service_scope="commands:write")),
+    p=Depends(auth.require_image_access(service_scope=ESCOPO_DISPENSA)),
 ) -> dict:
     mac = m.normalize_mac(mac)
     alerta = alerts.dismiss(image, mac, alert_id, p.name or "console")
@@ -239,7 +245,7 @@ async def dismiss_alert(
 
 @router.post("/site-images/{image}/machines/{mac}/alerts/dismiss-all")
 async def dismiss_all_alerts(
-    image: str, mac: str, p=Depends(auth.require_image_access(service_scope="commands:write"))
+    image: str, mac: str, p=Depends(auth.require_image_access(service_scope=ESCOPO_DISPENSA))
 ) -> dict:
     mac = m.normalize_mac(mac)
     limpos = alerts.dismiss_all(image, mac, p.name or "console")
@@ -454,6 +460,8 @@ async def events(image: str, request: Request, tk: str = Query("")) -> Streaming
 
         # EventSource não recebe cookie: não renova (ver auth.principal_de_link)
         p = sessions.resolve(request.cookies.get(sessions.COOKIE, ""), renovar=False)
+    if p is not None and p.kind == "service" and not p.can_see_image(image):
+        raise erro(403, "image_out_of_scope", "sem acesso a esta imagem")
     if not p or not p.can_see_image(image):
         raise HTTPException(401, "credencial inválida")
 

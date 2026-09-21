@@ -29,7 +29,12 @@ async def create_image(body: SiteImageCreate, p=Depends(auth.require_console)) -
     if body.wallpaper_locked:
         extra["wallpaper_locked"] = True
     if body.dashboard_hidden:
+        if p.kind != "admin":
+            # o PATCH já tinha este portão; a criação não
+            raise HTTPException(403, "só a administração oculta uma imagem do dashboard")
         extra["dashboard_hidden"] = True
+    if body.country:
+        extra["country"] = body.country
     try:
         criada = store.create_site_image(
             body.id,
@@ -121,12 +126,22 @@ async def bulk_create(
 
 
 @router.get("/site-images")
-async def list_images(prefix: str = "", p=Depends(auth.require_console)) -> dict:
+def list_images(prefix: str = "", p=Depends(auth.require_console_or_service)) -> dict:
+    # `def`: para a chave de serviço conta as máquinas de cada sede (disco)
+    if p.kind == "service":
+        return {"images": ownership.imagens_para_servico(p, prefix)}
     return {"images": ownership.visible_site_images(p, prefix)}
 
 
 @router.get("/site-images/{image}")
-async def get_site_image(image: str, p=Depends(auth.require_image_access())) -> dict:
+async def get_site_image(
+    image: str, p=Depends(auth.require_image_access(service_scope=auth.QUALQUER))
+) -> dict:
+    # Qualquer chave de serviço cujo glob cubra a imagem, sem escopo específico:
+    # ela já conhece o id (whoami e a lista o dão) e aqui não há telemetria.
+    # Exigir `machines:read` devolveria o 403 a toda chave só de roster.
+    if p.kind == "service":
+        return ownership.imagem_para_servico(store.get_site_image(image) or {}, completa=True)
     # nunca o image.json cru: o `owner` de uma sede criada por convite é o
     # código do convite, e esta rota atende o token da sede (o hotconfig a lê)
     return ownership.site_image_para(p, store.get_site_image(image) or {})

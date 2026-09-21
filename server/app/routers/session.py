@@ -23,6 +23,9 @@ async def login(body: dict, request: Request, response: Response) -> dict:
     ip = ratelimit.client_ip(request)
 
     p = auth.identify(chave) if chave else None
+    if p is not None and p.kind == "service":
+        # chave válida, porta errada: não é tentativa de adivinhar código
+        raise auth.recusa_de_console(p)
     if p is None or p.kind not in sessions.TIPOS:
         # mesmo limitador da autenticação por cabeçalho: um código de convite é
         # curto o bastante para ser tentado na força bruta

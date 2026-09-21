@@ -224,12 +224,25 @@ def principal_de_link(request: Request, tk: str = "", image_id: str | None = Non
     return p
 
 
+def recusa_de_console(p: Principal | None) -> HTTPException:
+    """A recusa certa para quem bateu numa rota do console.
+
+    Chave de serviço VÁLIDA levava 401 "credencial ausente ou inválida", e o
+    preflight do MOJ concluía que a chave estava errada. 401 é só para
+    credencial que não vale; a que vale e não pode é 403, com o código que diz
+    por quê. (Sub-admin em rota só de admin continua 401: é a invariante 11,
+    o console não confirma o que existe para quem não é dono.)"""
+    if p is not None and p.kind == "service":
+        return erro(403, "console_only", "esta rota é do console; chave de serviço não entra")
+    return _unauthorized()
+
+
 async def require_admin(
     request: Request = None, authorization: str | None = Header(None)
 ) -> Principal:
     p = principal(request, authorization)
     if not p or p.kind != "admin":
-        raise _unauthorized()
+        raise recusa_de_console(p)
     return p
 
 
@@ -247,15 +260,39 @@ async def require_console(
     p = principal(request, authorization)
     if p and p.kind in ("admin", "subadmin"):
         return p
+    if p is not None and p.kind == "service":
+        # antes do limitador: chave válida não é tentativa de adivinhar código,
+        # e não pode gastar o balde do IP (o MOJ levava 429 por perguntar)
+        raise recusa_de_console(p)
     ip = ratelimit.client_ip(request)
     ratelimit.exigir(f"console:{ip}", rate=0.2, burst=10)
     raise _unauthorized()
 
 
-def require_image_access(*, service_scope: str | None = None, allow_machine: bool = False):
+async def require_console_or_service(
+    request: Request, authorization: str | None = Header(None)
+) -> Principal:
+    """Console, ou qualquer chave de serviço válida: as poucas rotas em que o
+    integrador precisa se enxergar (`/whoami`, a lista de imagens)."""
+    p = principal(request, authorization)
+    if p is not None and p.kind == "service":
+        return p
+    return await require_console(request, authorization)
+
+
+# Para `service_scope`: qualquer chave de serviço válida cujo glob cubra a
+# imagem, sem escopo específico.
+QUALQUER = "*"
+
+
+def require_image_access(
+    *, service_scope: str | tuple[str, ...] | None = None, allow_machine: bool = False
+):
     """Dependência para rotas /images/{image}: aceita admin, token da própria
-    imagem e, se `service_scope`, serviço com o escopo; `allow_machine` aceita
-    a chave de máquina da imagem (header X-NB-Machine-Key)."""
+    imagem e, se `service_scope`, serviço com o escopo (uma tupla = qualquer um
+    deles; `QUALQUER` = toda chave válida); `allow_machine` aceita a chave de
+    máquina da imagem (header X-NB-Machine-Key)."""
+    escopos = (service_scope,) if isinstance(service_scope, str) else tuple(service_scope or ())
 
     async def dep(
         image: str,
@@ -277,7 +314,7 @@ def require_image_access(*, service_scope: str | None = None, allow_machine: boo
             # serviço é credencial que a administração emitiu (o MOJ): erro
             # claro vale mais que sigilo, e quem integra precisa distinguir
             # "faltou escopo" de "essa sala não é sua"
-            if service_scope is None or service_scope not in p.scopes:
+            if not escopos or (QUALQUER not in escopos and not p.scopes.intersection(escopos)):
                 raise erro(403, "insufficient_scope", "escopo insuficiente")
             if not _site_image_dir(image).is_dir():
                 raise erro(404, "image_not_found", "imagem não existe")

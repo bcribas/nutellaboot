@@ -33,6 +33,8 @@ async def relatorio(
     tk: str = Query(""),
 ):
     p = auth.principal_de_link(request, tk, image)
+    if p is not None and p.kind == "service" and not p.can_see_image(image):
+        raise erro(403, "image_out_of_scope", "sem acesso a esta imagem")
     if p is None or not p.can_see_image(image):
         raise erro(401, "unauthorized", "credencial ausente ou inválida")
     if p.kind == "service" and "machines:read" not in p.scopes:
