@@ -12,6 +12,7 @@
   <h1 data-i18n="admin_title"></h1>
   <span class="spacer"></span>
   <!-- só aparece depois de entrar: sem sessão a tela da frota responde 401 -->
+  <span id="healthinfo" class="sub hidden"></span>
   <a id="gofrota" class="btn small primary hidden" href="/laboratorios/" data-i18n="fleet_title"></a>
   <button type="button" id="logout" class="small hidden" data-i18n="admin_logout"></button>
   <span id="lang"></span>
@@ -130,6 +131,8 @@
         </label>
       </div>
       <div class="actions">
+        <label class="inline" data-admin-only><input type="checkbox" id="newdashhidden">
+          <span data-i18n="dashboard_hidden_at_creation"></span></label>
         <button type="button" id="create" class="primary" data-i18n="create"></button>
         <span id="createstatus" class="muted"></span>
       </div>
@@ -249,6 +252,14 @@
       <div class="actions">
         <button type="button" id="pub_retry" class="small" data-i18n="publish_retry"></button>
         <span id="pub_info" class="muted"></span>
+        <span class="spacer"></span>
+        <input type="text" id="pub_file" list="pub_files" data-i18n-placeholder="publish_file_label" style="max-width:300px">
+        <datalist id="pub_files"></datalist>
+        <select id="pub_kind" class="small">
+          <option value="layers" data-i18n="publish_kind_layers"></option>
+          <option value="usb" data-i18n="publish_kind_usb"></option>
+        </select>
+        <button type="button" id="pub_go" class="small" data-i18n="publish_go"></button>
       </div>
       <div id="publist" class="muted" style="margin-top:10px" data-i18n="publish_none"></div>
     </div>

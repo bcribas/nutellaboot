@@ -7,6 +7,7 @@ import { esc } from "/common/ui.js";
 import { montarSeletor } from "/common/fleetview.js";
 import { iniciarChaves, carregarChaves, abrirChavesDaImagem } from "./chaves.js";
 import { carregarDonos, carregarConvites, camposExtrasDoConvite } from "./donos.js";
+import { abrirWebhooks, verLogDoBuild, formularioRegistrarCamada, publicarArquivo, editarImagem, aprovarCriando } from "./extras.js";
 
 const $ = (s) => document.querySelector(s);
 const A = { kind: "admin" };
@@ -214,8 +215,18 @@ function renderImages() {
     chaves.onclick = () => abrirChavesDaImagem(img.id);
     // perfil e placar são decisão da administração: para o sub-admin os botões
     // só davam 403
-    if (ehAdmin()) actions.append(perfil, " ", oculta, " ");
-    actions.append(cam, " ", ver, " ", chaves, " ", rot, " ", del);
+    const editar = document.createElement("button");
+    editar.className = "small";
+    editar.textContent = t("image_edit");
+    editar.onclick = () => editarImagem(img, modelos.filter((x) => x.layers > 0), ehAdmin());
+    if (ehAdmin()) {
+      const wh = document.createElement("button");
+      wh.className = "small";
+      wh.textContent = t("webhooks_button");
+      wh.onclick = () => abrirWebhooks(img.id);
+      actions.append(perfil, " ", oculta, " ", wh, " ");
+    }
+    actions.append(editar, " ", cam, " ", ver, " ", chaves, " ", rot, " ", del);
     tr.appendChild(actions);
     tbody.appendChild(tr);
   }
@@ -223,9 +234,22 @@ function renderImages() {
   box.appendChild(table);
 }
 
+async function mostrarSaude() {
+  try {
+    const h = await api.get("/api/v1/health", A);
+    const el_ = $("#healthinfo");
+    el_.textContent = t("health_info", { v: h.version, gb: Math.round(h.disk_free_gb) });
+    el_.classList.toggle("warn", h.disk_free_gb < 20);
+    el_.classList.remove("hidden");
+  } catch {
+    /* sem a saúde, a tela segue */
+  }
+}
+
 async function load() {
   eu = await api.get("/api/v1/whoami", A);
   aplicarPerfil();
+  mostrarSaude();
 
   const [imgs, mods] = await Promise.all([
     api.get("/api/v1/site-images", A),
@@ -350,10 +374,16 @@ function renderModels() {
     const dup = document.createElement("button");
     dup.className = "small";
     dup.textContent = t("model_duplicate");
-    dup.onclick = () => {
-      $("#mod_from").value = m.name;
-      $("#mod_name").focus();
-      toast(t("model_duplicate_hint"));
+    dup.onclick = async () => {
+      const nome = prompt(t("model_duplicate_name"), `${m.name}-copia`);
+      if (!nome) return;
+      try {
+        await api.post(`/api/v1/models/${encodeURIComponent(m.name)}/duplicate`, { name: nome.trim() }, A);
+        toast(t("model_duplicated"));
+        load();
+      } catch (e) {
+        toast(`${t("error")}: ${e.message}`, true);
+      }
     };
     acoes.append(dup, " ");
     if (m.can_manage) {
@@ -461,6 +491,17 @@ function layersEditor(m, layers) {
         await api.put(`/api/v1/models/${m.name}/layers/order`, { files: ordem }, A);
         showModel(m);
       };
+      const desce = document.createElement("button");
+      desce.className = "small";
+      desce.textContent = "↓";
+      // a base fica por último (invariante 13): nada desce para baixo dela
+      desce.disabled = idx >= layers.length - 1 || (layers[idx + 1].role || "") === "base";
+      desce.onclick = async () => {
+        const ordem = layers.map((x) => x.file);
+        [ordem[idx + 1], ordem[idx]] = [ordem[idx], ordem[idx + 1]];
+        await api.put(`/api/v1/models/${m.name}/layers/order`, { files: ordem }, A);
+        showModel(m);
+      };
       const del = document.createElement("button");
       del.className = "small danger";
       del.textContent = t("remove");
@@ -468,7 +509,7 @@ function layersEditor(m, layers) {
         await api.del(`/api/v1/models/${m.name}/layers/${encodeURIComponent(c.file)}`, A);
         showModel(m);
       };
-      acoes.append(sobe, " ", del);
+      acoes.append(sobe, " ", desce, " ", del);
     }
     tr.appendChild(acoes);
     table.appendChild(tr);
@@ -560,6 +601,15 @@ async function locksEditor(m) {
     const tr = document.createElement("tr");
     const td0 = document.createElement("td");
     td0.innerHTML = `<span class="mono">${esc(f.key)}</span><br><span class="muted">${esc(tr_(f.label))}</span>`;
+    if (m.can_manage) {
+      // o rótulo e a ajuda que a sede lê, nos três idiomas (a API já aceitava;
+      // a tela só mandava o padrão). O servidor exige os três preenchidos.
+      const textos = document.createElement("button");
+      textos.className = "small";
+      textos.textContent = t("field_texts_edit");
+      textos.onclick = () => editarTextosDoCampo(m, f, () => showModel(m));
+      td0.append(" ", textos);
+    }
 
     // O valor padrão importa DUAS vezes: é o que a sede vê ao abrir o
     // formulário, e — quando o campo está trancado — é o valor que vai para
@@ -617,6 +667,61 @@ async function locksEditor(m) {
     wrap.appendChild(salvar);
   }
   return wrap;
+}
+
+function editarTextosDoCampo(m, f, aoSalvar) {
+  const dlg = document.createElement("dialog");
+  dlg.className = "reauth";
+  const corpo = document.createElement("div");
+  const campos = {};
+  for (const [chave, rotulo, tag] of [["label", "field_label_lang", "input"], ["help", "field_help_lang", "textarea"]]) {
+    campos[chave] = {};
+    for (const lang of ["pt", "en", "es"]) {
+      const lab = document.createElement("label");
+      lab.className = "fld";
+      const sp = document.createElement("span");
+      sp.textContent = t(rotulo, { lang });
+      const inp = document.createElement(tag);
+      const atual = f[chave];
+      inp.value = typeof atual === "string" ? atual : (atual && atual[lang]) || "";
+      campos[chave][lang] = inp;
+      lab.append(sp, inp);
+      corpo.appendChild(lab);
+    }
+  }
+  const salvar = document.createElement("button");
+  salvar.className = "primary";
+  salvar.textContent = t("save");
+  salvar.onclick = async () => {
+    const corpoPatch = {};
+    for (const chave of ["label", "help"]) {
+      const obj = Object.fromEntries(Object.entries(campos[chave]).map(([l, i]) => [l, i.value.trim()]));
+      if (Object.values(obj).some((v) => v) && Object.values(obj).some((v) => !v)) {
+        return toast(t("field_texts_need_all"), true);
+      }
+      if (Object.values(obj).every((v) => v)) corpoPatch[chave] = obj;
+    }
+    if (!Object.keys(corpoPatch).length) return dlg.close();
+    try {
+      await api.patch(`/api/v1/models/${m.name}/schema/fields/${encodeURIComponent(f.key)}`, corpoPatch, A);
+      dlg.close();
+      aoSalvar();
+    } catch (e) {
+      toast(`${t("error")}: ${e.message}`, true);
+    }
+  };
+  const fechar = document.createElement("button");
+  fechar.textContent = t("close");
+  fechar.onclick = () => dlg.close();
+  const h = document.createElement("h2");
+  h.textContent = f.key;
+  const acoes = document.createElement("div");
+  acoes.className = "actions";
+  acoes.append(salvar, fechar);
+  dlg.append(h, corpo, acoes);
+  dlg.onclose = () => dlg.remove();
+  document.body.appendChild(dlg);
+  dlg.showModal();
 }
 
 // O controle do valor padrão, do tipo do campo. Uma caixa de texto para tudo
@@ -809,6 +914,12 @@ async function loadLayerBuilds() {
         b.error ? `<br><span class="muted">${String(b.error).slice(0, 80)}</span>` : ""
       }</td>`;
     const td = document.createElement("td");
+    // o erro vinha cortado em 80 caracteres e era a única pista: o log inteiro
+    const log = document.createElement("button");
+    log.className = "small";
+    log.textContent = t("layer_log_view");
+    log.onclick = () => verLogDoBuild(b.id);
+    td.append(log, " ");
     if (b.state === "done" && b.output) {
       const info = document.createElement("div");
       info.className = "muted mono";
@@ -943,6 +1054,11 @@ async function showImageLayers(image) {
   hist.className = "muted";
   hist.textContent = `${builds.used}${builds.quota ? "/" + builds.quota : ""} builds`;
   inner.appendChild(hist);
+  inner.appendChild(formularioRegistrarCamada(image, () => {
+    box.remove();
+    showImageLayers(image);
+    loadPublish();
+  }));
   const fechar = document.createElement("button");
   fechar.textContent = t("close");
   fechar.onclick = () => box.remove();
@@ -1099,6 +1215,15 @@ async function loadPublish() {
   $("#pub_info").textContent = data.enabled
     ? `${data.host}`
     : t("publish_disabled_warn");
+  const dl = $("#pub_files");
+  if (dl) {
+    dl.innerHTML = "";
+    for (const f of data.files) {
+      const o = document.createElement("option");
+      o.value = f.file;
+      dl.appendChild(o);
+    }
+  }
   if (!data.files.length) {
     box.className = "muted";
     box.textContent = t("publish_none");
@@ -1161,6 +1286,14 @@ async function loadRequests() {
       );
       loadRequests();
     };
+    const cr = document.createElement("button");
+    cr.className = "small";
+    cr.textContent = t("request_approve_create");
+    cr.onclick = () => aprovarCriando(req, modelos.filter((x) => x.layers > 0), (criada) => {
+      document.querySelector("main").prepend(credentialsCard(criada));
+      loadRequests();
+      load();
+    });
     const rj = document.createElement("button");
     rj.className = "small danger";
     rj.textContent = t("request_reject");
@@ -1168,7 +1301,7 @@ async function loadRequests() {
       await api.post(`/api/v1/requests/${req.id}/reject`, {}, A);
       loadRequests();
     };
-    td.append(ap, " ", rj);
+    td.append(ap, " ", cr, " ", rj);
     tr.appendChild(td);
     table.appendChild(tr);
   }
@@ -1184,9 +1317,11 @@ async function createImage() {
   let info;
   try {
     const wallpaper_locked = $("#newwalllock").checked;
+    // fora do placar desde a criação: só a administração (a caixa é admin-only)
+    const dashboard_hidden = ehAdmin() && $("#newdashhidden").checked;
     info = await api.post(
       "/api/v1/site-images",
-      { id, fullname, model, unlocked, wallpaper_locked },
+      { id, fullname, model, unlocked, wallpaper_locked, dashboard_hidden },
       A
     );
   } catch (e) {
@@ -1393,6 +1528,8 @@ async function main() {
   $("#layi_build").onclick = buildLayerForImage;
   $("#usb_build").onclick = buildGenericUsb;
   $("#sharedash").onclick = criarChaveDash;
+  $("#pub_go").onclick = publicarArquivo;
+  document.addEventListener("nb3:publicacao-mudou", loadPublish);
   $("#pub_retry").onclick = async () => {
     const r = await api.post("/api/v1/publish/retry", {}, A);
     toast(`${r.ok}/${r.retried}`);

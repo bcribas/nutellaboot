@@ -45,6 +45,8 @@ GLOBALS = {
     "sessionStorage", "localStorage",
     "URLSearchParams", "URL", "FormData", "Blob", "File",
     "EventSource", "WebSocket", "AudioContext", "DOMParser", "CustomEvent",
+    # o segredo do webhook é gerado no navegador (crypto.getRandomValues)
+    "crypto", "Uint8Array",
     "JSON", "Math", "Date", "Promise", "Array", "Object", "String", "Number",
     "Boolean", "Set", "Map", "Error", "TypeError", "RegExp",
     "encodeURIComponent", "decodeURIComponent", "parseInt", "parseFloat",
@@ -260,9 +262,9 @@ def test_o_verificador_acusa_o_bug_original():
     e confere que o verificador aponta exatamente o `template`. Se um dia o
     verificador afrouxar a ponto de deixar isso passar, este teste avisa."""
     texto = (REPO / "web" / "admin" / "app.js").read_text(encoding="utf-8")
-    alvo = "{ id, fullname, model, unlocked, wallpaper_locked }"
+    alvo = "{ id, fullname, model, unlocked, wallpaper_locked, dashboard_hidden }"
     assert alvo in texto, "a linha da criação de imagem mudou; atualize o teste"
-    quebrado = texto.replace(alvo, "{ id, fullname, model: template, unlocked, wallpaper_locked }")
+    quebrado = texto.replace(alvo, "{ id, fullname, model: template, unlocked, wallpaper_locked, dashboard_hidden }")
 
     nomes = {nome for _, nome in usos_sem_declaracao(quebrado)}
     assert nomes == {"template"}, nomes

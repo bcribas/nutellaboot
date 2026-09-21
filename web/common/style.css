@@ -309,3 +309,7 @@ dialog.reauth::backdrop { background: rgba(0, 0, 0, .6); }
 dialog.reauth input[type="password"] { width: 100%; margin: 8px 0 12px; }
 dialog.reauth h3 { margin: 16px 0 6px; }
 tr.row-outside td { opacity: .45; }
+dialog.reauth.wide { max-width: 860px; }
+.whrow { border-top: 1px solid var(--line); padding: 10px 0; }
+.whrow input[type="text"] { margin: 6px 0; }
+.registrar { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 8px; }

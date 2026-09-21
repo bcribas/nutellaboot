@@ -1090,6 +1090,16 @@ eles cobrem), então o MOJ não precisa que ninguém digite os ids das sedes.
 
 #### Webhooks do MOJ: quem instala, para onde apontam e onde ver a falha
 
+Pela tela: na linha da imagem no `/admin/`, **Webhooks** abre a lista da sede
+(a do MOJ inclusive): acrescentar, mudar os eventos, trocar o segredo (gerado
+no navegador e mostrado uma vez), **Enviar teste** (bate na URL agora e mostra
+o status) e as entregas que falharam. Ali também: **Editar** (nome, modelo,
+cota de builds), e nas camadas da imagem, **Registrar uma camada já
+construída** (o caminho do `nb3-pack-upper`: arquivo em `data/blobs` e md5).
+No cartão de publicação, **Publicar** manda um arquivo específico. Em
+Pedidos, **Criar a imagem** aprova criando a sede na hora (com id, modelo e
+perfil) em vez de emitir um código.
+
 Com `webhooks:write` o próprio MOJ instala e remove o webhook dele
 (`POST …/webhooks`, `DELETE …/webhooks/<id>`), sem a chave de administração.
 Cada chave só vê e só mexe nos webhooks que criou, e eles só apontam para

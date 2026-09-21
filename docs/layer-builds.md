@@ -323,3 +323,10 @@ anterior de mesmo nome de arquivo.
 As camadas construídas localmente ficam em `data/blobs/` e são servidas em
 `/blobs/<arquivo>`. O md5 vai no manifest, e a máquina confere depois de
 baixar — camada corrompida no caminho é descartada e baixada de novo.
+
+## Acompanhar pela tela
+
+Cada build na lista do `/admin/` tem **ver log**: abre os últimos 8000
+caracteres da saída e acompanha sozinho enquanto o build está na fila ou
+rodando. Antes só apareciam os primeiros 80 caracteres do erro, e um build que
+falhava era um beco sem saída na interface.
