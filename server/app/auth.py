@@ -331,6 +331,32 @@ def require_image_access(
     return dep
 
 
+def require_admin_or_service(scope: str):
+    """Rota de uma imagem que é da ADMINISTRAÇÃO (sub-admin e token da sede não
+    entram) e que uma chave de serviço com `scope` também alcança, dentro do
+    glob dela. É o caso dos webhooks."""
+
+    async def dep(
+        image: str, request: Request = None, authorization: str | None = Header(None)
+    ) -> Principal:
+        p = principal(request, authorization)
+        if p is not None and p.kind == "service":
+            if scope not in p.scopes:
+                raise erro(403, "insufficient_scope", "escopo insuficiente")
+            if not _site_image_dir(image).is_dir():
+                raise erro(404, "image_not_found", "imagem não existe")
+            if not p.can_see_image(image):
+                raise erro(403, "image_out_of_scope", "sem acesso a esta imagem")
+            return p
+        if not p or p.kind != "admin":
+            raise _unauthorized()
+        if not _site_image_dir(image).is_dir():
+            raise erro(404, "image_not_found", "imagem não existe")
+        return p
+
+    return dep
+
+
 def require_machine(image: str, x_nb_machine_key: str | None) -> Principal:
     """Só a chave de máquina da imagem (telemetria/fila)."""
     if not _site_image_dir(image).is_dir():

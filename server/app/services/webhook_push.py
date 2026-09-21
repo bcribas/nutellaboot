@@ -28,7 +28,6 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .. import fsdb
 from ..settings import VERSION
 from . import logcap
 from .store import site_image_dir
@@ -52,7 +51,10 @@ _semaforos: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaph
 
 
 def webhooks_for(image_id: str, event: str) -> list[dict]:
-    conf = fsdb.read_json(site_image_dir(image_id) / "webhooks.json", []) or []
+    from . import webhooks_store
+
+    # pelo store: o arquivo antigo (sem id, sem dono) sai normalizado
+    conf = webhooks_store.carregar(image_id)
     return [w for w in conf if not w.get("events") or event in w["events"]]
 
 
@@ -85,6 +87,18 @@ async def _deliver(image_id: str, w: dict, event: str, delivery: str, body: byte
     if w.get("secret"):
         headers["X-NB-Signature"] = sign(w["secret"], body)
 
+    if str(w.get("owner", "")).startswith("service:"):
+        # de novo, na hora de bater: o DNS pode ter mudado desde o cadastro
+        from . import webhook_guard
+
+        motivo = await asyncio.to_thread(webhook_guard.motivo_da_recusa, w["url"])
+        if motivo:
+            linha = {"at": int(time.time()), "delivery": delivery, "event": event,
+                     "webhook_id": w.get("id", ""), **_destino(w["url"]), "attempts": 0,
+                     "error": "forbidden_destination"}
+            await asyncio.to_thread(_registra, image_id, linha)
+            return False
+
     loop = asyncio.get_running_loop()
     semaforo = _semaforos.get(loop)
     if semaforo is None:
@@ -115,6 +129,50 @@ async def _deliver(image_id: str, w: dict, event: str, delivery: str, body: byte
     }
     await asyncio.to_thread(_registra, image_id, linha)
     return False
+
+
+async def testar(image_id: str, w: dict) -> dict:
+    """Uma entrega só, esperada, para o botão "enviar teste": diz na hora se a
+    URL responde e se o destinatário aceita a assinatura."""
+    delivery = uuid.uuid4().hex
+    corpo = json.dumps(
+        {"event": "webhook.test", "image": image_id, "at": int(time.time()),
+         "delivery": delivery, "data": {"test": True, "webhook_id": w.get("id", "")}},
+        ensure_ascii=False,
+    ).encode()
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": f"NutellaBoot3/{VERSION}",
+        "X-NB-Event": "webhook.test",
+        "X-NB-Delivery": delivery,
+        "X-NB-Attempt": "1",
+        "X-NB-Webhook-Id": str(w.get("id", "")),
+    }
+    if w.get("secret"):
+        headers["X-NB-Signature"] = sign(w["secret"], corpo)
+    inicio = time.monotonic()
+    saida = {"ok": False, "status_code": None, "error": "", "delivery": delivery}
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
+            r = await client.post(w["url"], content=corpo, headers=headers)
+        saida.update(ok=r.status_code < 400, status_code=r.status_code)
+    except httpx.HTTPError as e:
+        saida["error"] = type(e).__name__
+    saida["elapsed_ms"] = int((time.monotonic() - inicio) * 1000)
+    return saida
+
+
+def falhas(image_id: str, n: int = 100) -> list[dict]:
+    caminho = site_image_dir(image_id) / LOG
+    if not caminho.is_file():
+        return []
+    out = []
+    for linha in caminho.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]:
+        try:
+            out.append(json.loads(linha))
+        except ValueError:
+            continue
+    return out
 
 
 def emit(image_id: str, event: str, data: dict) -> None:

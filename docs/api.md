@@ -797,8 +797,13 @@ de pacotes extras, gastando a cota dela:
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/site-images/{img}/webhooks` | A | — | lista com o segredo mascarado (`***`) |
-| PUT | `/api/v1/site-images/{img}/webhooks` | A | `{webhooks:[{url, secret, events}]}` | `{ok, webhooks}` |
+| GET | `/api/v1/site-images/{img}/webhooks` | A, S`webhooks:write` | — | `{webhooks:[{id, url, secret, events, owner, created_at}]}`, com o segredo mascarado (`***`). A chave de serviço vê só os que ela criou |
+| POST | `/api/v1/site-images/{img}/webhooks` | A, S`webhooks:write` | `{url, secret?, events?}` | `201` a entrada com `id` e `created:true`. A mesma `url` pelo mesmo dono atualiza a entrada (`200`, `created:false`, mesmo `id`) em vez de duplicar |
+| PUT | `/api/v1/site-images/{img}/webhooks/{id}` | A, S`webhooks:write` | qualquer de `{url, events, secret}` | a entrada. Mandar só `secret` é a rotação do segredo |
+| DELETE | `/api/v1/site-images/{img}/webhooks/{id}` | A, S`webhooks:write` | — | `204` |
+| POST | `/api/v1/site-images/{img}/webhooks/{id}/test` | A, S`webhooks:write` | — | entrega `webhook.test` agora: `{ok, status_code, error, elapsed_ms, delivery}` |
+| GET | `/api/v1/site-images/{img}/webhooks/deliveries?n=` | A, S`webhooks:write` | — | `{deliveries:[…]}`: as entregas que esgotaram as tentativas (`webhooks.log`) |
+| PUT | `/api/v1/site-images/{img}/webhooks` | A | `{webhooks:[{id?, url, secret?, events}]}` | `{ok, webhooks, kept}`: a lista inteira, só da administração (ver abaixo) |
 | POST | `/api/v1/service-keys` | A | `{name, scopes:[…], images:[globs]}` | `{name, key, scopes, images}` |
 | GET | `/api/v1/service-keys` | A | — | lista sem as chaves |
 | DELETE | `/api/v1/service-keys/{nome}` | A | — | `204` |
@@ -807,6 +812,27 @@ Eventos disponíveis: `machine.first_seen`, `machine.status`, `machine.locked`, 
 
 `events` vazio significa "todos os eventos". A URL precisa começar com
 `http://` ou `https://`, e cada evento é validado contra o catálogo.
+
+Cada webhook tem um **dono**: `admin`, ou `service:<nome>` quando foi uma chave
+de serviço que o criou. A chave de serviço só enxerga e só mexe nos seus (o de
+outro dono responde `404 webhook_not_found`), nas imagens do glob dela, com no
+máximo 5 por imagem e segredo obrigatório (16 caracteres ou mais). Sub-admin e
+token da sede não entram aqui: um webhook é o servidor batendo numa URL
+escolhida por quem o configura, de dentro da rede de gestão.
+
+Pelo mesmo motivo, a URL de um webhook de chave de **serviço** precisa ser
+`https` para um endereço público. Destino interno só quando a administração o
+libera em `data/server.json`
+(`{"webhooks": {"allow_hosts": ["moj.interno", "10.1.0.0/16"]}}`); fora disso
+vem `400 webhook_url_forbidden`. A conferência roda ao gravar e de novo a cada
+entrega. Os webhooks da administração apontam para onde ela quiser.
+
+O **`PUT` da lista inteira** continua existindo para a administração, e foi
+feito para o ler-e-regravar não destruir nada: a entrada é casada por `id` e
+depois por `url` (e mantém `id`, dono e data); `secret` ausente ou igual à
+máscara `***` **mantém o segredo gravado** (`""` limpa); e webhook de chave de
+serviço que ficou de fora **não é apagado** (`kept` diz quantos). Para apagar,
+use o `DELETE` por `id`.
 
 ---
 
@@ -986,7 +1012,18 @@ curl -sS https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/machi
 
 ### 7. Receber eventos por webhook
 
-Configuração (pela administração):
+Com o escopo `webhooks:write`, a própria chave de serviço instala o webhook (e
+reinstalar com a mesma URL não duplica):
+
+```bash
+curl -sS -X POST https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/webhooks \
+  -H "Authorization: Bearer $NB3S" -H 'Content-Type: application/json' \
+  -d '{"url": "https://moj.naquadah.com.br/hooks/nutellaboot?contest=c1",
+       "secret": "um-segredo-de-16-caracteres-ou-mais",
+       "events": ["alert.raised", "alert.dismissed"]}'
+```
+
+Ou pela administração, com a lista inteira:
 
 ```bash
 curl -sS -X PUT https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brbr/webhooks \

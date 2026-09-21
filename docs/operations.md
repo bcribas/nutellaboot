@@ -986,8 +986,38 @@ vez pela administração (`docs/api.md`, seção "Integração com o MOJ"):
 ```bash
 curl -sS -X POST "$SERVER/api/v1/service-keys" -H "Authorization: Bearer $ADMIN_KEY" \
     -H 'Content-Type: application/json' \
-    -d '{"name":"moj","scopes":["machines:read","commands:write","bindings:write","roster:read","roster:write"],"images":["26*"]}'
+    -d '{"name":"moj","scopes":["machines:read","commands:write","alerts:write","bindings:write","roster:read","roster:write","webhooks:write"],"images":["26*"]}'
 ```
+
+O ideal é **uma chave por evento**, com o glob das imagens daquele evento. A
+chave se enxerga (`GET /api/v1/whoami` devolve escopos, globs e as imagens que
+eles cobrem), então o MOJ não precisa que ninguém digite os ids das sedes.
+
+#### Webhooks do MOJ: quem instala, para onde apontam e onde ver a falha
+
+Com `webhooks:write` o próprio MOJ instala e remove o webhook dele
+(`POST …/webhooks`, `DELETE …/webhooks/<id>`), sem a chave de administração.
+Cada chave só vê e só mexe nos webhooks que criou, e eles só apontam para
+`https` de endereço público. Se o receptor estiver numa rede interna, libere o
+destino em `data/server.json` (é arquivo de dado, não de código; vale na hora,
+sem reiniciar):
+
+```json
+{"webhooks": {"allow_hosts": ["moj.interno", "10.1.0.0/16"]}}
+```
+
+Quando o MOJ diz que "não recebeu o evento":
+
+1. `POST …/webhooks/<id>/test` manda um `webhook.test` agora e devolve o status
+   que o receptor respondeu (ou o erro de conexão).
+2. `GET …/webhooks/deliveries` (ou o arquivo
+   `data/site-images/<sede>/webhooks.log`) lista as entregas que esgotaram as
+   três tentativas: evento, `delivery`, host, caminho e o último status. `error:
+   "dropped"` quer dizer que havia entregas demais em voo (receptor morto
+   assinando `machine.status`); `forbidden_destination`, que o destino deixou
+   de ser público.
+3. Peça ao MOJ para **listar os eventos** que quer: `events: []` assina tudo,
+   inclusive `machine.status`, dezenas por segundo na frota.
 
 Com `machines:read` ele lê as máquinas (`?active_since=` pula quem não
 reportou), as séries em lote (`GET …/site-images/<sede>/samples?since&until&

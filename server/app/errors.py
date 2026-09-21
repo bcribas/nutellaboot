@@ -48,6 +48,12 @@ CODIGOS = {
     "user_not_in_roster": "o user_id do vínculo não está no roster da imagem",
     "command_not_allowed": "o comando não está na lista de comandos aceitos",
     "command_blocked": "o comando está bloqueado pelo cadeado do modelo",
+    "webhook_not_found": "o webhook não existe (ou é de outro dono)",
+    "webhook_url_forbidden": "chave de serviço só aponta webhook para https público, ou destino liberado",
+    "webhook_limit": "teto de webhooks por chave de serviço nesta imagem",
+    "invalid_url": "a url não é http(s)",
+    "invalid_event": "evento fora do catálogo",
+    "invalid_secret": "segredo ausente, curto demais ou igual à máscara",
     "no_target": "nenhuma máquina alvo (ou `target` malformado)",
 }
 
