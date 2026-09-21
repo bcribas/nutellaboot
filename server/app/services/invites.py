@@ -105,6 +105,9 @@ def is_valid(code: str) -> tuple[bool, str]:
     inv = get(code)
     if inv is None:
         return False, "código inválido"
+    if inv.get("revoked"):
+        # revogado fecha as duas portas: o console (abaixo) e a criação
+        return False, "código revogado"
     if inv.get("expires_at") and time.time() > inv["expires_at"]:
         return False, "código expirado"
     if len(inv.get("used_images", [])) >= inv.get("max_images", 1):

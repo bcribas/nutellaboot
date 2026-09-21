@@ -127,7 +127,9 @@ async def list_images(prefix: str = "", p=Depends(auth.require_console)) -> dict
 
 @router.get("/site-images/{image}")
 async def get_site_image(image: str, p=Depends(auth.require_image_access())) -> dict:
-    return store.get_site_image(image) or {}
+    # nunca o image.json cru: o `owner` de uma sede criada por convite é o
+    # código do convite, e esta rota atende o token da sede (o hotconfig a lê)
+    return ownership.site_image_para(p, store.get_site_image(image) or {})
 
 
 @router.patch("/site-images/{image}")

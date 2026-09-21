@@ -9,6 +9,7 @@
 
 import * as api from "/common/api.js";
 import { t } from "/common/i18n.js";
+import { esc } from "/common/ui.js";
 
 const RECARGA_MS = 4000;
 
@@ -67,7 +68,7 @@ export function usbBlock(imageId, token = "") {
       // recebia 401 e ficava sem o bloco do pendrive inteiro.
       dados = await api.get(`/api/v1/site-images/${encodeURIComponent(imageId)}/usb`, { token });
     } catch (e) {
-      caixa.innerHTML = `<p class="muted">${t("usb_title")}: ${e.message}</p>`;
+      caixa.innerHTML = `<p class="muted">${t("usb_title")}: ${esc(e.message)}</p>`;
       return;
     }
     desenhar(dados);
@@ -79,7 +80,7 @@ export function usbBlock(imageId, token = "") {
     if (!d.kernel.ok) {
       const aviso = document.createElement("p");
       aviso.className = "warn";
-      aviso.innerHTML = `${t("usb_no_kernel")}<br><code>${d.kernel.hint}</code>`;
+      aviso.innerHTML = `${t("usb_no_kernel")}<br><code>${esc(d.kernel.hint)}</code>`;
       caixa.appendChild(aviso);
       return;
     }

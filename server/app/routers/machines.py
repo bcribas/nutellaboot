@@ -363,8 +363,17 @@ async def create_command(
             403,
             f"{command}: {bloqueados[command]} está bloqueado pela organização da maratona",
         )
+    # Sem `target` o padrão é a sala inteira (é contrato). O perigo é o corpo
+    # que QUIS escolher máquinas com o nome errado de campo: o nb3-api mandou
+    # `macs` por meses e um "desligue esta máquina" desligava a sala. Quem
+    # manda um desses campos sem `target` errou, e o erro tem de aparecer.
+    if "target" not in body and any(k in body for k in ("macs", "mac", "targets")):
+        raise HTTPException(400, 'as máquinas vão em "target": "all" ou uma lista de MACs')
     target = body.get("target", "all")
-    macs = m.list_macs(image) if target == "all" else [m.normalize_mac(x) for x in target]
+    if target != "all" and not isinstance(target, list):
+        # uma string aqui seria percorrida letra a letra
+        raise HTTPException(400, '"target" é "all" ou uma lista de MACs')
+    macs = m.list_macs(image) if target == "all" else [m.normalize_mac(str(x)) for x in target]
     macs = [x for x in macs if m.valid_mac(x)]
     if not macs:
         raise HTTPException(400, "nenhuma máquina alvo")

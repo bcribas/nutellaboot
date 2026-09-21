@@ -3,6 +3,7 @@ import * as api from "/common/api.js";
 import { apararColagem, ligarOlho } from "/common/chave.js";
 import { init, t, apply, currentLang } from "/common/i18n.js";
 import { usbBlock } from "/common/usb.js";
+import { esc } from "/common/ui.js";
 
 const $ = (s) => document.querySelector(s);
 const A = { kind: "admin" };
@@ -53,7 +54,7 @@ function credentialsCard(info, title) {
     [t("config_link"), configUrl],
     [t("manage_link"), hotUrl],
   ];
-  card.innerHTML = `<h2>${title || t("created")}: ${info.id}</h2>`;
+  card.innerHTML = `<h2>${esc(title || t("created"))}: ${esc(info.id)}</h2>`;
   const table = document.createElement("table");
   for (const [k, v] of rows) {
     if (!v || v === "—") continue;
@@ -103,9 +104,9 @@ function renderImages() {
     const reserved = img.namespace === "contest";
     const livre = Boolean(img.unlocked);
     tr.innerHTML = `
-      <td class="mono">${img.id}</td>
-      <td>${img.fullname || ""}</td>
-      <td class="muted">${img.model || ""}</td>
+      <td class="mono">${esc(img.id)}</td>
+      <td>${esc(img.fullname)}</td>
+      <td class="muted">${esc(img.model)}</td>
       <td><span class="pill ${reserved ? "warn" : ""}">${
         reserved ? t("reserved_namespace") : t("personal_namespace")
       }</span>
@@ -363,7 +364,7 @@ async function showModel(m) {
   const card = document.createElement("div");
   card.className = "card";
   card.style.borderColor = "var(--accent)";
-  card.innerHTML = `<h3 style="margin:0 0 4px">${t("model_panel_title")} — <span class="mono">${m.name}</span></h3>`;
+  card.innerHTML = `<h3 style="margin:0 0 4px">${t("model_panel_title")} — <span class="mono">${esc(m.name)}</span></h3>`;
   if (!m.can_manage) {
     const aviso = document.createElement("p");
     aviso.className = "help muted";
@@ -396,9 +397,9 @@ function layersEditor(m, layers) {
     const tr = document.createElement("tr");
     const papel = c.role || "extra";
     tr.innerHTML = `<td style="width:32px" class="muted">${idx + 1}</td>
-      <td class="mono">${c.file}</td>
+      <td class="mono">${esc(c.file)}</td>
       <td><span class="pill ${papel === "base" ? "warn" : ""}">${t(ROLE_LABEL[papel] || "role_extra")}</span></td>
-      <td class="muted mono">${(c.md5 || "").slice(0, 10)}…</td>`;
+      <td class="muted mono">${esc((c.md5 || "").slice(0, 10))}…</td>`;
     const acoes = document.createElement("td");
     acoes.style.textAlign = "right";
     if (m.can_manage) {
@@ -510,7 +511,7 @@ async function locksEditor(m) {
     original[f.key] = JSON.stringify(f.default ?? null);
     const tr = document.createElement("tr");
     const td0 = document.createElement("td");
-    td0.innerHTML = `<span class="mono">${f.key}</span><br><span class="muted">${tr_(f.label)}</span>`;
+    td0.innerHTML = `<span class="mono">${esc(f.key)}</span><br><span class="muted">${esc(tr_(f.label))}</span>`;
 
     // O valor padrão importa DUAS vezes: é o que a sede vê ao abrir o
     // formulário, e — quando o campo está trancado — é o valor que vai para
@@ -784,10 +785,8 @@ async function loadLayerBuilds() {
   for (const b of data.builds) {
     const tr = document.createElement("tr");
     const cor = { done: "ok", failed: "bad", running: "warn" }[b.state] || "";
-    tr.innerHTML = `<td><b>${b.name || ""}</b><br><span class="muted mono">${
-      b.image || b.model || ""
-    }</span></td>
-      <td class="muted mono">${(b.packages || []).join(" ")}</td>
+    tr.innerHTML = `<td><b>${esc(b.name)}</b><br><span class="muted mono">${esc(b.image || b.model)}</span></td>
+      <td class="muted mono">${esc((b.packages || []).join(" "))}</td>
       <td><span class="pill ${cor}">${stateLabel(b.state)}</span>${
         b.error ? `<br><span class="muted">${String(b.error).slice(0, 80)}</span>` : ""
       }</td>`;
@@ -834,8 +833,8 @@ function renderLayerTargets() {
   for (const img of images) {
     const row = document.createElement("label");
     row.className = "list-item";
-    row.innerHTML = `<input type="checkbox" value="${img.id}"><span class="grow mono">${img.id}</span>
-      <span class="muted">${img.fullname || ""}</span>`;
+    row.innerHTML = `<input type="checkbox" value="${esc(img.id)}"><span class="grow mono">${esc(img.id)}</span>
+      <span class="muted">${esc(img.fullname)}</span>`;
     box.appendChild(row);
   }
   const sel = $("#layi_img");
@@ -896,11 +895,11 @@ async function showImageLayers(image) {
   const box = document.createElement("div");
   box.className = "detail";
   const inner = document.createElement("div");
-  inner.innerHTML = `<h2>${t("layer_of_image")}: <span class="mono">${image}</span></h2>`;
+  inner.innerHTML = `<h2>${t("layer_of_image")}: <span class="mono">${esc(image)}</span></h2>`;
   const lista = document.createElement("table");
   for (const c of layers.extra) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="mono">${c.file}</td><td class="muted mono">${(c.cdn_url || "").slice(0, 60)}</td>`;
+    tr.innerHTML = `<td class="mono">${esc(c.file)}</td><td class="muted mono">${esc((c.cdn_url || "").slice(0, 60))}</td>`;
     const td = document.createElement("td");
     const rm = document.createElement("button");
     rm.className = "small danger";
@@ -971,7 +970,7 @@ async function loadUsb() {
     kernel.textContent = `${t("usb_kernel")}: vmlinuz ${Math.round(v.size / 1048576)} MB · initrd.img ${Math.round(i.size / 1048576)} MB · ${data}`;
   } else {
     kernel.className = "warn";
-    kernel.innerHTML = `${t("usb_no_kernel")}<br><code>${d.kernel.hint}</code>`;
+    kernel.innerHTML = `${t("usb_no_kernel")}<br><code>${esc(d.kernel.hint)}</code>`;
   }
   box.appendChild(kernel);
 
@@ -980,7 +979,7 @@ async function loadUsb() {
   g.innerHTML =
     `<strong>${t("usb_generic_image")}</strong>: ` +
     (d.generic.status === "done"
-      ? `<span class="mono">${d.generic.file}</span> · ${Math.round((d.generic.size || 0) / 1048576)} MB · ` +
+      ? `<span class="mono">${esc(d.generic.file)}</span> · ${Math.round((d.generic.size || 0) / 1048576)} MB · ` +
         (d.generic.published
           ? `<span class="pill ok">${t("usb_published")}</span> <span class="muted mono">${d.generic.public_url}</span>`
           : `<span class="muted">${t("usb_local")}</span>`)
@@ -1019,7 +1018,7 @@ async function loadUsb() {
       const aviso = img.stale
         ? `<br><span class="warn small">${t("usb_stale_boot_key")}</span>`
         : "";
-      tr.innerHTML = `<td class="mono">${img.id}</td>
+      tr.innerHTML = `<td class="mono">${esc(img.id)}</td>
         <td><span class="pill ${cor}">${usbEstadoTexto(img)}</span>${aviso}</td>`;
       const td = document.createElement("td");
       if (img.status === "done") {
@@ -1101,9 +1100,9 @@ async function loadPublish() {
         : f.status === "failed"
           ? t("publish_status_failed")
           : t("publish_status_disabled");
-    tr.innerHTML = `<td class="mono">${f.file}</td>
+    tr.innerHTML = `<td class="mono">${esc(f.file)}</td>
       <td><span class="pill ${cor}">${rotulo}</span></td>
-      <td class="muted mono">${(f.url || f.error || "").slice(0, 60)}</td>`;
+      <td class="muted mono">${esc((f.url || f.error || "").slice(0, 60))}</td>`;
     table.appendChild(tr);
   }
   box.appendChild(table);
@@ -1131,8 +1130,8 @@ async function loadRequests() {
   const table = document.createElement("table");
   for (const req of pend) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><b>${req.wanted_name}</b><br><span class="muted mono">${req.contact}</span></td>
-      <td class="muted">${req.note || ""}</td>`;
+    tr.innerHTML = `<td><b>${esc(req.wanted_name)}</b><br><span class="muted mono">${esc(req.contact)}</span></td>
+      <td class="muted">${esc(req.note)}</td>`;
     const td = document.createElement("td");
     const ap = document.createElement("button");
     ap.className = "small primary";
@@ -1313,7 +1312,7 @@ async function carregarChavesDash() {
       const linha = document.createElement("div");
       linha.className = "muted";
       linha.style.cssText = "display:flex;gap:10px;align-items:center;font-size:13px;margin-top:4px";
-      linha.innerHTML = `<span class="mono">${k.name}</span>`;
+      linha.innerHTML = `<span class="mono">${esc(k.name)}</span>`;
       const rev = document.createElement("button");
       rev.className = "small";
       rev.textContent = t("dash_share_revoke");

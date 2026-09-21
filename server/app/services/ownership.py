@@ -11,8 +11,10 @@ para derivar site-images deles, mas só de leitura.
 
 from __future__ import annotations
 
+import hashlib
+
 from .. import auth
-from . import owners, store
+from . import invites, owners, store
 
 
 def is_admin(p: auth.Principal) -> bool:
@@ -25,6 +27,43 @@ def quota(p: auth.Principal, recurso: str) -> int | None:
     if is_admin(p):
         return None
     return owners.quotas(p.owner).get(recurso)
+
+
+# --- o dono, do jeito que pode ser mostrado ---
+#
+# O id do dono de um sub-admin é `invite:<CÓDIGO>`, e o código É a credencial
+# de console dele (invariante 18). Então o `owner` cru só sai para a
+# administração e para o próprio dono; para qualquer outro olhar (token da
+# sede, chave de serviço, outro sub-admin vendo um modelo público) vai o
+# rótulo e uma referência curta que não se reverte.
+
+
+def owner_ref(owner: str) -> str:
+    return hashlib.sha256(owner.encode()).hexdigest()[:8]
+
+
+def owner_publico(owner: str) -> dict:
+    if not owners.is_owner_id(owner):
+        return {"owner_kind": "admin", "owner_label": "", "owner_ref": "admin"}
+    rec = owners.get(owner) or {}
+    inv = invites.get(owners.code_of(owner)) or {}
+    rotulo = rec.get("label") or inv.get("label") or inv.get("note") or ""
+    return {"owner_kind": "subadmin", "owner_label": rotulo, "owner_ref": owner_ref(owner)}
+
+
+def pode_ver_dono(p: auth.Principal, owner: str) -> bool:
+    return is_admin(p) or (p.kind == "subadmin" and owner == p.owner)
+
+
+def site_image_para(p: auth.Principal, info: dict) -> dict:
+    """O `image.json` como `p` pode vê-lo. Toda rota que devolve a imagem a
+    alguém que não entrou pelo console passa por aqui."""
+    dono = info.get("owner") or "admin"
+    out = {k: v for k, v in info.items() if k != "owner"}
+    out.update(owner_publico(dono))
+    if pode_ver_dono(p, dono):
+        out["owner"] = dono
+    return out
 
 
 # --- modelos ---
@@ -61,7 +100,10 @@ def visible_models(p: auth.Principal) -> list[dict]:
                 "name": n,
                 "description": tpl.get("description", ""),
                 "public": bool(tpl.get("public")),
-                "owner": dono,
+                # o dono cru é credencial: num modelo público de OUTRO
+                # sub-admin, quem olha recebe só o rótulo
+                **({"owner": dono} if pode_ver_dono(p, dono) else {}),
+                **owner_publico(dono),
                 "mine": dono == p.owner,
                 "layers": len(tpl.get("layers", [])),
                 "used_by": len(store.models_using(n)),

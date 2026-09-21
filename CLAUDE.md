@@ -151,10 +151,16 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
     Maratona 2026), e alerta igual ainda aberto não repete (`repeated`).
     Está em `services/alerts.py`, com teste.
 
-18. **O código de convite nunca é gravado dentro da site-image.** Ele é a
-    credencial do console de sub-admin; se ficasse no `image.json`, quem
-    tivesse só o token da imagem escalaria para sub-admin. O que fica gravado
-    é `owner` (`"admin"` ou `"invite:<CÓDIGO>"`). Há teste.
+18. **O código de convite nunca sai para quem não é o console dono.** Ele é a
+    credencial do console de sub-admin, e o `owner` gravado no `image.json` (e
+    no `model.json`) é `"invite:<CÓDIGO>"`: **o `owner` cru É a credencial**.
+    Por meses `GET /site-images/{img}` devolveu o `image.json` inteiro ao token
+    da sede (o hotconfig lê essa rota) e o teste só conferia que não havia uma
+    chave chamada `invite`. Toda rota que devolve imagem ou modelo a quem não
+    é admin nem o próprio dono passa por `ownership.site_image_para` /
+    `ownership.owner_publico` (`owner_kind`, `owner_label`, `owner_ref`). O
+    teste (`tests/test_owner_leak.py`) confere pelo VALOR, varrendo os GET que
+    o token alcança. Rota nova que devolva `owner`: passe pelo mesmo funil.
 
 19. **O boot REGRAVA o pendrive da sede quando ele está para trás**, e por isso
     `client/stuff/25-usbupdate.sh` é o arquivo mais perigoso do projeto: errar
@@ -362,6 +368,23 @@ O ambiente de teste tem um nginx externo que faz proxy de
   diz o que fez (`resampled`, `native_points`, `interval_s`) — sem isso o
   MOJ concluiu que o agente mandava a cada 2 min quando era o passo do
   reamostrador.
+- **`POST …/commands` sem `target` é a sala inteira**, e o `nb3-api command`
+  mandou as máquinas em `macs` (campo que o servidor nunca leu) por meses:
+  `command <sede> mlpoweroff <mac>` desligava a sala. O teste comparava só os
+  CAMINHOS da ferramenta com o OpenAPI, nunca o corpo. Hoje o servidor recusa
+  (400) corpo com `macs`/`mac`/`targets` sem `target`, a ferramenta exige
+  `--all` por extenso, e `tests/test_cli_api.py` confere o EFEITO (a fila de
+  cada máquina). Subcomando destrutivo novo: teste o efeito, não a rota.
+- **Texto de fora não entra cru em `innerHTML`.** O pedido de imagem do
+  formulário PÚBLICO (`wanted_name`, `contact`, `note`) era interpolado na
+  tela do admin: um anônimo rodava script na sessão que gere as chaves. Nome
+  de sede, time do roster, `vendor`/`detail` de alerta e o status da máquina
+  são a mesma coisa. Use `esc()` de `web/common/ui.js` (ou `textContent`);
+  `tests/test_web_js.py` acusa template com marcação que interpola esses
+  campos sem `esc(`. Ele não enxerga template ANINHADO: confira à mão.
+- O no-undef caseiro de `tests/test_web_js.py` lia a flag de regex (`/x/g`)
+  como identificador; só passava onde a tela declarava um `g` por acaso.
+  Hoje as flags são apagadas junto com a regex.
 
 ## Estilo
 

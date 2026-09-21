@@ -123,6 +123,13 @@ def tirar_nao_codigo(texto: str) -> str:
                 if i < n and texto[i] == "/":
                     apagar(inicio + 1, i)
                     i += 1
+                    # as flags (`/x/gi`) não são identificador: sem isto o `g`
+                    # só passava onde a tela, por acaso, declarava um `g`
+                    fim = i
+                    while fim < n and texto[fim].isalpha():
+                        fim += 1
+                    apagar(i, fim)
+                    i = fim
                 continue
             if c == "}" and len(modo) > 1 and modo[-1] == "codigo":
                 # fecha um ${ ... }: volta ao texto do template
@@ -464,3 +471,30 @@ def test_a_home_mostra_a_sessao_e_o_enter_e_o_submit():
     admin = (REPO / "web" / "admin" / "app.js").read_text(encoding="utf-8")
     assert '$("#login").onsubmit' in admin
     assert 'e.key === "Enter" && enter()' not in admin
+
+
+# Campos que chegam de fora do servidor: o nome da sede (sub-admin), o pedido de
+# imagem (um ANÔNIMO, pelo formulário público), o time do roster, o alerta e o
+# status (quem tem a chave de máquina escreve o que quiser).
+_DE_FORA = re.compile(
+    r"fullname|wanted_name|\.contact|\.note\b|vendor|\.detail|binding|teamLabel|"
+    r"e\.message|JSON\.stringify|\.hint|\.label\b|\bteam\b|\bquem\b|\bseat\b"
+)
+
+
+def test_texto_de_fora_nao_entra_cru_no_innerhtml():
+    """O pedido de imagem do formulário PÚBLICO era interpolado no `innerHTML`
+    do console: um anônimo rodava script na sessão do admin. Todo template com
+    marcação que interpola um campo de fora passa por `esc()`."""
+    ruins = []
+    WEB = REPO / "web"
+    for arq in sorted(WEB.rglob("*.js")):
+        texto = arq.read_text(encoding="utf-8")
+        for m in re.finditer(r"`([^`]*<[^`]*)`", texto, re.S):
+            for e in re.findall(r"\$\{((?:[^{}]|\{[^{}]*\})*)\}", m.group(1)):
+                if re.fullmatch(r'[\w.\s]+\?\s*"[^"]*"\s*:\s*"[^"]*"', e.strip()):
+                    continue  # ternário que só escolhe entre dois literais
+                if _DE_FORA.search(e) and "esc(" not in e and "t(" not in e.split("?")[0]:
+                    linha = texto[: m.start()].count("\n") + 1
+                    ruins.append(f"{arq.relative_to(WEB)}:{linha}: ${{{e.strip()[:60]}}}")
+    assert ruins == [], "\n".join(ruins)

@@ -10,6 +10,7 @@
 // expande — aí sim pela rota que já existe.
 import * as api from "/common/api.js";
 import { init, t, apply } from "/common/i18n.js";
+import { esc } from "/common/ui.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -68,10 +69,10 @@ function renderAlertas() {
     row.href = hotconfigUrl(a.sede);
     row.target = "_blank";
     row.rel = "noopener";
-    row.innerHTML = `<b class="fasede">${a.sede}</b>
+    row.innerHTML = `<b class="fasede">${esc(a.sede)}</b>
       <span class="awhat">${t(KIND_LABEL[a.kind] || "usb_other")}</span>
-      <span class="amac">${a.team ? `${a.team} · ` : ""}${a.mac || ""}</span>
-      <span class="fadet">${a.vendor || a.detail || ""}</span>
+      <span class="amac">${a.team ? `${esc(a.team)} · ` : ""}${esc(a.mac)}</span>
+      <span class="fadet">${esc(a.vendor || a.detail)}</span>
       <span class="awhen">${hora(a.at)}</span>`;
     lista.appendChild(row);
   }
@@ -141,11 +142,11 @@ function render() {
     const marcadas = macsDa(s.id).size;
     tr.innerHTML =
       `<td class="expandir"><button type="button">${expandidas.has(s.id) ? "▾" : "▸"}</button></td>
-       <td class="nome"><span class="sedeid">${s.id}</span>
-         <a class="gohot" href="${hotconfigUrl(s.id)}" target="_blank" rel="noopener"
+       <td class="nome"><span class="sedeid">${esc(s.id)}</span>
+         <a class="gohot" href="${esc(hotconfigUrl(s.id))}" target="_blank" rel="noopener"
             title="${t("fleet_open_hotconfig")}">\u2197</a>
          ${marcadas ? `<span class="sedenome"> · ${marcadas} ${t("fleet_picked")}</span>` : ""}
-         <br><span class="sedenome">${s.fullname || ""}</span></td>` +
+         <br><span class="sedenome">${esc(s.fullname)}</span></td>` +
       num(s.machines) + num(s.active) + num(s.new) + num(s.online) +
       num(s.locked, "ntrava") + num(s.alerts, "nalerta");
 
@@ -202,8 +203,8 @@ function linhaMaquinas(s) {
       const linha = document.createElement("div");
       linha.className = "farow";
       linha.innerHTML = `<span class="awhat">${t(KIND_LABEL[a.kind] || "usb_other")}</span>
-        <span class="amac">${a.mq.binding?.name ? `${a.mq.binding.name} · ` : ""}${a.mq.mac}</span>
-        <span class="fadet">${a.vendor || a.detail || ""}</span>
+        <span class="amac">${a.mq.binding?.name ? `${esc(a.mq.binding.name)} · ` : ""}${esc(a.mq.mac)}</span>
+        <span class="fadet">${esc(a.vendor || a.detail)}</span>
         <span class="awhen">${hora(a.at)}</span>`;
       bloco.appendChild(linha);
     }
@@ -218,8 +219,8 @@ function linhaMaquinas(s) {
       "mchip" + (marcado ? " sel" : "") + (mq.online ? "" : " off") +
       ((mq.alerts || []).length ? " alerta" : "");
     const time = mq.binding?.name || mq.binding?.user_id || "";
-    chip.innerHTML = `<span class="mac">${mq.mac}</span>${
-      time ? `<span class="time">${time}</span>` : ""
+    chip.innerHTML = `<span class="mac">${esc(mq.mac)}</span>${
+      time ? `<span class="time">${esc(time)}</span>` : ""
     }${mq.lock?.locked ? "🔒" : ""}`;
     chip.onclick = () => {
       // escolher máquina a máquina desmarca a sede inteira: os dois juntos
@@ -434,7 +435,7 @@ function renderRelatorio() {
     } else {
       a.setAttribute("download", "");
     }
-    a.innerHTML = `<span>${t(ARQ_LABEL[f.name] || f.name)}</span><span class="tam">${tamanho(
+    a.innerHTML = `<span>${esc(t(ARQ_LABEL[f.name] || f.name))}</span><span class="tam">${tamanho(
       f.size || 0
     )}</span>`;
     arquivos.appendChild(a);

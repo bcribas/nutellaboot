@@ -146,6 +146,28 @@ def test_command_only_reaches_target_machine(client, img, hm, hi):
     assert len(client.get(f"/api/v1/site-images/testes3/machines/{outra}/commands", headers=hm).json()["commands"]) == 1
 
 
+def test_corpo_que_escolhe_maquinas_no_campo_errado_e_recusado(client, img, hm, hi):
+    """Sem `target` o padrão é a sala inteira. Um corpo com `macs` QUIS escolher
+    máquinas e errou o campo (foi o que o nb3-api fez): obedecer o padrão ali é
+    desligar a sala toda por engano."""
+    for mac in (MAC, "52-54-00-ab-cd-02"):
+        client.post(f"/api/v1/site-images/testes3/machines/{mac}/status", json={}, headers=hm)
+    for corpo in (
+        {"command": "mlreboot", "macs": [MAC]},
+        {"command": "mlreboot", "mac": MAC},
+        {"command": "mlreboot", "targets": {"testes3": [MAC]}},
+        {"command": "mlreboot", "target": MAC},  # string: seria lida letra a letra
+    ):
+        r = client.post(f"/api/v1/site-images/testes3/commands", json=corpo, headers=hi)
+        assert r.status_code == 400, corpo
+        assert "target" in r.json()["detail"]
+    maquinas = client.get(f"/api/v1/site-images/testes3/machines", headers=hi).json()["machines"]
+    assert [x["pending"] for x in maquinas] == [0, 0]
+    # e o contrato: sem nenhum desses campos, a sala inteira
+    r = client.post(f"/api/v1/site-images/testes3/commands", json={"command": "mlreboot"}, headers=hi)
+    assert r.status_code == 200 and r.json()["machines"] == 2
+
+
 def test_delay_holds_command(client, img, hm, hi):
     client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
     client.post(

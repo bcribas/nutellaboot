@@ -3,6 +3,7 @@
 // (0/1/5/10 min) — aqui o servidor empurra as mudanças.
 import * as api from "/common/api.js";
 import { init, t, apply, currentLang } from "/common/i18n.js";
+import { esc } from "/common/ui.js";
 
 const $ = (s) => document.querySelector(s);
 let machines = [];
@@ -96,8 +97,8 @@ function renderAlerts() {
     const quando = new Date(a.at * 1000).toLocaleTimeString();
     const quem = teamLabel(a.m) ? `${teamLabel(a.m)} · ` : "";
     linha.innerHTML = `<span class="awhat">${t(KIND_LABEL[a.kind] || "usb_other")}</span>
-      <span class="amac">${quem}${a.mac}</span>
-      <span>${[a.vendor, a.detail].filter(Boolean).join(" · ")}</span>
+      <span class="amac">${esc(quem)}${esc(a.mac)}</span>
+      <span>${esc([a.vendor, a.detail].filter(Boolean).join(" · "))}</span>
       <span class="awhen">${quando}</span>`;
     const btn = document.createElement("button");
     btn.className = "small";
@@ -198,8 +199,8 @@ function card(m) {
   const seat = m.binding?.seat ? `#${m.binding.seat} · ` : "";
 
   el.innerHTML = `
-    <div class="team${team ? "" : " none"}">${seat}${team || t("no_team")}</div>
-    <div class="mac">${m.mac}</div>
+    <div class="team${team ? "" : " none"}">${esc(seat)}${esc(team || t("no_team"))}</div>
+    <div class="mac">${esc(m.mac)}</div>
     <div class="metrics">
       <span>${t("memory")} <b class="${memPct > 85 ? "hot" : ""}">${memPct}%</b></span>
       ${load != null ? `<span>${t("load")} <b class="${load > 4 ? "hot" : ""}">${load.toFixed(1)}</b></span>` : ""}
@@ -232,7 +233,7 @@ function renderRejeitadas() {
     return;
   }
   box.classList.remove("hidden");
-  const quais = rejeitadas.map((r) => `"${r.id}"`).join(", ");
+  const quais = esc(rejeitadas.map((r) => `"${r.id}"`).join(", "));
   box.innerHTML = `${t("rejected_machines", { n: rejeitadas.length })} ${quais}<br>${t(
     "rejected_machines_hint"
   )}`;
@@ -330,7 +331,7 @@ function showDetail(m) {
   box.className = "detail";
   const inner = document.createElement("div");
   inner.innerHTML = `
-    <h2>${teamLabel(m) || t("no_team")} <span class="mono muted">${m.mac}</span></h2>`;
+    <h2>${esc(teamLabel(m) || t("no_team"))} <span class="mono muted">${esc(m.mac)}</span></h2>`;
 
   // Três abas: os gráficos do período (a leitura útil abre primeiro), o estado
   // cru de agora (a telemetria) e o histórico (o journal que a máquina manda a
@@ -351,7 +352,7 @@ function showDetail(m) {
         `/api/v1/site-images/${api.imageId}/machines/${m.mac}/samples?since=${since}`
       );
     } catch (e) {
-      painel.innerHTML = `<p class="muted">${t("error")}: ${e.message}</p>`;
+      painel.innerHTML = `<p class="muted">${t("error")}: ${esc(e.message)}</p>`;
       return;
     }
     const pts = dd.points || [];
@@ -387,7 +388,7 @@ function showDetail(m) {
   };
 
   const mostrarEstado = () => {
-    painel.innerHTML = `<pre>${JSON.stringify(m.status, null, 1)}</pre>`;
+    painel.innerHTML = `<pre>${esc(JSON.stringify(m.status, null, 1))}</pre>`;
   };
   const mostrarLogs = async () => {
     painel.innerHTML = `<p class="muted">${t("loading")}</p>`;
@@ -415,7 +416,7 @@ function showDetail(m) {
         painel.appendChild(baixar);
       }
     } catch (e) {
-      painel.innerHTML = `<p class="muted">${t("error")}: ${e.message}</p>`;
+      painel.innerHTML = `<p class="muted">${t("error")}: ${esc(e.message)}</p>`;
     }
   };
 

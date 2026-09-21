@@ -33,6 +33,7 @@ import csv
 import io
 import json
 import os
+import secrets
 import sys
 import urllib.error
 import urllib.parse
@@ -204,13 +205,30 @@ def cmd_roster(c, a):
     return c.put(f"/api/v1/site-images/{a.image}/roster", corpo)
 
 
+def multipart(campo: str, nome: str, tipo: str, conteudo: bytes) -> tuple[bytes, str]:
+    """Um arquivo só, em multipart/form-data, com a stdlib (a rota de upload é
+    `UploadFile`: corpo cru ali responde 422)."""
+    limite = "nb3" + secrets.token_hex(12)
+    cabeca = (
+        f"--{limite}\r\n"
+        f'Content-Disposition: form-data; name="{campo}"; filename="{nome}"\r\n'
+        f"Content-Type: {tipo}\r\n\r\n"
+    ).encode()
+    return cabeca + conteudo + f"\r\n--{limite}--\r\n".encode(), f"multipart/form-data; boundary={limite}"
+
+
 def cmd_logo(c, a):
+    # o servidor só aceita SVG e PNG (confere pelos primeiros bytes)
+    ext = a.arquivo.lower().rsplit(".", 1)[-1]
+    tipos = {"png": "image/png", "svg": "image/svg+xml"}
+    if ext not in tipos:
+        raise SystemExit("o logotipo precisa ser .png ou .svg")
     with open(a.arquivo, "rb") as f:
         conteudo = f.read()
-    tipo = "image/png" if a.arquivo.lower().endswith(".png") else "image/jpeg"
+    corpo, tipo = multipart("file", os.path.basename(a.arquivo), tipos[ext], conteudo)
     return c.request(
         "PUT", f"/api/v1/site-images/{a.image}/roster/logos/{a.org}",
-        raw=conteudo, content_type=tipo,
+        raw=corpo, content_type=tipo,
     )
 
 
@@ -263,11 +281,18 @@ def cmd_unlock(c, a):
 
 
 def cmd_command(c, a):
-    corpo = {"command": a.command}
-    if a.macs:
-        corpo["macs"] = a.macs
+    # A sala inteira só com --all, por extenso. Esta função já mandou as
+    # máquinas no campo `macs`, que o servidor nunca leu: "desligue esta
+    # máquina" desligava a sala. O campo é `target`.
+    if a.all and a.macs:
+        raise SystemExit("escolha: MACs ou --all, não os dois")
+    if not a.all and not a.macs:
+        raise SystemExit("informe os MACs das máquinas, ou --all para a sala inteira")
+    corpo = {"command": a.command, "target": "all" if a.all else a.macs}
     if a.args:
-        corpo["args"] = ler_corpo(a.args)
+        corpo["args"] = a.args
+    if a.delay:
+        corpo["delay"] = a.delay
     return c.post(f"/api/v1/site-images/{a.image}/commands", corpo)
 
 
@@ -397,8 +422,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("command", help="envia um comando à sala")
     s.add_argument("image")
     s.add_argument("command")
-    s.add_argument("macs", nargs="*")
-    s.add_argument("--args", default="", help="JSON, @arquivo ou -")
+    s.add_argument("macs", nargs="*", help="máquinas alvo (ou use --all)")
+    s.add_argument("--all", action="store_true", help="a sala inteira")
+    s.add_argument("--args", default="", help="argumento do comando (texto)")
+    s.add_argument("--delay", type=int, default=0, help="segundos até valer")
     s.set_defaults(fn=cmd_command)
 
     s = sub.add_parser("service-key", help="chave de integração, com escopos")

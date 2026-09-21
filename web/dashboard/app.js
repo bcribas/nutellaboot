@@ -196,7 +196,7 @@ function render() {
         "sede" +
         (s.online === 0 ? " off" : pior > 85 || s.alerts > 0 ? " bad" : pior > 70 ? " warn" : "");
       el.innerHTML = `
-        <span class="sid">${s.id}</span>
+        <span class="sid">${esc(s.id)}</span>
         <span class="son"><b>${s.online}</b>/${s.machines}</span>
         ${s.alerts > 0 ? `<span class="badge">${s.alerts}</span>` : ""}
         ${medidor("RAM", r.mem_avg, r.mem_avg != null ? `${r.mem_avg}%` : "—")}
@@ -403,7 +403,7 @@ function renderInventario() {
           const cls = d.pct >= 95 ? "bad" : d.pct >= 85 ? "warn" : "";
           return `<div class="disco-linha${d.online ? "" : " offline"}">
             <span class="dsede">${d.site}</span>
-            <span class="dquem">${d.team || d.mac}</span>
+            <span class="dquem">${esc(d.team || d.mac)}</span>
             <span class="dpct ${cls}">${d.pct}%</span>
             <span class="dsub">${d.free_mb} MB ${t("dash_disk_free")}</span></div>`;
         })
@@ -493,8 +493,8 @@ function renderZoomCabecalho() {
     const linha = document.createElement("div");
     linha.className = "zalerta";
     linha.innerHTML = `<b>${t(KIND_LABEL[a.kind] || "usb_other")}</b>
-      <span>${a.team ? `${a.team} · ` : ""}${a.mac || ""}</span>
-      <span class="dsub">${a.vendor || a.detail || ""}</span>
+      <span>${a.team ? `${esc(a.team)} · ` : ""}${esc(a.mac)}</span>
+      <span class="dsub">${esc(a.vendor || a.detail)}</span>
       <span class="dsub">${hora(a.at)}</span>`;
     az.appendChild(linha);
   }
@@ -528,8 +528,8 @@ async function renderZoomMaquinas() {
     el.className = `zmac ${est}` + ((m.alerts || []).length ? " alerta" : "");
     const nome = m.binding?.name || m.binding?.user_id || m.mac;
     el.innerHTML = `
-      <div class="ztitulo">${m.lock?.locked ? "🔒 " : ""}${nome}</div>
-      <div class="zmacaddr">${m.mac}${est !== "on" ? ` · ${t(est === "stale" ? "stale" : "offline")}` : ""}</div>
+      <div class="ztitulo">${m.lock?.locked ? "🔒 " : ""}${esc(nome)}</div>
+      <div class="zmacaddr">${esc(m.mac)}${est !== "on" ? ` · ${t(est === "stale" ? "stale" : "offline")}` : ""}</div>
       ${medidor("RAM", res.mem_pct, res.mem_pct != null ? `${res.mem_pct}%` : "—")}
       ${medidor("CPU", cpu, cpu != null ? `${cpu}%` : "—")}
       ${medidor("swap", (res.swap_used_mb || 0) > 0 ? 100 : 0, res.swap_used_mb ? `${res.swap_used_mb}M` : "0")}

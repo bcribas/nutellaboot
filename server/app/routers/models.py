@@ -79,7 +79,11 @@ async def list_models(p=Depends(auth.require_console)) -> dict:
 async def get_model(name: str, p=Depends(auth.require_console)) -> dict:
     if not ownership.can_use_model(p, name):
         raise HTTPException(404, "modelo não existe")
-    return store.get_model(name) or {}
+    tpl = dict(store.get_model(name) or {})
+    dono = store.model_owner(name)
+    if not ownership.pode_ver_dono(p, dono):
+        tpl.pop("owner", None)
+    return {**tpl, **ownership.owner_publico(dono)}
 
 
 @router.patch("/models/{name}")

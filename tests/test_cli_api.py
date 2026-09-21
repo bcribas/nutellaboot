@@ -193,6 +193,66 @@ def test_roster_e_vinculo(live):
     roda(live, "images", "delete", "cliroster")
 
 
+def _maquina(live, image, chave, mac):
+    r = httpx.post(
+        f"{live['base']}/api/v1/site-images/{image}/machines/{mac}/status",
+        headers={"X-NB-Machine-Key": chave},
+        json={"sysresources": {"mem_pct": 10}},
+        timeout=5,
+    )
+    assert r.status_code == 200, r.text
+
+
+def _pendentes(live, image):
+    r = httpx.get(
+        f"{live['base']}/api/v1/site-images/{image}/machines",
+        headers={"Authorization": f"Bearer {live['admin']}"},
+        timeout=5,
+    )
+    return {m["mac"]: m["pending"] for m in r.json()["machines"]}
+
+
+def test_command_atinge_so_as_maquinas_pedidas(live):
+    """O CLI mandava as máquinas em `macs`, campo que o servidor nunca leu:
+    sem `target` o padrão é a sala inteira, e `command <sede> mlpoweroff <mac>`
+    desligava TODAS. O teste confere o efeito, não o corpo: é na fila de cada
+    máquina que o erro aparece."""
+    roda(live, "images", "create", "clicmd", "--model", "t")
+    cred = json.loads(roda(live, "--json", "images", "credentials", "clicmd").stdout)
+    alvo, vizinha = "52-54-00-00-00-01", "52-54-00-00-00-02"
+    for mac in (alvo, vizinha):
+        _maquina(live, "clicmd", cred["machine_key"], mac)
+
+    r = roda(live, "command", "clicmd", "mlreboot", alvo)
+    assert r.returncode == 0, r.stderr
+    assert _pendentes(live, "clicmd") == {alvo: 1, vizinha: 0}
+
+    # a sala inteira só por extenso
+    r = roda(live, "command", "clicmd", "mlreboot")
+    assert r.returncode != 0
+    assert "--all" in r.stderr
+    assert _pendentes(live, "clicmd") == {alvo: 1, vizinha: 0}
+
+    assert roda(live, "command", "clicmd", "mlreboot", "--all").returncode == 0
+    assert _pendentes(live, "clicmd") == {alvo: 2, vizinha: 1}
+    roda(live, "images", "delete", "clicmd")
+
+
+def test_logo_sobe_de_verdade(live, tmp_path):
+    """Mandava corpo cru a uma rota de `UploadFile`: 422, sempre."""
+    roda(live, "images", "create", "clilogo", "--model", "t")
+    png = tmp_path / "ufu.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)
+    r = roda(live, "--json", "logo", "clilogo", "ufu", str(png))
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["format"] == "png"
+
+    jpg = tmp_path / "ufu.jpg"
+    jpg.write_bytes(b"\xff\xd8\xff")
+    assert roda(live, "logo", "clilogo", "ufu", str(jpg)).returncode != 0
+    roda(live, "images", "delete", "clilogo")
+
+
 def test_erro_do_servidor_sai_diferente_de_zero_e_diz_o_motivo(live):
     """A invariante 15, do lado do cliente."""
     r = roda(live, "images", "get", "naoexiste")

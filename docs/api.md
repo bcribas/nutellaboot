@@ -184,13 +184,21 @@ ALLOWNETWORKCHANGE='f'
 | POST | `/api/v1/site-images` | C | `{id, fullname, model, unlocked?, wallpaper_locked?, dashboard_hidden?}` | imagem criada **com as credenciais em claro** (única vez) |
 | POST | `/api/v1/site-images/bulk` | A | TSV ou `{rows:[…]}` | `{results:[…]}`; com `?format=csv`, CSV das credenciais |
 | GET | `/api/v1/site-images?prefix=` | C | — | `{images:[…]}` (o sub-admin vê só as dele) |
-| GET | `/api/v1/site-images/{img}` | C, I | — | `image.json` |
+| GET | `/api/v1/site-images/{img}` | C, I | — | `image.json` **sem o `owner` cru** para quem não é o console dono (ver abaixo); sempre com `owner_kind`, `owner_label`, `owner_ref` |
 | PATCH | `/api/v1/site-images/{img}` | C | `{fullname?, unlocked?, model?, wallpaper_locked?, dashboard_hidden?}` | imagem atualizada |
 | DELETE | `/api/v1/site-images/{img}` | C | — | `204` (apaga também o pendrive gerado em `data/usb/` e o estado de publicação) |
 | POST | `/api/v1/site-images/{img}/token/rotate` | C | — | `{token}` |
 | GET | `/api/v1/site-images/{img}/credentials` | C | — | token, chaves e links prontos |
 | GET | `/api/v1/site-images/{img}/boot-key` | C | — | `{boot_key}` |
 | POST | `/api/v1/site-images/{img}/boot-key/rotate` | C | — | `{boot_key}` (exige atualizar os pendrives) |
+
+> **O dono de uma imagem e o código do convite.** O id do dono de um sub-admin é
+> `invite:<CÓDIGO>`, e o código é a credencial de console dele. Por isso o
+> `owner` cru só é devolvido à administração e ao próprio dono. Para o token da
+> sede, a chave de serviço e outro sub-admin (num modelo público), a resposta
+> traz `owner_kind` (`admin` ou `subadmin`), `owner_label` (o rótulo do convite)
+> e `owner_ref` (uma referência curta, que não se reverte ao código). Vale
+> também para `GET /api/v1/models` e `GET /api/v1/models/{nome}`.
 
 `dashboard_hidden` (só a administração muda) tira a imagem das visões da frota
 (`/labs`, `/labs/inventory`, `/labs/series`): é para a imagem de teste dos
@@ -620,6 +628,11 @@ token e a chave de máquina de cada sede. Nome fora da lista é `404`.
 > desbloqueia a sala inteira.
 
 `target` é `"all"` ou uma lista de MACs. `delay` adia a execução em segundos.
+Sem `target` o comando vale para **a sala inteira**; por isso um corpo que traz
+`macs`, `mac` ou `targets` sem `target` responde **400**: quem mandou um desses
+quis escolher máquinas e errou o campo, e obedecer o padrão ali desligaria a
+sala toda por engano (o `nb3-api` fez exatamente isso até setembro de 2026).
+Um `target` que não seja `"all"` nem lista também é 400.
 
 Uma ordem que nenhuma máquina buscou caduca `command_ttl_sec` segundos
 (`data/server.json`, padrão 600) depois do seu `not_before`: é apagada da fila
@@ -804,6 +817,9 @@ nb3-api bulk sedes.tsv > credenciais.csv
 nb3-api roster set 26brbr @times.json
 nb3-api bind 26brbr 52-54-00-12-34-56 team-001 --seat 012
 nb3-api lock 26brbr                  # a sala inteira
+nb3-api command 26brbr mlreboot 52-54-00-12-34-56    # só esta máquina
+nb3-api command 26brbr cleanhomenow --all            # a sala inteira, por extenso
+nb3-api logo 26brbr ufu ufu.png                      # PNG ou SVG
 nb3-api machines 26brbr
 nb3-api report 26brbr 1785600000 1785700000 > relatorio.html
 ```
