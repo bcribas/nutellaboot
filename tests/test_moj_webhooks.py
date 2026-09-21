@@ -192,6 +192,74 @@ async def test_webhook_is_delivered_and_signed(data_root, image_testes3):
     assert payload["data"]["machines"] == [MAC]
 
 
+@pytest.mark.anyio
+async def test_a_entrega_tem_id_igual_nas_tentativas(data_root, image_testes3, monkeypatch):
+    """Achado 13: sem um id de entrega, quem recebe não distingue a REPETIÇÃO
+    de uma entrega (a resposta se perdeu e o servidor tentou de novo) de dois
+    eventos iguais. O id vai dentro do corpo, logo dentro da assinatura; o
+    corpo e o `at` são os mesmos nas três tentativas."""
+    import asyncio
+
+    import uvicorn
+    from fastapi import FastAPI, Request
+    from fastapi.responses import JSONResponse
+
+    monkeypatch.setattr(webhook_push, "ESPERAS", (0.0, 0.0))
+    vistos = []
+    receptor = FastAPI()
+
+    @receptor.post("/instavel")
+    async def instavel(request: Request):
+        vistos.append({"body": await request.body(), "h": dict(request.headers)})
+        return JSONResponse({}, status_code=500 if len(vistos) < 3 else 200)
+
+    @receptor.post("/morto")
+    async def morto(request: Request):
+        return JSONResponse({}, status_code=503)
+
+    server = uvicorn.Server(uvicorn.Config(receptor, host="127.0.0.1", port=8898, log_level="warning"))
+    task = asyncio.create_task(server.serve())
+    for _ in range(50):
+        if server.started:
+            break
+        await asyncio.sleep(0.05)
+
+    img = data_root / "site-images" / "testes3"
+    fsdb.write_json(
+        img / "webhooks.json",
+        [{"id": "wh_um", "url": "http://127.0.0.1:8898/instavel", "secret": "s" * 16, "events": ["machine.locked"]},
+         {"id": "wh_dois", "url": "http://127.0.0.1:8898/morto?token=naovaza", "secret": "", "events": []}],
+    )
+    webhook_push.emit("testes3", "machine.locked", {"machines": [MAC]})
+    for _ in range(80):
+        if len(vistos) >= 3 and (img / "webhooks.log").exists():
+            break
+        await asyncio.sleep(0.1)
+    server.should_exit = True
+    await task
+
+    assert len(vistos) == 3
+    corpos = {v["body"] for v in vistos}
+    assert len(corpos) == 1, "o corpo mudou entre as tentativas"
+    payload = json.loads(vistos[0]["body"])
+    assert isinstance(payload["at"], int)
+    assert len(payload["delivery"]) == 32
+    assert [v["h"]["x-nb-attempt"] for v in vistos] == ["1", "2", "3"]
+    for v in vistos:
+        assert v["h"]["x-nb-delivery"] == payload["delivery"]
+        assert v["h"]["x-nb-event"] == "machine.locked"
+        assert v["h"]["x-nb-webhook-id"] == "wh_um"
+        assert v["h"]["x-nb-signature"] == webhook_push.sign("s" * 16, v["body"])
+
+    # o que morreu fica escrito, sem o token que ia na query string
+    linhas = [json.loads(l) for l in (img / "webhooks.log").read_text().splitlines()]
+    assert len(linhas) == 1
+    falha = linhas[0]
+    assert falha["webhook_id"] == "wh_dois" and falha["attempts"] == 3 and falha["last_status"] == 503
+    assert falha["path"] == "/morto" and "naovaza" not in json.dumps(falha)
+    assert falha["delivery"] != payload["delivery"], "cada assinante tem a sua entrega"
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import time
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from .. import auth
 from ..services import config as cfg
-from ..services import store, webhook_push
+from ..services import eventos, store
 from ..services import wallpaper as wp
-from ..services.notify import notify
 
 router = APIRouter(prefix="/api/v1")
 
@@ -64,8 +62,7 @@ async def put_config(
         raise HTTPException(400, str(e))
     # o evento existia no catálogo desde o começo e nunca era emitido: quem
     # inscrevesse um webhook em config.updated não recebia nada
-    notify.publish(image, {"event": "config.updated", "data": {"keys": sorted(applied)}, "at": time.time()})
-    webhook_push.emit(image, "config.updated", {"keys": sorted(applied)})
+    eventos.publicar(image, "config.updated", {"keys": sorted(applied)})
     return {"ok": True, "values": applied}
 
 

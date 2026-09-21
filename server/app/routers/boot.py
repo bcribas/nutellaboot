@@ -24,8 +24,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from .. import auth
-from ..services import seeders, store, stuffgen, webhook_push
-from ..services.notify import notify
+from ..services import eventos, seeders, store, stuffgen
 from ..settings import settings
 
 router = APIRouter(prefix="/boot/v3", default_response_class=PlainTextResponse)
@@ -130,8 +129,7 @@ async def seeder_join(
     if r["accepted"] and r["new"]:
         # só na entrada nova, não no heartbeat, senão viraria um evento por
         # máquina a cada poucos minutos
-        notify.publish(image, {"event": "seeder.joined", "data": {"ip": ip}, "at": time.time()})
-        webhook_push.emit(image, "seeder.joined", {"ip": ip})
+        eventos.publicar(image, "seeder.joined", {"ip": ip})
     return f"accepted={'t' if r['accepted'] else 'f'}\nseeders={r['count']}\n"
 
 

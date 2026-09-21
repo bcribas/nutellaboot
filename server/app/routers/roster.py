@@ -21,8 +21,7 @@ from ..errors import erro
 from ..services import bindings
 from ..services import machines as m
 from ..services import store
-from ..services import webhook_push
-from ..services.notify import notify
+from ..services import eventos
 
 router = APIRouter(prefix="/api/v1")
 
@@ -34,8 +33,7 @@ def _publish(image: str, event: str, data: dict) -> None:
     tempo real, mas um webhook do MOJ inscrito em machine.bound nunca
     disparava, apesar de a documentacao prometer.
     """
-    notify.publish(image, {"event": event, "data": data, "at": time.time()})
-    webhook_push.emit(image, event, data)
+    eventos.publicar(image, event, data)
 
 LOGO_MAX = 2 * 1024 * 1024
 LOGO_TYPES = {
@@ -126,10 +124,10 @@ async def put_binding(
     if not m.valid_mac(mac):
         raise erro(400, "invalid_mac", "MAC inválido")
     user_id = body.get("user_id")
-    binding = {"bound_at": time.time(), "by": p.name, "source": _fonte(p, body)}
+    binding = {"bound_at": int(time.time()), "by": p.name, "source": _fonte(p, body)}
     if body.get("at") is not None:
         try:
-            binding["client_at"] = float(body["at"])
+            binding["client_at"] = int(float(body["at"]))
         except (TypeError, ValueError):
             raise HTTPException(400, "at precisa ser epoch numérico")
     if body.get("boot_id"):

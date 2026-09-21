@@ -385,6 +385,19 @@ O ambiente de teste tem um nginx externo que faz proxy de
 - O no-undef caseiro de `tests/test_web_js.py` lia a flag de regex (`/x/g`)
   como identificador; só passava onde a tela declarava um `g` por acaso.
   Hoje as flags são apagadas junto com a regex.
+- **Evento se publica por `services/eventos.publicar`, e nunca segurando
+  `fsdb.locked`.** Havia cinco cópias de `notify.publish(...)` +
+  `webhook_push.emit(...)` nas rotas, todas supondo o event loop: de uma rota
+  `def` (threadpool) o `emit` desistia calado e o `notify` mexia em
+  `asyncio.Queue` fora da thread dele. O `publicar` faz o salto de volta ao
+  loop. E quem segura um lock e espera o loop trava se o loop estiver esperando
+  aquele lock: solte, depois publique. Os testes trocam `webhook_push.emit` por
+  um espião de TRÊS posicionais, pelo atributo do módulo: não mude a
+  assinatura nem importe o `emit` por nome.
+- O corpo do webhook é montado UMA vez por assinante (`delivery` + `at` do
+  evento) e reenviado byte a byte nas tentativas. Montar dentro do laço de
+  tentativas mudaria o `at` e a assinatura, e o destinatário deduplica por
+  `delivery`.
 
 ## Estilo
 

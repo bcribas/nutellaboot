@@ -14,7 +14,7 @@ from .. import auth
 from ..errors import erro
 from ..services import alerts, logs
 from ..services import machines as m
-from ..services import webhook_push
+from ..services import eventos
 from ..services.notify import notify
 
 router = APIRouter(prefix="/api/v1")
@@ -53,8 +53,7 @@ def _machine(image: str, x_nb_machine_key: str | None, mac: str) -> str:
 
 def publicar_evento(image: str, event: str, data: dict) -> None:
     """Avisa o painel (SSE) e os sistemas externos inscritos (webhooks)."""
-    notify.publish(image, {"event": event, "data": data, "at": time.time()})
-    webhook_push.emit(image, event, data)
+    eventos.publicar(image, event, data)
 
 
 # A telemetria é um dict livre (o servidor não conhece o formato de propósito:

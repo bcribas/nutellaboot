@@ -48,7 +48,7 @@ def remover(image_id: str, mac: str, *, by: str, source: str) -> dict | None:
                 {
                     "event": "unbound",
                     "mac": mac,
-                    "at": time.time(),
+                    "at": int(time.time()),
                     "by": by,
                     "source": source,
                     **{k: anterior[k] for k in CAMPOS_DO_VINCULO if k in anterior},

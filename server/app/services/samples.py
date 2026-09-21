@@ -239,8 +239,9 @@ def janela(image_id: str, mac: str, since: float = 0, until: float = 0, limit: i
         "native_points": len(nativos),
         "resampled": len(pontos) < len(nativos),
         "interval_s": intervalo_mediano(nativos),
-        "since": since,
-        "until": until,
+        # inteiros, como o `t` dos pontos: a query aceita fração, o eco não
+        "since": int(since),
+        "until": int(until),
         "truncated": truncado(image_id, mac, since),
     }
 

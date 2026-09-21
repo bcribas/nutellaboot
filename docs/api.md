@@ -402,7 +402,9 @@ O `user_id` do vínculo tem que existir no roster da imagem, senão vem 404 —
 
 O vínculo gravado tem `bound_at` e `by` (do servidor) e `source` (quem
 afirmou: o valor mandado, ou `service:<nome>` para chave de serviço e
-`console` para o resto). `at` do cliente vira `client_at` — o instante do
+`console` para o resto). Todos os instantes são inteiros (epoch em
+segundos), como o `t` dos pontos e o `since`/`until` ecoados pelos samples.
+`at` do cliente vira `client_at` — o instante do
 login no juiz, por exemplo —, `boot_id` diz em qual boot e `note` é texto
 livre. Toda mudança vai para o histórico da máquina (`bindings.log`, com
 teto): `history` devolve as últimas `n` linhas, `bound` e `unbound`, a
@@ -1008,10 +1010,26 @@ Cada evento chega como `POST` com corpo JSON e o cabeçalho
 {
   "event": "machine.locked",
   "image": "26brbr",
-  "at": 1785620123.45,
+  "at": 1785620123,
+  "delivery": "5f0c1d6e2a7b4c1e9d3f8a6b7c5d4e3f",
   "data": {"machines": ["52-54-00-12-34-56"]}
 }
 ```
+
+`at` é o instante do **evento**, inteiro. `delivery` identifica a entrega e vai
+dentro do corpo (logo, dentro da assinatura): é o mesmo nas três tentativas,
+assim como o corpo inteiro, byte a byte. **Deduplique por `delivery`**: uma
+tentativa repetida é a mesma entrega cuja resposta se perdeu, não um evento
+novo. Cada assinante tem o seu `delivery`.
+
+| Cabeçalho | Conteúdo |
+|---|---|
+| `X-NB-Signature` | `sha256=<HMAC-SHA256 do corpo cru, com o segredo>` (só quando há segredo) |
+| `X-NB-Delivery` | o mesmo `delivery` do corpo (o do corpo é o assinado) |
+| `X-NB-Attempt` | `1`, `2` ou `3` |
+| `X-NB-Event` | o nome do evento |
+| `X-NB-Webhook-Id` | o `id` do webhook que recebeu, quando ele tem um |
+| `User-Agent` | `NutellaBoot3/<versão>` |
 
 Verificação no lado do MOJ:
 
@@ -1025,9 +1043,16 @@ def assinatura_confere(corpo: bytes, cabecalho: str, segredo: str) -> bool:
     return hmac.compare_digest(esperado, cabecalho or "")
 ```
 
-A entrega é de melhor esforço: até três tentativas, com espera crescente e
-tempo limite de 5 segundos cada. Um webhook lento nunca segura o boot nem o
-comando de bloqueio — o envio acontece em segundo plano.
+A entrega é de melhor esforço: até três tentativas (espera de 1 s e 2 s entre
+elas), tempo limite de 5 segundos cada, sem seguir redirecionamento. Um webhook
+lento nunca segura o boot nem o comando de bloqueio: o envio acontece em segundo
+plano, com no máximo 8 entregas simultâneas. A entrega que esgota as tentativas
+fica registrada em `webhooks.log` da imagem (evento, `delivery`, host, caminho e
+o último status; nunca o corpo, o segredo ou a query string).
+
+**Liste os eventos que você quer.** `events: []` assina tudo, inclusive
+`machine.status`, que dispara a cada telemetria de cada máquina (dezenas por
+segundo na frota inteira).
 
 ---
 
