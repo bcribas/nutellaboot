@@ -82,6 +82,17 @@ def set_disabled(owner: str, valor: bool) -> dict:
     return rec
 
 
+def set_label(owner: str, label: str) -> None:
+    """O rótulo aparece em toda lista de imagens: quando o convite é
+    renomeado, o registro do sub-admin acompanha."""
+    with fsdb.locked(settings.data_root / "owners"):
+        rec = fsdb.read_json(_path(owner))
+        if rec is None:
+            return
+        rec["label"] = label
+        fsdb.write_json(_path(owner), rec, mode=0o600)
+
+
 def quotas(owner: str) -> dict:
     """Tetos deste sub-admin, vindos do convite (o registro pode sobrescrever).
     `None` em qualquer campo significa sem limite."""

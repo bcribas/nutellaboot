@@ -49,7 +49,7 @@ def _load() -> dict:
     return fsdb.read_json(_path(), {}) or {}
 
 
-def create(kind: str, name: str, *, ip: str = "") -> dict:
+def create(kind: str, name: str, *, ip: str = "", key_fp: str = "") -> dict:
     """Abre uma sessão e devolve {id, expires_at}."""
     if kind not in TIPOS:
         raise ValueError(f"sessao nao vale para {kind}")
@@ -63,6 +63,10 @@ def create(kind: str, name: str, *, ip: str = "") -> dict:
         "renewed_at": agora,
         "ip": ip[:45],
     }
+    if key_fp:
+        # a sessão de admin pertence a UMA chave: revogá-la derruba a sessão
+        # mesmo que exista outra chave com o mesmo id
+        registro["key_fp"] = key_fp
     with fsdb.locked(settings.data_root):
         dados = {k: v for k, v in _load().items() if v.get("expires_at", 0) > agora}
         dados[sid] = registro
@@ -121,8 +125,13 @@ def resolve(sid: str, *, renovar: bool = True):
     p = None
     if kind == "admin":
         chaves = fsdb.read_json(settings.data_root / "keys" / "admin.json", {"keys": []})
-        if any(e.get("id", "admin") == name for e in chaves.get("keys", [])):
-            p = auth.Principal("admin", name)
+        fp = registro.get("key_fp", "")
+        # sessão antiga (sem fp) continua valendo pelo id, como sempre
+        if any(
+            e.get("id", "admin") == name and (not fp or str(e.get("sha256", ""))[:8] == fp)
+            for e in chaves.get("keys", [])
+        ):
+            p = auth.Principal("admin", name, key_fp=fp)
     elif kind == "subadmin":
         from . import invites, owners
 
@@ -176,6 +185,32 @@ def delete_all(name: str) -> int:
         if alvo:
             fsdb.write_json(_path(), dados, mode=0o600)
     return len(alvo)
+
+
+def delete_da_chave(name: str, key_fp: str) -> int:
+    """Encerra as sessões abertas com UMA chave de admin (a que foi revogada).
+    Sessão antiga, sem impressão digital, cai junto: não dá para saber de qual
+    chave veio, e na dúvida cai."""
+    with fsdb.locked(settings.data_root):
+        dados = _load()
+        alvo = [
+            k for k, v in dados.items()
+            if v.get("kind") == "admin" and v.get("name") == name and v.get("key_fp", key_fp) == key_fp
+        ]
+        for k in alvo:
+            del dados[k]
+        if alvo:
+            fsdb.write_json(_path(), dados, mode=0o600)
+    return len(alvo)
+
+
+def contar_da_chave(name: str, key_fp: str) -> int:
+    agora = time.time()
+    return sum(
+        1 for v in _load().values()
+        if v.get("kind") == "admin" and v.get("name") == name and v.get("expires_at", 0) > agora
+        and v.get("key_fp", key_fp) == key_fp
+    )
 
 
 def list_for(name: str) -> list[dict]:

@@ -17,11 +17,10 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from .. import auth, fsdb
+from .. import auth
 from ..errors import CODIGOS, erro
 from ..services import store, webhook_guard, webhook_push
 from ..services import webhooks_store as ws
-from ..settings import settings
 
 router = APIRouter(prefix="/api/v1")
 
@@ -237,48 +236,3 @@ async def put_webhooks(image: str, body: dict, p=Depends(auth.require_admin)) ->
         mantidos = [w for w in restantes if w["owner"] != "admin"]
         lista[:] = nova_lista + mantidos
     return {"ok": True, "webhooks": len(nova_lista), "kept": len(mantidos)}
-
-
-@router.post("/service-keys")
-async def create_service_key(body: dict, p=Depends(auth.require_admin)) -> dict:
-    """Cria a credencial que o MOJ usa. O escopo limita o que ela faz e
-    `images` limita a quais imagens ela enxerga."""
-    nome = str(body.get("name", "")).strip()
-    if not nome:
-        raise HTTPException(400, "informe um nome")
-    escopos = body.get("scopes") or []
-    for s in escopos:
-        if s not in ESCOPOS:
-            raise HTTPException(400, f"escopo desconhecido: {s}")
-
-    key = auth.new_key("nb3s")
-    path = settings.data_root / "keys" / "services.json"
-    with fsdb.locked(path.parent):
-        conf = fsdb.read_json(path, {}) or {}
-        conf[nome] = {
-            "sha256": auth.key_hash(key),
-            "scopes": escopos,
-            "images": body.get("images") or [],
-        }
-        fsdb.write_json(path, conf, mode=0o600)
-    return {"name": nome, "key": key, "scopes": escopos, "images": body.get("images") or []}
-
-
-@router.get("/service-keys")
-async def list_service_keys(p=Depends(auth.require_admin)) -> dict:
-    conf = fsdb.read_json(settings.data_root / "keys" / "services.json", {}) or {}
-    return {
-        "service_keys": [
-            {"name": n, "scopes": v.get("scopes", []), "images": v.get("images", [])}
-            for n, v in conf.items()
-        ]
-    }
-
-
-@router.delete("/service-keys/{name}", status_code=204)
-async def delete_service_key(name: str, p=Depends(auth.require_admin)) -> None:
-    path = settings.data_root / "keys" / "services.json"
-    with fsdb.locked(path.parent):
-        conf = fsdb.read_json(path, {}) or {}
-        conf.pop(name, None)
-        fsdb.write_json(path, conf, mode=0o600)

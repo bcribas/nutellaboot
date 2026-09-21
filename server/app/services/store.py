@@ -465,6 +465,24 @@ def rotate_boot_key(image_id: str) -> str:
     return chave
 
 
+def rotate_machine_key(image_id: str, grace_hours: float) -> dict:
+    """Troca a chave de máquina. A máquina só recebe a chave no BOOT (ela vem
+    no stuff), então quem está ligada continua com a antiga até reiniciar: sem
+    carência, a sala inteira fica muda na hora, inclusive para a ordem de
+    destravar. Na carência a antiga continua valendo (`machine.key.prev`)."""
+    nova = auth.new_key("nb3m")
+    d = site_image_dir(image_id)
+    ate = int(time.time() + max(0.0, grace_hours) * 3600)
+    with fsdb.locked(d):
+        antiga = (fsdb.read_text(d / "machine.key") or "").strip()
+        if antiga and grace_hours > 0:
+            fsdb.write_json(d / "machine.key.prev", {"key": antiga, "valid_until": ate}, mode=0o600)
+        else:
+            (d / "machine.key.prev").unlink(missing_ok=True)
+        fsdb.write_text(d / "machine.key", nova + "\n", mode=0o600)
+    return {"machine_key": nova, "previous_valid_until": ate if antiga and grace_hours > 0 else None}
+
+
 def patch_site_image(image_id: str, fields: dict) -> dict:
     d = site_image_dir(image_id)
     with fsdb.locked(d):

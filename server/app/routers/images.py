@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse
 
 from .. import auth
 from ..models import BulkRequest, SiteImageCreate, SiteImagePatch
-from ..services import eventos, fleet_views, ownership, presence, seeders, store, usb
+from ..services import audit, eventos, fleet_views, ownership, presence, seeders, store, usb
 
 router = APIRouter(prefix="/api/v1")
 
@@ -224,6 +224,35 @@ async def rotate_boot_key(image: str, p=Depends(auth.require_console)) -> dict:
     precisam ter o nutellaboot.conf atualizado — senão param de bootar."""
     _minha(p, image)
     return {"boot_key": store.rotate_boot_key(image)}
+
+
+@router.post("/site-images/{image}/machine-key/rotate")
+def rotate_machine_key(image: str, body: dict, request: Request, p=Depends(auth.require_console)) -> dict:
+    """Troca a chave de máquina da sede (era a única credencial sem rotação).
+
+    `grace_hours` (0 a 72, padrão 12): por quanto tempo a chave ANTIGA ainda
+    vale. A máquina só recebe a chave no boot; sem carência, quem está ligada
+    para de reportar e de receber ordem na hora, e uma máquina travada não
+    receberia o destravar. Por isso `grace_hours: 0` (chave vazada) é recusado
+    enquanto houver máquina travada, a não ser com `force`."""
+    _minha(p, image)
+    horas = body.get("grace_hours", 12)
+    if not isinstance(horas, (int, float)) or isinstance(horas, bool) or not 0 <= horas <= 72:
+        raise HTTPException(400, "grace_hours vai de 0 a 72")
+    from ..services import machines as m
+
+    maquinas = m.list_machines(image)
+    travadas = sum(1 for x in maquinas if (x.get("lock") or {}).get("locked"))
+    ligadas = sum(1 for x in maquinas if x.get("online"))
+    if horas == 0 and travadas and not body.get("force"):
+        raise HTTPException(
+            409,
+            f"{travadas} máquina(s) travada(s) ficariam sem receber o destravar: "
+            "destrave antes, use carência, ou repita com force",
+        )
+    r = store.rotate_machine_key(image, float(horas))
+    audit.registrar(p, request, "machine_key.rotated", image, {"grace_hours": horas, "online": ligadas})
+    return {**r, "online": ligadas, "locked": travadas}
 
 
 @router.get("/site-images/{image}/seeders")

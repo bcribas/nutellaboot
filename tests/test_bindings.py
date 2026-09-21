@@ -43,11 +43,11 @@ def roster(client, img, ha):
     assert r.status_code == 200, r.text
 
 
-def _moj(client, ha, scopes):
+def _moj(client, ha, scopes, nome="moj"):
     return {
         "Authorization": "Bearer "
         + client.post(
-            "/api/v1/service-keys", json={"name": "moj", "scopes": scopes, "images": []}, headers=ha
+            "/api/v1/service-keys", json={"name": nome, "scopes": scopes, "images": []}, headers=ha
         ).json()["key"]
     }
 
@@ -90,7 +90,7 @@ def test_historico_exige_machines_read(client, roster, ha, hi):
     client.put(ROTA, json={"user_id": "team-001"}, headers=hi)
     so_escreve = _moj(client, ha, ["bindings:write"])
     assert client.get(f"{ROTA}/history", headers=so_escreve).status_code == 403
-    le = _moj(client, ha, ["bindings:write", "machines:read"])
+    le = _moj(client, ha, ["bindings:write", "machines:read"], nome="moj-leitor")
     assert client.get(f"{ROTA}/history", headers=le).status_code == 200
 
 

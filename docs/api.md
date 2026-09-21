@@ -204,6 +204,7 @@ ALLOWNETWORKCHANGE='f'
 | GET | `/api/v1/site-images/{img}/credentials` | C | — | token, chaves e links prontos |
 | GET | `/api/v1/site-images/{img}/boot-key` | C | — | `{boot_key}` |
 | POST | `/api/v1/site-images/{img}/boot-key/rotate` | C | — | `{boot_key}` (exige atualizar os pendrives) |
+| POST | `/api/v1/site-images/{img}/machine-key/rotate` | C | `{grace_hours?: 0 a 72 (padrão 12), force?}` | `{machine_key, previous_valid_until, online, locked}`. A máquina só recebe a chave no boot: na carência a antiga continua valendo. `grace_hours: 0` com máquina travada é `409`, salvo `force` |
 
 > **O dono de uma imagem e o código do convite.** O id do dono de um sub-admin é
 > `invite:<CÓDIGO>`, e o código é a credencial de console dele. Por isso o
@@ -310,6 +311,7 @@ Notas que economizam depuração:
 |---|---|---|---|---|
 | GET | `/api/v1/invites` | A | — | `{invites:[…]}` |
 | POST | `/api/v1/invites` | A | `{label?, note?, model?, count?, max_images?, max_models?, build_quota?, expires_at?, unlocked?, wallpaper_locked?}` | `{invites:[…]}` — **com os códigos**; `count` emite vários de uma vez |
+| PATCH | `/api/v1/invites/{code}` | A | qualquer de `{label, note, max_images, max_models, build_quota, expires_at, revoked, unlocked, wallpaper_locked, model}` | o convite atualizado. `revoked: true` fecha o console e a criação **sem destruir nada** (o dono dos objetos fica) e volta atrás com `false` |
 | DELETE | `/api/v1/invites/{code}` | A | — | **409** listando o que ficaria órfão; `?force=true` apaga assim mesmo |
 
 `unlocked` no convite escolhe o perfil da imagem que ele vai criar: **Livre**
@@ -893,9 +895,31 @@ de pacotes extras, gastando a cota dela:
 | POST | `/api/v1/site-images/{img}/webhooks/{id}/test` | A, S`webhooks:write` | — | entrega `webhook.test` agora: `{ok, status_code, error, elapsed_ms, delivery}` |
 | GET | `/api/v1/site-images/{img}/webhooks/deliveries?n=` | A, S`webhooks:write` | — | `{deliveries:[…]}`: as entregas que esgotaram as tentativas (`webhooks.log`) |
 | PUT | `/api/v1/site-images/{img}/webhooks` | A | `{webhooks:[{id?, url, secret?, events}]}` | `{ok, webhooks, kept}`: a lista inteira, só da administração (ver abaixo) |
-| POST | `/api/v1/service-keys` | A | `{name, scopes:[…], images:[globs]}` | `{name, key, scopes, images}` |
-| GET | `/api/v1/service-keys` | A | — | lista sem as chaves |
+| POST | `/api/v1/service-keys` | A | `{name, scopes:[…], images:[globs], follow?}` | `{name, key, scopes, images, follow, created_at, created_by}`; a chave aparece **uma vez**. Nome que já existe é `409 key_exists` (não sobrescreve) |
+| GET | `/api/v1/service-keys` | A | — | `{service_keys:[{name, scopes, images, follow, created_at, created_by, rotated_at, last_used}]}`, sem as chaves |
+| PATCH | `/api/v1/service-keys/{nome}` | A | qualquer de `{scopes, images, follow}` | a chave atualizada (a credencial não muda) |
+| POST | `/api/v1/service-keys/{nome}/rotate` | A | — | chave nova com o **mesmo** nome, escopos e globs; a antiga morre na hora |
 | DELETE | `/api/v1/service-keys/{nome}` | A | — | `204` |
+| GET | `/api/v1/admin-keys` | A | — | `{keys:[{id, fp, created_at, created_by, last_used, current, sessions}]}` (`current`: a chave desta requisição) |
+| POST | `/api/v1/admin-keys` | A + reautenticação | `{id, current_key?}` | `201` `{id, key, fp, created_at}`; a chave aparece **uma vez** |
+| POST | `/api/v1/admin-keys/{id}/revoke` | A + reautenticação | `{current_key?, fp?, confirm?}` | `{revoked, fp, sessions_ended, remaining}` |
+| GET | `/api/v1/audit?limit=` | A | — | `{entries:[{at, actor_kind, actor, ip, action, target, detail}]}`, o mais recente primeiro |
+
+**Chaves de administração.** Cunhar e revogar chave de admin é o único ato que
+sobrevive à sessão que o fez, então pede **prova de posse da chave**: quem chama
+por `Authorization: Bearer` já provou; quem chama pela sessão do navegador
+manda `current_key` (a MESMA chave com que entrou), senão vem `403
+reauth_required`. Regras: nunca se revoga a **última** chave (`409
+last_admin_key`); revogar a chave da própria sessão pede `confirm: "<id>"`
+(`409 confirm_required`); se houver duas chaves com o mesmo `id` (herança do
+`nb3-init` antigo), `fp` desempata (`409 key_ambiguous`). Revogar derruba as
+sessões abertas com aquela chave, e só elas. Não existe "rotacionar": crie a
+nova, confira que ela entra, e revogue a velha.
+
+`last_used` (de chave de admin e de serviço) é mantido em memória e vai ao
+disco no máximo uma vez por minuto; serve para achar chave esquecida, não para
+perícia. Todo ato sobre credencial fica em `GET /api/v1/audit`, sem segredo
+nenhum (o convite aparece pela referência do dono, não pelo código).
 
 Eventos disponíveis (a lista viva está em `GET /api/v1/events/types`):
 

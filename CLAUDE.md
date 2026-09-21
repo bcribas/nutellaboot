@@ -406,6 +406,21 @@ O ambiente de teste tem um nginx externo que faz proxy de
   serviço. Todo modelo é aberto e todo campo opcional. Rota nova que o MOJ lê:
   acrescente em `schemas.DOCS`; `tests/test_openapi_shapes.py` valida respostas
   reais e prende o contrato.
+- **Rota que cunha ou mata chave de ADMIN chama `auth.conferir_reauth`.** É o
+  único ato que sobrevive à sessão que o fez: por cookie exige `current_key` (a
+  MESMA chave da sessão, por id e impressão digital), por Bearer a posse já
+  está provada. A recusa é 403 `reauth_required`, nunca 401 (a tela concluiria
+  que a sessão morreu). A sessão de admin guarda `key_fp`: revogar uma chave
+  derruba as sessões DELA, e recriar o mesmo id não revive sessão antiga.
+- **`last_used` de chave nunca escreve por requisição e nunca toca o
+  `admin.json`** (`services/keyusage.py`): mapa em memória, despejo 1x/min em
+  `keys/last-used.json`. Um defeito ali não pode trancar a administração.
+- `admin.json` e `services.json` só se escrevem por `services/keys.py` (lock,
+  data, quem criou). Nome de chave de serviço repetido é 409: sobrescrever
+  trocava a credencial do MOJ calado. Trocar é `rotate`.
+- Os mapas em memória do processo (`keyusage`, `presence`, `ratelimit`) valem
+  entre testes: `conftest.data_root` zera os dois primeiros; teste que mexe em
+  limite de taxa chama `ratelimit.reset()`.
 
 ## Estilo
 

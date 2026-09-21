@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .. import auth
-from ..services import invites, owners, requests, store, usb
+from ..services import audit, invites, owners, ownership, requests, store, usb
 
 router = APIRouter(prefix="/api/v1")
 
@@ -33,6 +33,53 @@ async def create_invite(body: dict, p=Depends(auth.require_admin)) -> dict:
 @router.get("/invites")
 async def list_invites(p=Depends(auth.require_admin)) -> dict:
     return {"invites": invites.list_all()}
+
+
+_INTEIROS = ("max_images", "max_models", "build_quota")
+_BOOLEANOS = ("revoked", "unlocked", "wallpaper_locked")
+_TEXTOS = ("label", "note")
+
+
+@router.patch("/invites/{code}")
+async def patch_invite(code: str, body: dict, request: Request, p=Depends(auth.require_admin)) -> dict:
+    """Ajusta um convite já emitido. `revoked: true` é a revogação que NÃO
+    destrói nada: fecha o console e a criação de imagens, mantém o dono dos
+    objetos, e volta atrás com `revoked: false`. (O DELETE apaga o convite, e
+    com ele a identidade do sub-admin.)"""
+    campos: dict = {}
+    for k in _INTEIROS:
+        if k in body:
+            if not isinstance(body[k], int) or isinstance(body[k], bool) or body[k] < 0:
+                raise HTTPException(400, f"{k} é um inteiro maior ou igual a zero")
+            campos[k] = body[k]
+    for k in _BOOLEANOS:
+        if k in body:
+            if not isinstance(body[k], bool):
+                raise HTTPException(400, f"{k} é verdadeiro ou falso")
+            campos[k] = body[k]
+    for k in _TEXTOS:
+        if k in body:
+            campos[k] = str(body[k] or "")[:120]
+    if "expires_at" in body:
+        v = body["expires_at"]
+        if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0):
+            raise HTTPException(400, "expires_at é epoch em segundos, ou null para não expirar")
+        campos["expires_at"] = v
+    if "model" in body:
+        v = body["model"]
+        if v and not store.model_exists(str(v)):
+            raise HTTPException(400, f"modelo '{v}' não existe")
+        campos["model"] = str(v) if v else None
+    if not campos:
+        raise HTTPException(400, "nada para alterar")
+    atualizado = invites.set_fields(code, campos)
+    if atualizado is None:
+        raise HTTPException(404, "convite não existe")
+    if "label" in campos:
+        owners.set_label(owners.owner_id(code), campos["label"])
+    # o código é credencial: na auditoria vai a referência do dono
+    audit.registrar(p, request, "invite.changed", ownership.owner_ref(owners.owner_id(code)), campos)
+    return atualizado
 
 
 @router.delete("/invites/{code}")

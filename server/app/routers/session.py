@@ -32,7 +32,7 @@ async def login(body: dict, request: Request, response: Response) -> dict:
         ratelimit.exigir(f"console:{ip}", rate=0.2, burst=10)
         raise HTTPException(401, "chave ou código inválido")
 
-    sessao = sessions.create(p.kind, p.name, ip=ip)
+    sessao = sessions.create(p.kind, p.name, ip=ip, key_fp=p.key_fp)
     sessions.set_cookie(response, sessao["id"])
     return {"ok": True, "expires_at": sessao["expires_at"], **ownership.whoami(p)}
 

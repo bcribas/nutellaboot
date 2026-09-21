@@ -92,7 +92,8 @@ def test_o_catalogo_e_publico_e_completo(client):
 def test_todo_codigo_levantado_esta_no_catalogo_e_vice_versa():
     usados = set()
     for arq in (REPO / "server" / "app").rglob("*.py"):
-        usados |= set(re.findall(r'\berro\(\s*\d{3},\s*"([a-z_]+)"', arq.read_text(encoding="utf-8")))
+        # `ErroDeChave` é o erro do serviço de chaves, que a rota converte em `erro(...)`
+        usados |= set(re.findall(r'\b(?:erro|ErroDeChave)\(\s*\d{3},\s*"([a-z_]+)"', arq.read_text(encoding="utf-8")))
     assert usados, "nenhum erro( encontrado: a regex quebrou?"
     assert usados <= set(errors.CODIGOS), usados - set(errors.CODIGOS)
     sem_emissor = set(errors.CODIGOS) - usados - set(errors.PADRAO_POR_STATUS.values())

@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -40,10 +41,17 @@ def emitir_chave(data: Path, ident: str) -> str:
     não pode perdê-la porque alguém rodou o comando de novo.
     """
     arquivo = data / "keys" / "admin.json"
-    atual = fsdb.read_json(arquivo, {"keys": []}) or {"keys": []}
     chave = auth.new_key("nb3a")
-    atual.setdefault("keys", []).append({"id": ident, "sha256": auth.key_hash(chave)})
-    fsdb.write_json(arquivo, atual, mode=0o600)
+    with fsdb.locked(arquivo.parent):
+        atual = fsdb.read_json(arquivo, {"keys": []}) or {"keys": []}
+        if any(e.get("id", "admin") == ident for e in atual.get("keys", [])):
+            # dois ids iguais eram aceitos, e aí revogar um deles não derrubava
+            # sessão nenhuma (a sessão revalidava só pelo id)
+            raise SystemExit(f"ja existe uma chave de admin com o id '{ident}': escolha outro com --id")
+        atual.setdefault("keys", []).append(
+            {"id": ident, "sha256": auth.key_hash(chave), "created_at": int(time.time()), "created_by": "nb3-init"}
+        )
+        fsdb.write_json(arquivo, atual, mode=0o600)
     return chave
 
 

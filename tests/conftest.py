@@ -18,6 +18,11 @@ from server.app.settings import settings  # noqa: E402
 def data_root(tmp_path, monkeypatch):
     """data/ isolado por teste."""
     monkeypatch.setattr(settings, "data_root", tmp_path)
+    # o disco é por teste; os mapas em memória do processo também têm de ser
+    from server.app.services import keyusage, presence
+
+    keyusage.reset()
+    presence.reset()
     return tmp_path
 
 

@@ -13,6 +13,7 @@ from .routers import (
     health,
     images,
     invites,
+    keys,
     labs,
     layers,
     machines,
@@ -110,6 +111,10 @@ async def _vida(app: FastAPI):
         from .services import presence
 
         presence.iniciar()
+        # o "último uso" das chaves vive na memória e vai ao disco 1x por minuto
+        from .services import keyusage
+
+        keyusage.iniciar()
     yield
 
 
@@ -143,6 +148,7 @@ def create_app() -> FastAPI:
     app.include_router(machines.router)
     app.include_router(roster.router)
     app.include_router(webhooks.router)
+    app.include_router(keys.router)
     app.include_router(labs.router)
     app.include_router(layers.router)
     app.include_router(invites.router)

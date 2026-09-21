@@ -10,6 +10,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import secrets
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from fastapi import Header, HTTPException, Request
 from . import fsdb
 from .settings import settings
 from .errors import erro
+from .services import keyusage
 
 
 def new_key(prefix: str) -> str:
@@ -37,6 +39,9 @@ class Principal:
     # serviço com `labs:read`: de quem é a visão da frota que a chave segue
     # (services/fleet_views.py); vazio = só os globs, como sempre foi
     follow: str = ""
+    # admin: impressão digital da chave (o começo do hash). A sessão a guarda
+    # para morrer junto com ESTA chave, e não com qualquer uma de mesmo id
+    key_fp: str = ""
     # True quando sessions.resolve acabou de estender a sessão: o cookie
     # precisa ser reemitido nesta resposta (SessionCookieMiddleware)
     sessao_renovada: bool = False
@@ -83,11 +88,13 @@ def identify(token: str | None, image_id: str | None = None) -> Principal | None
     admin = fsdb.read_json(settings.data_root / "keys" / "admin.json", {"keys": []})
     for entry in admin.get("keys", []):
         if secrets.compare_digest(th, entry.get("sha256", "")):
-            return Principal("admin", entry.get("id", "admin"))
+            keyusage.tocar("admin", th[:8])
+            return Principal("admin", entry.get("id", "admin"), key_fp=th[:8])
 
     services = fsdb.read_json(settings.data_root / "keys" / "services.json", {})
     for name, entry in services.items():
         if secrets.compare_digest(th, entry.get("sha256", "")):
+            keyusage.tocar("service", name)
             return Principal(
                 "service",
                 name,
@@ -127,6 +134,16 @@ def identify_machine(machine_key: str | None, image_id: str) -> Principal | None
         return None
     stored = (fsdb.read_text(_site_image_dir(image_id) / "machine.key") or "").strip()
     if stored and secrets.compare_digest(machine_key.strip(), stored):
+        return Principal("machine", image_id)
+    # Só no descasamento (o caminho quente não muda): a chave anterior, durante
+    # a carência de uma rotação. A máquina ligada só troca de chave no boot.
+    prev = fsdb.read_json(_site_image_dir(image_id) / "machine.key.prev")
+    if (
+        prev
+        and prev.get("key")
+        and time.time() < float(prev.get("valid_until") or 0)
+        and secrets.compare_digest(machine_key.strip(), str(prev["key"]))
+    ):
         return Principal("machine", image_id)
     return None
 
@@ -333,6 +350,31 @@ def require_image_access(
         return p
 
     return dep
+
+
+def conferir_reauth(p: Principal, request: Request, authorization: str | None, current_key) -> None:
+    """Para as rotas que cunham ou matam chave de ADMIN: prova de posse da
+    chave, não só da sessão.
+
+    O cookie prova que alguém entrou neste navegador; não prova que quem está
+    clicando agora é essa pessoa (aba aberta, sessão de 30 dias), e um script
+    injetado na tela do admin usaria a sessão para cunhar uma chave que
+    sobrevive a ela. Quem vem por Bearer já provou a posse na própria
+    requisição. Quem vem por cookie redigita a chave, e ela tem de ser a MESMA
+    da sessão (id e impressão digital).
+
+    A recusa é 403, não 401: 401 faria a tela concluir que a sessão morreu."""
+    from .services import audit, ratelimit
+
+    via_bearer = identify(_bearer(authorization))
+    if via_bearer is not None and via_bearer.kind == "admin":
+        return
+    q = identify(str(current_key or "").strip()) if current_key else None
+    if q is not None and q.kind == "admin" and q.name == p.name and (not p.key_fp or q.key_fp == p.key_fp):
+        return
+    audit.registrar(p, request, "reauth.failed")
+    ratelimit.exigir(f"reauth:{ratelimit.client_ip(request)}", rate=0.1, burst=5)
+    raise erro(403, "reauth_required", "confirme com a sua chave de administração")
 
 
 def require_admin_or_service(scope: str):
