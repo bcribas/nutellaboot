@@ -199,7 +199,12 @@ def cmd_config(c, a):
 def cmd_roster(c, a):
     if a.acao == "get":
         return c.get(f"/api/v1/site-images/{a.image}/roster")
+    if a.acao == "remove":
+        return c.delete(f"/api/v1/site-images/{a.image}/roster/{a.dados}")
     corpo = ler_corpo(a.dados)
+    if a.acao == "add":
+        # UM time, pelo user_id: sem ler e regravar a lista
+        return c.post(f"/api/v1/site-images/{a.image}/roster", corpo)
     if isinstance(corpo, list):
         corpo = {"roster": corpo}
     return c.put(f"/api/v1/site-images/{a.image}/roster", corpo)
@@ -242,7 +247,23 @@ def cmd_bind(c, a):
         corpo["source"] = a.source
     if a.boot_id:
         corpo["boot_id"] = a.boot_id
+    if a.criar:
+        # cria a entrada do roster que faltar (opt-in); o nome vai junto
+        corpo["create_roster_entry"] = {"name": a.name} if a.name else True
     return c.put(f"/api/v1/site-images/{a.image}/machines/{a.mac}/binding", corpo)
+
+
+def cmd_bind_lote(c, a):
+    corpo = ler_corpo(a.dados)
+    if isinstance(corpo, list):
+        corpo = {"bindings": corpo}
+    if a.criar:
+        corpo["create_roster_entry"] = True
+    return c.put(f"/api/v1/site-images/{a.image}/bindings", corpo)
+
+
+def cmd_command_status(c, a):
+    return c.get(f"/api/v1/site-images/{a.image}/commands/{a.command_id}")
 
 
 def cmd_binding_history(c, a):
@@ -309,9 +330,34 @@ def cmd_service_key(c, a):
 
 
 def cmd_webhooks(c, a):
-    if a.acao == "get":
-        return c.get(f"/api/v1/site-images/{a.image}/webhooks")
-    return c.put(f"/api/v1/site-images/{a.image}/webhooks", ler_corpo(a.dados))
+    base = f"/api/v1/site-images/{a.image}/webhooks"
+    if a.acao in ("get", "list"):
+        return c.get(base)
+    if a.acao == "set":
+        # a lista inteira, só com chave de admin; `***` mantém o segredo gravado
+        return c.put(base, ler_corpo(a.dados))
+    if a.acao == "add":
+        # a mesma url pelo mesmo dono atualiza a entrada em vez de duplicar
+        corpo = {"url": a.url, "events": a.event or []}
+        if a.secret:
+            corpo["secret"] = a.secret
+        return c.post(base, corpo)
+    if a.acao == "deliveries":
+        return c.get(f"{base}/deliveries")
+    if not a.id:
+        raise SystemExit(f"webhooks {a.acao}: informe --id")
+    if a.acao == "update":
+        corpo = {}
+        if a.url:
+            corpo["url"] = a.url
+        if a.event is not None:
+            corpo["events"] = a.event
+        if a.secret:
+            corpo["secret"] = a.secret
+        return c.put(f"{base}/{a.id}", corpo)
+    if a.acao == "test":
+        return c.post(f"{base}/{a.id}/test")
+    return c.delete(f"{base}/{a.id}")
 
 
 def cmd_events(c, a):
@@ -365,9 +411,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_config)
 
     s = sub.add_parser("roster", help="times da sede")
-    s.add_argument("acao", choices=["get", "set"])
+    s.add_argument("acao", choices=["get", "set", "add", "remove"])
     s.add_argument("image")
-    s.add_argument("dados", nargs="?", default="[]", help="JSON, @arquivo ou -")
+    s.add_argument("dados", nargs="?", default="[]",
+                   help="JSON, @arquivo ou - (em `remove`, o user_id)")
     s.set_defaults(fn=cmd_roster)
 
     s = sub.add_parser("logo", help="logotipo de uma instituição")
@@ -387,7 +434,20 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--seat", default="")
     s.add_argument("--source", default="", help="quem afirma o vínculo (ex.: moj-login)")
     s.add_argument("--boot-id", default="", dest="boot_id")
+    s.add_argument("--criar", action="store_true", help="cria a entrada do roster se o time não estiver nele")
+    s.add_argument("--name", default="", help="nome do time, para o --criar")
     s.set_defaults(fn=cmd_bind)
+
+    s = sub.add_parser("bind-lote", help="vários vínculos de uma vez (até 1000)")
+    s.add_argument("image")
+    s.add_argument("dados", help="JSON, @arquivo ou -: [{mac, user_id, …}]")
+    s.add_argument("--criar", action="store_true", help="create_roster_entry para todos")
+    s.set_defaults(fn=cmd_bind_lote)
+
+    s = sub.add_parser("command-status", help="quem executou um comando")
+    s.add_argument("image")
+    s.add_argument("command_id")
+    s.set_defaults(fn=cmd_command_status)
 
     s = sub.add_parser("binding-history", help="histórico de vínculos da máquina")
     s.add_argument("image")
@@ -436,9 +496,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_service_key)
 
     s = sub.add_parser("webhooks")
-    s.add_argument("acao", choices=["get", "set"])
+    s.add_argument("acao", choices=["get", "list", "add", "update", "delete", "test", "deliveries", "set"])
     s.add_argument("image")
-    s.add_argument("dados", nargs="?", default="{}", help="JSON, @arquivo ou -")
+    s.add_argument("dados", nargs="?", default="{}", help="só no `set`: JSON, @arquivo ou -")
+    s.add_argument("--id", default="", help="o webhook, em update/delete/test")
+    s.add_argument("--url", default="")
+    s.add_argument("--secret", default="")
+    s.add_argument("--event", action="append", help="repita para vários; sem nenhum = todos")
     s.set_defaults(fn=cmd_webhooks)
 
     sub.add_parser("events", help="catálogo de eventos e escopos").set_defaults(fn=cmd_events)

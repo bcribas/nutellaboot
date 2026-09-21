@@ -928,14 +928,24 @@ repositório.
 export NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br
 export NB3_API_KEY=nb3s_...          # serve nb3a_, nb3s_ e o nb3i_ da sede
 
-nb3-api whoami
+nb3-api whoami                       # com nb3s_: escopos, globs e as imagens que eles cobrem
 nb3-api bulk sedes.tsv > credenciais.csv
-nb3-api roster set 26brbr @times.json
+nb3-api roster set 26brbr @times.json                # a lista inteira
+nb3-api roster add 26brbr '{"user_id":"team-001","name":"Os Batatinhas"}'   # um time
+nb3-api roster remove 26brbr team-001
 nb3-api bind 26brbr 52-54-00-12-34-56 team-001 --seat 012
+nb3-api bind 26brbr 52-54-00-12-34-56 team-002 --criar --name "Dois"   # cria o time que faltar
+nb3-api bind-lote 26brbr @vinculos.json --criar      # até 1000 por pedido
 nb3-api lock 26brbr                  # a sala inteira
 nb3-api command 26brbr mlreboot 52-54-00-12-34-56    # só esta máquina
 nb3-api command 26brbr cleanhomenow --all            # a sala inteira, por extenso
+nb3-api command-status 26brbr 3f9c1a2b7d4e           # quem executou
 nb3-api logo 26brbr ufu ufu.png                      # PNG ou SVG
+nb3-api webhooks add 26brbr --url https://moj.example/h --secret "$SEGREDO" --event alert.raised
+nb3-api webhooks list 26brbr
+nb3-api webhooks test 26brbr --id wh_1a2b3c4d5e6f     # entrega um webhook.test agora
+nb3-api webhooks update 26brbr --id wh_1a2b3c4d5e6f --secret "$NOVO"    # rotação
+nb3-api webhooks delete 26brbr --id wh_1a2b3c4d5e6f
 nb3-api machines 26brbr
 nb3-api report 26brbr 1785600000 1785700000 > relatorio.html
 ```
@@ -960,8 +970,10 @@ Os exemplos abaixo usam a sede `26brbr`.
 
 ### 1. Criar a chave de serviço
 
-Feito uma vez, pela administração. Os escopos limitam o que a chave faz, e
-`images` limita onde ela age.
+Feito pela administração. Os escopos limitam o que a chave faz, e `images`
+limita onde ela age. O recomendado é **uma chave por evento**, com o glob das
+imagens daquele evento: a chave de administração não precisa ficar gravada em
+lugar nenhum do lado de quem integra.
 
 ```bash
 curl -sS -X POST https://nutellaboot.mdp.naquadah.com.br/api/v1/service-keys \
@@ -969,8 +981,9 @@ curl -sS -X POST https://nutellaboot.mdp.naquadah.com.br/api/v1/service-keys \
   -H 'Content-Type: application/json' \
   -d '{
         "name": "moj",
-        "scopes": ["machines:read", "commands:write",
-                   "bindings:write", "roster:read", "roster:write"],
+        "scopes": ["machines:read", "commands:write", "alerts:write",
+                   "bindings:write", "roster:read", "roster:write",
+                   "webhooks:write"],
         "images": ["26*"]
       }'
 ```

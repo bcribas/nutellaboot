@@ -253,6 +253,51 @@ def test_logo_sobe_de_verdade(live, tmp_path):
     roda(live, "images", "delete", "clilogo")
 
 
+def test_o_caminho_do_moj_pelas_rotas_novas(live):
+    """Chave de serviço se enxerga, acrescenta um time, vincula criando o que
+    falta, vincula em lote, segue um comando e instala o próprio webhook."""
+    roda(live, "images", "create", "clinovo", "--model", "t")
+    cred = json.loads(roda(live, "--json", "images", "credentials", "clinovo").stdout)
+    r = roda(live, "--json", "service-key", "create", "moj-cli",
+             "--scope", "machines:read", "--scope", "roster:write", "--scope", "bindings:write",
+             "--scope", "commands:write", "--scope", "webhooks:write", "--image", "clinovo")
+    assert r.returncode == 0, r.stderr
+    moj = json.loads(r.stdout)["key"]
+
+    eu = json.loads(roda(live, "--json", "whoami", key=moj).stdout)
+    assert eu["kind"] == "service" and eu["images"] == ["clinovo"]
+
+    m1, m2 = "52-54-00-00-aa-01", "52-54-00-00-aa-02"
+    for mac in (m1, m2):
+        _maquina(live, "clinovo", cred["machine_key"], mac)
+
+    assert roda(live, "roster", "add", "clinovo", '{"user_id":"t1","name":"Um"}', key=moj).returncode == 0
+    r = roda(live, "--json", "bind", "clinovo", m1, "t2", "--criar", "--name", "Dois", key=moj)
+    assert r.returncode == 0 and json.loads(r.stdout)["roster_entry_created"] is True, r.stderr
+    lote = json.dumps([{"mac": m2, "user_id": "t1"}, {"mac": "zz", "user_id": "t1"}])
+    d = json.loads(roda(live, "--json", "bind-lote", "clinovo", "-", key=moj, entrada=lote).stdout)
+    assert (d["bound"], d["failed"]) == (1, 1)
+    assert roda(live, "roster", "remove", "clinovo", "t2", key=moj).returncode == 0
+
+    cid = json.loads(roda(live, "--json", "command", "clinovo", "mlreboot", m1, key=moj).stdout)["command_id"]
+    estado = json.loads(roda(live, "--json", "command-status", "clinovo", cid, key=moj).stdout)
+    assert estado["summary"] == {"acked": 0, "pending": 1, "expired": 0}
+
+    # com a chave de admin o destino é livre; a de serviço só aponta para https público
+    r = roda(live, "--json", "webhooks", "add", "clinovo", "--url", "http://127.0.0.1:9/h", "--event", "alert.raised")
+    assert r.returncode == 0, r.stderr
+    wid = json.loads(r.stdout)["id"]
+    r = roda(live, "webhooks", "add", "clinovo", "--url", "http://127.0.0.1:9/h",
+             "--secret", "s" * 16, key=moj)
+    assert r.returncode != 0 and "webhook_url_forbidden" in r.stderr
+    assert roda(live, "webhooks", "update", "clinovo", "--id", wid, "--secret", "novo-segredo").returncode == 0
+    assert json.loads(roda(live, "--json", "webhooks", "test", "clinovo", "--id", wid).stdout)["ok"] is False
+    assert roda(live, "webhooks", "delete", "clinovo", "--id", wid).returncode == 0
+    assert json.loads(roda(live, "--json", "webhooks", "list", "clinovo").stdout)["webhooks"] == []
+    roda(live, "service-key", "delete", "moj-cli")
+    roda(live, "images", "delete", "clinovo")
+
+
 def test_erro_do_servidor_sai_diferente_de_zero_e_diz_o_motivo(live):
     """A invariante 15, do lado do cliente."""
     r = roda(live, "images", "get", "naoexiste")
