@@ -825,6 +825,72 @@ O seletor de período ("30 min · 2 h · 5 h · 24 h · desde…") fica na URL:
 `/dashboard/?since=<epoch>` abre já recortado — o link do telão pode apontar
 para o início da prova.
 
+Ao compartilhar, escolha o que o link mostra: **o link segue a minha seleção**
+(o padrão: ele mostra a visão da frota da administração, e muda na hora em que
+você a muda) ou **estas imagens** (um recorte fixo por globs, como `26br*`). O
+link que segue a seleção nunca se alarga sozinho, e os globs continuam sendo o
+teto.
+
+### A visão da frota: o que o dashboard e os laboratórios mostram
+
+A administração enxerga tudo, então o painel dela era a soma das sedes da prova
+com os laboratórios de todo mundo que entrou por convite. Agora há um recorte,
+**gravado no servidor** (vale em qualquer navegador, no telão e no link
+compartilhado que o segue):
+
+| Visão | O que mostra |
+|---|---|
+| **só as minhas** (o padrão) | as imagens da administração; para um sub-admin, as dele |
+| **todas** | tudo o que você pode ver |
+| **por dono** | as imagens dos donos marcados (só a administração) |
+| **escolhidas à mão** | as sedes marcadas na tela dos laboratórios |
+
+O seletor está no cartão da frota do `/admin/` e no topo do `/laboratorios/`.
+Para escolher à mão: em `/laboratorios/` marque **mostrar todas, sem salvar** (as
+sedes de fora da visão aparecem esmaecidas), marque as que você quer, escolha
+**escolhidas à mão** e **Gravar**. Imagem criada depois disso fica **fora** até
+ser escolhida, e a tela avisa ("N imagens novas fora da seleção"): o laboratório
+novo de alguém não pula para o telão sozinho. `dashboard_hidden` continua sendo
+exclusão dura, acima de qualquer visão.
+
+Toda lista de imagens (no `/admin/` e nos laboratórios) diz **de quem é** cada
+uma: a administração, ou o rótulo do convite de quem a criou. Mude o rótulo em
+**Convites → Editar**; ele acompanha em todas as telas. O código do convite
+nunca aparece nessas listas: ele é a credencial de console daquela pessoa.
+
+### Chaves: ver, criar, revogar
+
+O cartão **Chaves** do `/admin/` (só da administração) reúne o que antes pedia
+`curl` ou acesso ao servidor:
+
+- **Chaves de administração**: a lista (quem criou, quando, último uso, quantas
+  sessões abertas, e qual é a desta sessão), criar e revogar. Criar e revogar
+  pedem **a sua chave de novo**: o navegador lembra a sessão, não a pessoa.
+  Não existe "rotacionar": crie a nova, **entre com ela**, e só então revogue a
+  velha. A última chave não se revoga. Foi assim que a chave de admin que passou
+  pela conversa com o assistente do MOJ pôde ser trocada sem acesso ao servidor.
+- **Chaves de serviço** (o MOJ, o telão): todas aparecem, com escopos, globs,
+  criada em e último uso. Criar com os escopos do catálogo; **Rotacionar** dá
+  uma chave nova com o mesmo nome (a antiga morre na hora); nome repetido é
+  erro, não sobrescrita. O recomendado é uma chave por evento.
+- **Auditoria**: o que foi feito com chaves e convites, por quem e de onde. Não
+  guarda segredo nenhum.
+
+Em **Sub-administradores**: suspender (corta o console sem apagar nada), ajustar
+cotas, ver o uso e o último acesso. Em **Convites**: **Revogar** agora é
+reversível (fecha o console e a criação de imagens, e não deixa nada órfão);
+**Apagar** é o definitivo, e avisa o que ficaria sem dono antes de ir.
+
+Na linha de cada imagem, **Chaves** mostra a chave de boot (a que vai no
+`nutellaboot.conf`) e a rotaciona, e troca a **chave de máquina**, que não tinha
+rotação. A máquina só recebe a chave de máquina no boot: use a **carência**
+(12 h por padrão) para as máquinas ligadas não ficarem mudas; "sem carência" é
+para chave vazada, e é recusada enquanto houver máquina travada (ela não
+receberia o destravar).
+
+`last_used` é aproximado (vai ao disco uma vez por minuto): serve para achar a
+chave esquecida, não para perícia.
+
 ## 4. Durante a prova
 
 ### O painel do laboratório

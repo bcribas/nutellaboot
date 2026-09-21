@@ -33,6 +33,16 @@
   <input type="text" id="search" data-i18n-placeholder="search">
 </div>
 
+<!-- A visão da frota: o que ESTA tela e o dashboard mostram. Mora no servidor
+     (vale em qualquer navegador e no telão); "escolhidas à mão" grava as sedes
+     marcadas aqui embaixo. -->
+<div class="toolbar" id="visao">
+  <div id="fview" class="fview"></div>
+  <span class="spacer"></span>
+  <select id="ownerfilter" hidden></select>
+  <label class="inline"><input type="checkbox" id="viewall"> <span data-i18n="fview_show_all"></span></label>
+</div>
+
 <!-- Todos os alertas abertos da frota, das linhas do resumo. Sem botão de
      dispensar: o registro de quem dispensou pertence ao hotconfig da sede, e
      o link leva direto lá. -->

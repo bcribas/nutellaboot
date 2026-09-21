@@ -4,6 +4,9 @@ import { apararColagem, ligarOlho } from "/common/chave.js";
 import { init, t, apply, currentLang } from "/common/i18n.js";
 import { usbBlock } from "/common/usb.js";
 import { esc } from "/common/ui.js";
+import { montarSeletor } from "/common/fleetview.js";
+import { iniciarChaves, carregarChaves, abrirChavesDaImagem } from "./chaves.js";
+import { carregarDonos, carregarConvites, camposExtrasDoConvite } from "./donos.js";
 
 const $ = (s) => document.querySelector(s);
 const A = { kind: "admin" };
@@ -80,10 +83,41 @@ function credentialsCard(info, title) {
   return card;
 }
 
+// De quem é a imagem: a administração, ou o rótulo do convite de quem a criou
+// (nunca o código, que é a credencial dele).
+function rotuloDoDono(img) {
+  if (img.owner_kind !== "subadmin") return t("owner_admin");
+  return img.owner_label || img.owner_ref || "";
+}
+
+function preencherFiltroDeDonos() {
+  const sel = $("#ownerfilter");
+  const antes = sel.value;
+  const vistos = new Map();
+  for (const i of images) {
+    if (!vistos.has(i.owner_ref)) vistos.set(i.owner_ref, rotuloDoDono(i));
+  }
+  sel.innerHTML = "";
+  const todas = document.createElement("option");
+  todas.value = "";
+  todas.textContent = t("owner_filter_all");
+  sel.appendChild(todas);
+  for (const [ref, rotulo] of vistos) {
+    const o = document.createElement("option");
+    o.value = ref;
+    o.textContent = rotulo;
+    sel.appendChild(o);
+  }
+  if ([...vistos.keys()].includes(antes)) sel.value = antes;
+}
+
 function renderImages() {
   const q = $("#filter").value.trim().toLowerCase();
+  const dono = $("#ownerfilter").value;
   const list = images.filter(
-    (i) => !q || i.id.includes(q) || (i.fullname || "").toLowerCase().includes(q)
+    (i) =>
+      (!q || i.id.includes(q) || (i.fullname || "").toLowerCase().includes(q)) &&
+      (!dono || i.owner_ref === dono)
   );
   $("#imgcount").textContent = `(${list.length})`;
   const box = $("#imglist");
@@ -97,7 +131,7 @@ function renderImages() {
   const table = document.createElement("table");
   table.innerHTML = `<thead><tr>
     <th>${t("image_id")}</th><th>${t("image_name")}</th>
-    <th>${t("template")}</th><th></th><th></th></tr></thead>`;
+    <th>${t("template")}</th><th>${t("owner_col")}</th><th></th><th></th></tr></thead>`;
   const tbody = document.createElement("tbody");
   for (const img of list) {
     const tr = document.createElement("tr");
@@ -107,6 +141,7 @@ function renderImages() {
       <td class="mono">${esc(img.id)}</td>
       <td>${esc(img.fullname)}</td>
       <td class="muted">${esc(img.model)}</td>
+      <td class="muted">${esc(rotuloDoDono(img))}</td>
       <td><span class="pill ${reserved ? "warn" : ""}">${
         reserved ? t("reserved_namespace") : t("personal_namespace")
       }</span>
@@ -172,7 +207,15 @@ function renderImages() {
       await api.del(`/api/v1/site-images/${img.id}`, A);
       load();
     };
-    actions.append(perfil, " ", oculta, " ", cam, " ", ver, " ", rot, " ", del);
+    // chave de boot (ver/rotacionar) e chave de máquina (rotacionar com carência)
+    const chaves = document.createElement("button");
+    chaves.className = "small";
+    chaves.textContent = t("image_keys_button");
+    chaves.onclick = () => abrirChavesDaImagem(img.id);
+    // perfil e placar são decisão da administração: para o sub-admin os botões
+    // só davam 403
+    if (ehAdmin()) actions.append(perfil, " ", oculta, " ");
+    actions.append(cam, " ", ver, " ", chaves, " ", rot, " ", del);
     tr.appendChild(actions);
     tbody.appendChild(tr);
   }
@@ -199,12 +242,17 @@ async function load() {
   // modelo opcional do convite (vazio = a pessoa escolhe entre os públicos)
   if ($("#inv_tpl")) preencherSelect($("#inv_tpl"), modelos.filter((m) => m.public), { vazio: "—" });
 
+  preencherFiltroDeDonos();
   renderImages();
   renderModels();
   renderLayerTargets();
+  // a visão da frota (o que o dashboard e os laboratórios mostram)
+  montarSeletor($("#fview"));
   if (ehAdmin()) {
     loadInvites();
     loadRequests();
+    carregarDonos();
+    carregarChaves();
   }
   loadLayerBuilds();
   if (ehAdmin()) {
@@ -689,40 +737,9 @@ function wallpaperEditor(m, modelo) {
 }
 
 async function loadInvites() {
-  const box = $("#invlist");
-  if (!box) return;
-  const data = await api.get("/api/v1/invites", A);
-  box.innerHTML = "";
-  if (!data.invites.length) {
-    box.className = "muted";
-    box.textContent = "—";
-    return;
-  }
-  box.className = "";
-  const table = document.createElement("table");
-  for (const inv of data.invites) {
-    const tr = document.createElement("tr");
-    const td0 = document.createElement("td");
-    td0.appendChild(copyable(t("create_code"), inv.code));
-    tr.appendChild(td0);
-    const meta = document.createElement("td");
-    meta.className = "muted";
-    const perfil = inv.unlocked === false ? t("profile_official_short") : t("profile_free_short");
-    meta.textContent = `${inv.remaining} ${t("invite_remaining")} · ${perfil}${inv.model ? " · " + inv.model : ""}${inv.note ? " · " + inv.note : ""}`;
-    tr.appendChild(meta);
-    const td2 = document.createElement("td");
-    const rev = document.createElement("button");
-    rev.className = "small danger";
-    rev.textContent = t("invite_revoke");
-    rev.onclick = async () => {
-      await api.del(`/api/v1/invites/${inv.code}`, A);
-      loadInvites();
-    };
-    td2.appendChild(rev);
-    tr.appendChild(td2);
-    table.appendChild(tr);
-  }
-  box.appendChild(table);
+  // editar, revogar sem destruir (e voltar atrás) e apagar com o aviso do que
+  // ficaria órfão: ver donos.js
+  return carregarConvites();
 }
 
 async function generateInvite() {
@@ -733,6 +750,7 @@ async function generateInvite() {
     model: $("#inv_tpl").value || undefined,
     note: $("#inv_note").value.trim(),
     unlocked: $("#inv_profile").value === "free",
+    ...camposExtrasDoConvite(),
   };
   const r = await api.post("/api/v1/invites", body, A);
   for (const inv of r.invites) {
@@ -1312,13 +1330,15 @@ async function carregarChavesDash() {
       const linha = document.createElement("div");
       linha.className = "muted";
       linha.style.cssText = "display:flex;gap:10px;align-items:center;font-size:13px;margin-top:4px";
-      linha.innerHTML = `<span class="mono">${esc(k.name)}</span>`;
+      linha.innerHTML = `<span class="mono">${esc(k.name)}</span>
+        <span class="pill">${k.follow ? t("dash_share_follow_short") : esc((k.images || []).join(" ") || t("svckey_all_images"))}</span>`;
       const rev = document.createElement("button");
       rev.className = "small";
       rev.textContent = t("dash_share_revoke");
       rev.onclick = async () => {
         await api.del(`/api/v1/service-keys/${encodeURIComponent(k.name)}`, A);
         carregarChavesDash();
+        carregarChaves();
       };
       linha.appendChild(rev);
       box.appendChild(linha);
@@ -1331,9 +1351,13 @@ async function carregarChavesDash() {
 async function criarChaveDash() {
   const nome = `dashboard-${new Date().toISOString().slice(0, 10)}-${Math.random().toString(36).slice(2, 6)}`;
   try {
+    // "seguir": o link mostra o que a administração escolheu na visão da
+    // frota, e muda junto com ela. "globs": o recorte fixo de sempre.
+    const segue = $("#share_follow").checked;
+    const globs = $("#share_images").value.split(/[\s,]+/).filter(Boolean);
     const d = await api.post(
       "/api/v1/service-keys",
-      { name: nome, scopes: ["labs:read"], images: [] },
+      { name: nome, scopes: ["labs:read"], images: segue ? [] : globs, follow: segue ? "admin" : "" },
       A
     );
     const url = `${location.origin}/dashboard/?tk=${d.key}`;
@@ -1341,6 +1365,7 @@ async function criarChaveDash() {
     $("#shareurl").value = url;
     $("#shareurl").select();
     carregarChavesDash();
+    carregarChaves();
   } catch (e) {
     toast(`${t("error")}: ${e.message}`, true);
   }
@@ -1357,6 +1382,12 @@ async function main() {
   $("#bulkcsv").onclick = downloadCsv;
   $("#reload").onclick = load;
   $("#filter").oninput = renderImages;
+  $("#ownerfilter").onchange = renderImages;
+  $("#share_follow").onchange = $("#share_globs").onchange = () =>
+    $("#share_images").classList.toggle("hidden", $("#share_follow").checked);
+  iniciarChaves();
+  document.addEventListener("nb3:recarregar", load);
+  document.addEventListener("nb3:chaves-mudaram", carregarChavesDash);
   $("#inv_gen").onclick = generateInvite;
   $("#lay_build").onclick = buildLayerFromTemplate;
   $("#layi_build").onclick = buildLayerForImage;

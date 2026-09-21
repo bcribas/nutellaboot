@@ -29,10 +29,12 @@ function imageToken() {
 const CONSOLE_HEADER = { "X-NB-Console": "1" };
 
 export class ApiError extends Error {
-  constructor(status, detail) {
-    super(detail || `HTTP ${status}`);
+  constructor(status, detail, code) {
+    super(typeof detail === "string" && detail ? detail : `HTTP ${status}`);
     this.status = status;
     this.detail = detail;
+    // o código estável do erro (docs/api.md): é por ele que a tela decide
+    this.code = code || "";
   }
 }
 
@@ -46,7 +48,7 @@ async function parse(resp) {
     body = text;
   }
   if (!resp.ok) {
-    throw new ApiError(resp.status, body && body.detail ? body.detail : String(body));
+    throw new ApiError(resp.status, body && body.detail ? body.detail : String(body), body && body.code);
   }
   return body;
 }

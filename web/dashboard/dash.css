@@ -306,3 +306,7 @@ body.dash [hidden] { display: none !important; }
 .bignum.edmulti b { font-size: 40px; }
 #g-ed-leg .quad { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 #g-ed-leg { flex-wrap: wrap; }
+
+/* o recorte da frota que a tela está mostrando */
+.dchip { text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; margin-right: 12px; }
+.dchip:hover { border-color: var(--accent); color: var(--accent); }

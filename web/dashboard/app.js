@@ -280,6 +280,7 @@ async function buscar() {
   try {
     const d = await api.get("/api/v1/labs?dias=1");
     sites = d.sites || [];
+    pintarVisao(d.view);
   } catch (e) {
     $("#updated").textContent = `${t("error")}: ${e.message}`;
     return;
@@ -336,6 +337,21 @@ function rosca(fatias, totalRotulo) {
 // os nomes de editor e de time vêm da TELEMETRIA: quem tem a chave de máquina
 // escreve o que quiser ali, e isto aqui é a tela do admin — nada disso entra
 // no innerHTML sem passar por aqui
+// A visão da frota que o servidor aplicou (services/fleet_views.py). No link
+// compartilhado o servidor não conta o que ficou de fora, e o chip não aparece.
+const MODO_LABEL = { mine: "fview_mine", all: "fview_all", owners: "fview_owners", custom: "fview_custom" };
+
+function pintarVisao(v) {
+  const chip = $("#viewchip");
+  if (!chip) return;
+  if (compartilhado || !v || !v.mode) {
+    chip.hidden = true;
+    return;
+  }
+  chip.hidden = false;
+  chip.textContent = t("fview_chip", { modo: t(MODO_LABEL[v.mode] || "fview_mine"), n: v.shown, total: v.total });
+}
+
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

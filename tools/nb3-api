@@ -323,10 +323,78 @@ def cmd_service_key(c, a):
     if a.acao == "delete":
         c.delete(f"/api/v1/service-keys/{a.name}")
         return {"deleted": a.name}
+    if a.acao == "rotate":
+        # chave nova, mesmo nome, escopos e globs; a antiga morre na hora
+        return c.post(f"/api/v1/service-keys/{a.name}/rotate")
+    if a.acao == "set":
+        corpo = {}
+        if a.scopes is not None:
+            corpo["scopes"] = a.scopes
+        if a.images is not None:
+            corpo["images"] = a.images
+        if a.follow is not None:
+            corpo["follow"] = "" if a.follow == "none" else a.follow
+        return c.request("PATCH", f"/api/v1/service-keys/{a.name}", body=corpo)
+    corpo = {"name": a.name, "scopes": a.scopes or [], "images": a.images or []}
+    if a.follow and a.follow != "none":
+        corpo["follow"] = a.follow
+    return c.post("/api/v1/service-keys", corpo)
+
+
+def cmd_admin_key(c, a):
+    # por Bearer a posse da chave já está provada: não há o que redigitar
+    if a.acao == "list":
+        return c.get("/api/v1/admin-keys")
+    if a.acao == "create":
+        return c.post("/api/v1/admin-keys", {"id": a.id})
+    corpo = {"fp": a.fp} if a.fp else {}
+    if a.sim:
+        corpo["confirm"] = a.id  # só é exigido para a chave desta requisição
+    return c.post(f"/api/v1/admin-keys/{a.id}/revoke", corpo)
+
+
+def cmd_invite(c, a):
+    if a.acao == "list":
+        return c.get("/api/v1/invites")
+    if a.acao == "create":
+        # `invite create '{"count":2}'`: o JSON cai no primeiro posicional
+        return c.post("/api/v1/invites", ler_corpo(a.dados if a.dados != "{}" else (a.code or "{}")))
+    if a.acao in ("revoke", "restore"):
+        # reversível: fecha o console e a criação sem deixar nada órfão
+        return c.request("PATCH", f"/api/v1/invites/{a.code}", body={"revoked": a.acao == "revoke"})
+    if a.acao == "set":
+        return c.request("PATCH", f"/api/v1/invites/{a.code}", body=ler_corpo(a.dados))
+    return c.delete(f"/api/v1/invites/{a.code}", params={"force": "true" if a.force else ""})
+
+
+def cmd_owners(c, a):
+    if a.acao == "list":
+        return c.get("/api/v1/owners")
+    if a.acao in ("disable", "enable"):
+        return c.post(f"/api/v1/owners/{a.id}/disable", {"disabled": a.acao == "disable"})
+    return c.request("PATCH", f"/api/v1/owners/{a.id}/quotas", body=ler_corpo(a.dados))
+
+
+def cmd_view(c, a):
+    if a.acao == "get":
+        return c.get("/api/v1/labs/view")
+    corpo = {"mode": a.mode}
+    if a.owner:
+        corpo["owners"] = a.owner
+    if a.image:
+        corpo["images"] = a.image
+    return c.put("/api/v1/labs/view", corpo)
+
+
+def cmd_machine_key(c, a):
     return c.post(
-        "/api/v1/service-keys",
-        {"name": a.name, "scopes": a.scopes or [], "images": a.images or []},
+        f"/api/v1/site-images/{a.image}/machine-key/rotate",
+        {"grace_hours": a.grace_hours, "force": a.force},
     )
+
+
+def cmd_audit(c, a):
+    return c.get("/api/v1/audit", params={"limit": a.limit})
 
 
 def cmd_webhooks(c, a):
@@ -489,11 +557,49 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_command)
 
     s = sub.add_parser("service-key", help="chave de integração, com escopos")
-    s.add_argument("acao", choices=["create", "list", "delete"])
+    s.add_argument("acao", choices=["create", "list", "delete", "rotate", "set"])
     s.add_argument("name", nargs="?", default="")
     s.add_argument("--scope", dest="scopes", action="append")
     s.add_argument("--image", dest="images", action="append")
+    s.add_argument("--follow", choices=["admin", "none"], help="labs:read que segue a visão da frota")
     s.set_defaults(fn=cmd_service_key)
+
+    s = sub.add_parser("admin-key", help="chaves de administração")
+    s.add_argument("acao", choices=["list", "create", "revoke"])
+    s.add_argument("id", nargs="?", default="")
+    s.add_argument("--fp", default="", help="desempata dois ids iguais")
+    s.add_argument("--sim", action="store_true", help="confirma revogar a própria chave")
+    s.set_defaults(fn=cmd_admin_key)
+
+    s = sub.add_parser("invite", help="convites (a credencial do sub-admin)")
+    s.add_argument("acao", choices=["list", "create", "set", "revoke", "restore", "delete"])
+    s.add_argument("code", nargs="?", default="")
+    s.add_argument("dados", nargs="?", default="{}", help="JSON, @arquivo ou -")
+    s.add_argument("--force", action="store_true", help="apaga mesmo deixando objetos órfãos")
+    s.set_defaults(fn=cmd_invite)
+
+    s = sub.add_parser("owners", help="sub-administradores")
+    s.add_argument("acao", choices=["list", "disable", "enable", "quotas"])
+    s.add_argument("id", nargs="?", default="")
+    s.add_argument("dados", nargs="?", default="{}", help="quotas: {max_models, max_images, build_quota}")
+    s.set_defaults(fn=cmd_owners)
+
+    s = sub.add_parser("view", help="a visão da frota (o que o dashboard mostra)")
+    s.add_argument("acao", choices=["get", "set"])
+    s.add_argument("--mode", choices=["mine", "all", "owners", "custom"], default="mine")
+    s.add_argument("--owner", action="append", help="owner_ref, para --mode owners")
+    s.add_argument("--image", action="append", help="id, para --mode custom")
+    s.set_defaults(fn=cmd_view)
+
+    s = sub.add_parser("machine-key", help="troca a chave de máquina da sede")
+    s.add_argument("image")
+    s.add_argument("--grace-hours", type=float, default=12, dest="grace_hours")
+    s.add_argument("--force", action="store_true")
+    s.set_defaults(fn=cmd_machine_key)
+
+    s = sub.add_parser("audit", help="o que foi feito com as credenciais")
+    s.add_argument("--limit", type=int, default=50)
+    s.set_defaults(fn=cmd_audit)
 
     s = sub.add_parser("webhooks")
     s.add_argument("acao", choices=["get", "list", "add", "update", "delete", "test", "deliveries", "set"])

@@ -298,6 +298,40 @@ def test_o_caminho_do_moj_pelas_rotas_novas(live):
     roda(live, "images", "delete", "clinovo")
 
 
+def test_gestao_de_credenciais_pelo_cli(live):
+    """Chaves de admin e de serviço, convite revogado sem destruir, a visão da
+    frota e a auditoria: o que a tela do admin faz, por linha de comando."""
+    nova = json.loads(roda(live, "--json", "admin-key", "create", "cli-camila").stdout)
+    assert nova["key"].startswith("nb3a_")
+    ids = [k["id"] for k in json.loads(roda(live, "--json", "admin-key", "list", key=nova["key"]).stdout)["keys"]]
+    assert "cli-camila" in ids
+    assert roda(live, "admin-key", "revoke", "cli-camila").returncode == 0
+    assert roda(live, "whoami", key=nova["key"]).returncode != 0
+
+    r = roda(live, "--json", "service-key", "create", "cli-telao", "--scope", "labs:read", "--follow", "admin")
+    assert r.returncode == 0, r.stderr
+    antiga = json.loads(r.stdout)["key"]
+    rodada = json.loads(roda(live, "--json", "service-key", "rotate", "cli-telao").stdout)
+    assert rodada["key"] != antiga and rodada["follow"] == "admin"
+    assert roda(live, "service-key", "set", "cli-telao", "--follow", "none").returncode == 0
+    assert roda(live, "service-key", "create", "cli-telao", "--scope", "labs:read").returncode != 0, "409"
+    roda(live, "service-key", "delete", "cli-telao")
+
+    code = json.loads(roda(live, "--json", "invite", "create", '{"count":1,"label":"CLI"}').stdout)["invites"][0]["code"]
+    assert roda(live, "invite", "revoke", code).returncode == 0
+    assert roda(live, "whoami", key=code).returncode != 0
+    assert roda(live, "invite", "restore", code).returncode == 0
+    assert roda(live, "whoami", key=code).returncode == 0
+    assert roda(live, "invite", "delete", code).returncode == 0
+
+    assert json.loads(roda(live, "--json", "view", "set", "--mode", "all").stdout)["view"]["mode"] == "all"
+    assert json.loads(roda(live, "--json", "view", "get").stdout)["view"]["mode"] == "all"
+    roda(live, "view", "set", "--mode", "mine")
+
+    atos = [e["action"] for e in json.loads(roda(live, "--json", "audit", "--limit", "50").stdout)["entries"]]
+    assert {"admin_key.created", "admin_key.revoked", "service_key.rotated", "invite.changed"} <= set(atos)
+
+
 def test_erro_do_servidor_sai_diferente_de_zero_e_diz_o_motivo(live):
     """A invariante 15, do lado do cliente."""
     r = roda(live, "images", "get", "naoexiste")

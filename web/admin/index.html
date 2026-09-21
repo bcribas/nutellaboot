@@ -41,6 +41,19 @@
       <div id="who_quotas" class="muted mono"></div>
     </div>
 
+    <!-- A página cresceu: âncoras, e não abas (aba esconderia conteúdo do
+         Ctrl+F e guardaria estado). -->
+    <nav id="secnav" class="secnav">
+      <a href="#frotacard" data-i18n="nav_fleet"></a>
+      <a href="#sec_models" data-i18n="nav_models"></a>
+      <a href="#sec_images" data-i18n="nav_images"></a>
+      <a href="#sec_owners" data-admin-only data-i18n="nav_owners"></a>
+      <a href="#sec_keys" data-admin-only data-i18n="nav_keys"></a>
+      <a href="#sec_layers" data-i18n="nav_layers"></a>
+      <a href="#sec_usb" data-admin-only data-i18n="nav_usb"></a>
+      <a href="#sec_audit" data-admin-only data-i18n="nav_audit"></a>
+    </nav>
+
     <!-- A porta para a frota. Era um botão do tamanho do "sair" na barra de
          cima, e ninguém achava. -->
     <div class="card" id="frotacard" style="border-color:var(--ok)">
@@ -51,6 +64,15 @@
         <a class="btn" href="/dashboard/" target="_blank" rel="noopener" data-i18n="fleet_dashboard"></a>
         <button type="button" class="btn" id="sharedash" data-i18n="dash_share_make"></button>
       </div>
+      <!-- a visão da frota: o que aparece no dashboard e nos laboratórios -->
+      <div id="fview" class="fview"></div>
+      <div class="actions" data-admin-only>
+        <label class="inline"><input type="radio" name="sharekind" id="share_follow" checked>
+          <span data-i18n="dash_share_follow"></span></label>
+        <label class="inline"><input type="radio" name="sharekind" id="share_globs">
+          <span data-i18n="dash_share_globs"></span></label>
+        <input type="text" id="share_images" class="hidden" placeholder="26br* 26bo*" style="max-width:260px">
+      </div>
       <p class="help muted" data-i18n="dash_share_help"></p>
       <div id="shareout" class="hidden">
         <input type="text" id="shareurl" readonly style="width:100%;font-family:ui-monospace,monospace">
@@ -59,7 +81,7 @@
       <div id="sharelist"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="sec_models">
       <h2 data-i18n="models_section"></h2>
       <p class="help muted" data-i18n="models_section_help"></p>
       <div class="actions" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
@@ -125,16 +147,17 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="sec_images">
       <h2><span data-i18n="images"></span> <span id="imgcount" class="muted"></span></h2>
       <div class="actions" style="margin-bottom:10px">
         <input type="text" id="filter" data-i18n-placeholder="search" style="max-width:260px">
+        <select id="ownerfilter" data-admin-only style="max-width:260px"></select>
         <button type="button" id="reload" class="small" data-i18n="refresh"></button>
       </div>
       <div id="imglist" class="muted" data-i18n="loading"></div>
     </div>
 
-    <div class="card" data-admin-only>
+    <div class="card" id="sec_invites" data-admin-only>
       <h2 data-i18n="invites"></h2>
       <p class="help muted" data-i18n="invites_help"></p>
       <div class="actions" style="flex-wrap:wrap; gap:12px; align-items:flex-end">
@@ -153,6 +176,14 @@
           </select></label>
         <label class="fld" style="flex:1; min-width:160px"><span data-i18n="request_note"></span>
           <input type="text" id="inv_note"></label>
+        <label class="fld" style="max-width:220px"><span data-i18n="invite_label"></span>
+          <input type="text" id="inv_label"></label>
+        <label class="fld" style="max-width:120px"><span data-i18n="invite_max_models"></span>
+          <input type="number" id="inv_maxmodels" value="2" min="0"></label>
+        <label class="fld" style="max-width:140px"><span data-i18n="invite_expires_days"></span>
+          <input type="number" id="inv_expires" min="0" placeholder="∞"></label>
+        <label class="inline"><input type="checkbox" id="inv_walllock">
+          <span data-i18n="invite_wallpaper_locked"></span></label>
         <button type="button" id="inv_gen" class="primary" data-i18n="invite_generate"></button>
       </div>
       <div id="invlist" class="muted" style="margin-top:12px" data-i18n="loading"></div>
@@ -163,7 +194,7 @@
       <div id="reqlist" class="muted" data-i18n="loading"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="sec_layers">
       <h2 data-i18n="layers_section"></h2>
       <p class="help muted" data-i18n="layers_section_help"></p>
       <div class="tabs" style="display:flex;gap:8px;margin-bottom:14px">
@@ -202,7 +233,7 @@
       <div id="laylist" class="muted" style="margin-top:12px" data-i18n="layer_none"></div>
     </div>
 
-    <div class="card" data-admin-only>
+    <div class="card" id="sec_usb" data-admin-only>
       <h2 data-i18n="usb_section"></h2>
       <p class="help muted" data-i18n="usb_section_help"></p>
       <div class="actions">
@@ -222,8 +253,67 @@
       <div id="publist" class="muted" style="margin-top:10px" data-i18n="publish_none"></div>
     </div>
 
+    <div class="card" id="sec_owners" data-admin-only>
+      <h2 data-i18n="owners_section"></h2>
+      <p class="help muted" data-i18n="owners_help"></p>
+      <div id="ownerlist" class="muted" data-i18n="loading"></div>
+    </div>
+
+    <div class="card" id="sec_keys" data-admin-only>
+      <h2 data-i18n="keys_section"></h2>
+      <p class="help muted" data-i18n="keys_section_help"></p>
+
+      <h3 data-i18n="adminkey_title"></h3>
+      <div id="adminkeylist" class="muted" data-i18n="loading"></div>
+      <div class="actions" style="align-items:flex-end;gap:12px">
+        <label class="fld" style="max-width:220px"><span data-i18n="adminkey_id"></span>
+          <input type="text" id="adminkey_id" placeholder="camila" spellcheck="false"></label>
+        <button type="button" id="adminkey_create" class="primary" data-i18n="adminkey_create"></button>
+      </div>
+      <div id="adminkey_out"></div>
+
+      <h3 data-i18n="svckey_title" style="margin-top:22px"></h3>
+      <div id="svclist" class="muted" data-i18n="loading"></div>
+      <div class="actions" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+        <label class="fld" style="max-width:220px"><span data-i18n="svckey_name"></span>
+          <input type="text" id="svc_name" placeholder="moj-2026" spellcheck="false"></label>
+        <label class="fld" style="flex:1;min-width:220px"><span data-i18n="svckey_images"></span>
+          <input type="text" id="svc_images" placeholder="26br* 26bo*" spellcheck="false"></label>
+        <button type="button" id="svc_create" class="primary" data-i18n="svckey_create"></button>
+      </div>
+      <p class="help muted" data-i18n="svckey_images_help"></p>
+      <div id="svc_scopes" class="checks"></div>
+      <div id="svc_out"></div>
+    </div>
+
+    <div class="card" id="sec_audit" data-admin-only>
+      <h2 data-i18n="audit_section"></h2>
+      <p class="help muted" data-i18n="audit_help"></p>
+      <div class="actions"><button type="button" id="audit_reload" class="small" data-i18n="refresh"></button></div>
+      <div id="auditlist" class="muted" data-i18n="loading"></div>
+    </div>
+
   </div>
 </main>
+
+<!-- Depois do painel, de propósito: o formulário de login continua sendo o
+     primeiro <form> com campo de senha da página (é o que o gerenciador de
+     senhas preenche, e o que os testes conferem). -->
+<dialog id="reauth" class="reauth">
+  <form id="reauth_form" method="dialog">
+    <h2 data-i18n="reauth_title"></h2>
+    <p class="help muted" data-i18n="reauth_help"></p>
+    <input type="text" name="username" autocomplete="username" value="admin"
+           readonly tabindex="-1" aria-hidden="true" class="vh">
+    <input type="password" id="reauth_key" name="password" autocomplete="current-password"
+           spellcheck="false" required>
+    <p id="reauth_err" class="warn hidden" data-i18n="reauth_bad"></p>
+    <div class="actions">
+      <button type="submit" class="primary" data-i18n="reauth_submit"></button>
+      <button type="button" id="reauth_cancel" data-i18n="cancel"></button>
+    </div>
+  </form>
+</dialog>
 
 <script type="module" src="./app.js"></script>
 </body>

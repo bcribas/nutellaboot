@@ -23,11 +23,13 @@ DINAMICOS: dict[str, set[str]] = {}
 
 def paginas() -> list[tuple[Path, Path]]:
     """(html, js) de cada tela. A home é web/index.html + web/index.js; as
-    demais são web/<tela>/index.html + web/<tela>/app.js."""
+    demais são web/<tela>/index.html + CADA .js de web/<tela>/ (as telas
+    grandes são divididas em módulos, e um id procurado num módulo que não
+    fosse conferido voltaria a ser a tela em branco sem erro)."""
     out = [(WEB / "index.html", WEB / "index.js")]
     for d in sorted(WEB.iterdir()):
         if (d / "index.html").is_file() and (d / "app.js").is_file():
-            out.append((d / "index.html", d / "app.js"))
+            out += [(d / "index.html", js) for js in sorted(d.glob("*.js"))]
     return out
 
 
@@ -43,7 +45,7 @@ def ids_procurados(js: Path) -> set[str]:
     return achados
 
 
-@pytest.mark.parametrize("html,js", paginas(), ids=lambda p: p.parent.name or p.name)
+@pytest.mark.parametrize("html,js", paginas(), ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_ids_do_js_existem_no_html(html, js):
     faltando = ids_procurados(js) - ids_no_html(html) - DINAMICOS.get(html.parent.name, set())
     assert faltando == set(), f"{js.relative_to(REPO)} procura ids que {html.name} não tem: {sorted(faltando)}"
@@ -88,7 +90,10 @@ def test_alerta_chega_sem_esperar_o_agrupamento():
     assert 'addEventListener("alert.raised"' in app
 
 
-@pytest.mark.parametrize("secao", ["invites", "requests_admin", "publish_section", "bulk"])
+@pytest.mark.parametrize(
+    "secao",
+    ["invites", "requests_admin", "publish_section", "bulk", "keys_section", "owners_section", "audit_section"],
+)
 def test_console_marca_o_que_e_so_da_administracao(secao):
     """Sub-admin não pode ver convites, pedidos, publicação nem criação em
     massa — o JS esconde pelo atributo, então ele precisa estar no cartão."""
@@ -98,3 +103,30 @@ def test_console_marca_o_que_e_so_da_administracao(secao):
     antes = html.split(f'<h2 data-i18n="{secao}">', 1)[0]
     abertura = antes.rsplit("<div class=", 1)[-1]
     assert "data-admin-only" in abertura, f"o cartão de {secao} precisa de data-admin-only"
+
+
+def _imports(js: Path) -> list[str]:
+    return re.findall(r'''^\s*import\s[^;]*?from\s+["\']([^"\']+)["\']''', js.read_text(encoding="utf-8"), re.M)
+
+
+def test_modulos_importados_existem():
+    """Import de módulo que não existe é tela em branco, sem erro para quem
+    opera: o navegador nem começa a rodar o app.js."""
+    ruins = []
+    for js in WEB.rglob("*.js"):
+        for alvo in _imports(js):
+            caminho = WEB / alvo.lstrip("/") if alvo.startswith("/") else (js.parent / alvo)
+            if not caminho.resolve().is_file():
+                ruins.append(f"{js.relative_to(WEB)} importa {alvo}")
+    assert ruins == []
+
+
+def test_nenhum_import_default():
+    """O no-undef caseiro (test_web_js) só entende `import { a, b }` e
+    `import * as x`: um `import x from` passaria batido e esconderia erro."""
+    ruins = []
+    for js in WEB.rglob("*.js"):
+        for linha in js.read_text(encoding="utf-8").splitlines():
+            if re.match(r"\s*import\s+[A-Za-z_$][\w$]*\s*(,|from)", linha):
+                ruins.append(f"{js.relative_to(WEB)}: {linha.strip()}")
+    assert ruins == []

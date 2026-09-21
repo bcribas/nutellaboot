@@ -278,3 +278,34 @@ button.linkish {
   background: none; border: 0; padding: 0; color: var(--accent);
   font-size: 13px; cursor: pointer; text-decoration: underline;
 }
+
+/* --- console: navegação por âncoras, chaves, visão da frota --- */
+.secnav {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; flex-wrap: wrap; gap: 4px 14px;
+  padding: 8px 12px; margin-bottom: 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  font-size: 14px;
+}
+.secnav a { color: var(--muted); text-decoration: none; }
+.secnav a:hover { color: var(--accent); }
+/* a âncora não pode parar debaixo da barra grudada */
+.card[id] { scroll-margin-top: 56px; }
+
+label.inline { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; font-size: 14px; }
+.checks { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 8px 0; }
+.checks.hidden { display: none; }
+.fview { margin: 10px 0 4px; }
+.fview .fview-hint { margin-left: 8px; font-size: 13px; }
+.copiavel code { word-break: break-all; }
+.card.onetime { border-color: var(--accent); margin-top: 10px; }
+
+dialog.reauth {
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--accent); border-radius: var(--radius);
+  padding: 20px 22px; max-width: 520px; width: calc(100% - 40px);
+}
+dialog.reauth::backdrop { background: rgba(0, 0, 0, .6); }
+dialog.reauth input[type="password"] { width: 100%; margin: 8px 0 12px; }
+dialog.reauth h3 { margin: 16px 0 6px; }
+tr.row-outside td { opacity: .45; }
