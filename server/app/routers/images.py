@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse
 
 from .. import auth
 from ..models import BulkRequest, SiteImageCreate, SiteImagePatch
-from ..services import eventos, ownership, presence, seeders, store, usb
+from ..services import eventos, fleet_views, ownership, presence, seeders, store, usb
 
 router = APIRouter(prefix="/api/v1")
 
@@ -128,7 +128,14 @@ def list_images(prefix: str = "", p=Depends(auth.require_console_or_service)) ->
     # `def`: para a chave de serviço conta as máquinas de cada sede (disco)
     if p.kind == "service":
         return {"images": ownership.imagens_para_servico(p, prefix)}
-    return {"images": ownership.visible_site_images(p, prefix)}
+    # com o dono de cada uma, do jeito que pode ser mostrado (rótulo, e não o
+    # código do convite): a lista do console não dizia de quem era a imagem
+    return {
+        "images": [
+            {**i, **ownership.owner_publico(str(i.get("owner") or "admin"))}
+            for i in ownership.visible_site_images(p, prefix)
+        ]
+    }
 
 
 @router.get("/site-images/{image}")
@@ -186,6 +193,7 @@ async def delete_image(image: str, p=Depends(auth.require_console)) -> None:
     store.delete_site_image(image)
     # senão o vigia anunciaria `machine.offline` de uma sede que não existe mais
     presence.esquecer_imagem(image)
+    fleet_views.purge_image(image)
 
 
 @router.post("/site-images/{image}/token/rotate")

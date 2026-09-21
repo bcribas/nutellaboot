@@ -34,6 +34,9 @@ class Principal:
     name: str = ""
     scopes: set[str] = field(default_factory=set)
     images: list[str] = field(default_factory=list)  # globs (serviço)
+    # serviço com `labs:read`: de quem é a visão da frota que a chave segue
+    # (services/fleet_views.py); vazio = só os globs, como sempre foi
+    follow: str = ""
     # True quando sessions.resolve acabou de estender a sessão: o cookie
     # precisa ser reemitido nesta resposta (SessionCookieMiddleware)
     sessao_renovada: bool = False
@@ -90,6 +93,7 @@ def identify(token: str | None, image_id: str | None = None) -> Principal | None
                 name,
                 scopes=set(entry.get("scopes", [])),
                 images=list(entry.get("images", [])),
+                follow=str(entry.get("follow") or ""),
             )
 
     if image_id:

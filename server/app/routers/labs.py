@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 
 from .. import auth
 from ..errors import erro
-from ..services import fleet_report, labs, labs_series, ownership, store
+from ..services import fleet_report, fleet_views, labs, labs_series, ownership, store
 from ..services import machines as m
 from .machines import comandos_bloqueados, publicar_evento
 
@@ -46,6 +46,8 @@ async def visao_geral(
     dias: float = Query(labs.DIAS_PADRAO, ge=0, le=3650),
     format: str = Query("json", pattern="^(json|csv)$"),
     tk: str = Query(""),
+    view: str = Query("", pattern="^(|all|mine)$"),
+    owner: str = Query(""),
 ):
     """Uma linha por sede: quantas máquinas, quantas ativas na janela, quantas
     apareceram nela, e o estado de agora.
@@ -65,14 +67,42 @@ async def visao_geral(
     cabeçalho, e é o que importa: lá se desliga a frota.
     """
     p = _principal_da_frota(request, tk)
-    linhas = labs.resumo(p, dias=dias)
+    # a VISÃO da frota: para o console o padrão é "minhas" (a administração
+    # via os laboratórios de todo mundo misturados às sedes da prova);
+    # `?view=all` e `?owner=` são a olhada sem salvar
+    imagens, meta = fleet_views.resolver(p, view=view, owner=owner)
+    linhas = labs.resumo(p, dias=dias, imagens=imagens)
     if format == "csv":
         return PlainTextResponse(
             labs.csv_de(linhas),
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="frota.csv"'},
         )
-    return {"sites": linhas, "days": dias}
+    return {"sites": linhas, "days": dias, "view": meta}
+
+
+@router.get("/labs/view")
+async def ler_visao(p=Depends(auth.require_console)) -> dict:
+    """A visão da frota de quem pergunta, o que ela dá agora e, para a
+    administração, os donos que existem (para o seletor)."""
+    _, meta = fleet_views.resolver(p)
+    corpo = {"view": fleet_views.get(p.owner), "meta": meta}
+    if p.kind == "admin":
+        corpo["owners"] = fleet_views.donos(p)
+    return corpo
+
+
+@router.put("/labs/view")
+async def gravar_visao(body: dict, p=Depends(auth.require_console)) -> dict:
+    """Grava a visão no servidor, por dono: vale em qualquer navegador, no
+    telão e para a chave compartilhada que a segue."""
+    try:
+        visao = fleet_views.validar(p, body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    gravada = fleet_views.put(p.owner, visao, by=p.name or p.kind)
+    _, meta = fleet_views.resolver(p)
+    return {"view": gravada, "meta": meta}
 
 
 @router.post("/commands")
@@ -147,6 +177,8 @@ async def serie_da_frota(
     until: float = Query(0, ge=0),
     site: str = Query(""),
     tk: str = Query(""),
+    view: str = Query("", pattern="^(|all|mine)$"),
+    owner: str = Query(""),
 ) -> dict:
     """O histórico da frota (ou de uma sede, com `site=`), gravado pelo
     servidor a um ponto por minuto. `since`/`until` recortam — "só o período
@@ -157,20 +189,33 @@ async def serie_da_frota(
     subconjunto — o total bruto vazaria a contagem das sedes alheias.
     """
     p = _principal_da_frota(request, tk)
+    imagens, _ = fleet_views.resolver(p, view=view, owner=owner)
     try:
-        pontos = labs_series.serie(p, since=since, until=until, site=site)
+        # com `site=` a pergunta é sobre UMA sede: a visão não se aplica, só o
+        # que o principal pode ver
+        pontos = labs_series.serie(
+            p, since=since, until=until, site=site,
+            permitidos=None if site else {i["id"] for i in imagens},
+        )
     except KeyError:
         raise HTTPException(404, "imagem não existe")
     return {"points": pontos, "site": site or None}
 
 
 @router.get("/labs/inventory")
-async def inventario_da_frota(request: Request, tk: str = Query("")) -> dict:
+async def inventario_da_frota(
+    request: Request,
+    tk: str = Query(""),
+    view: str = Query("", pattern="^(|all|mine)$"),
+    owner: str = Query(""),
+) -> dict:
     """De que é feito o parque: processadores, RAM instalada, editores em uso
     e os discos mais cheios. Console (sub-admin vê só as sedes dele) e a chave
     compartilhada; aceita o cookie sem cabeçalho pela mesma razão do resumo —
     é GET de leitura para telas que sondam."""
-    return labs.inventario(_principal_da_frota(request, tk))
+    p = _principal_da_frota(request, tk)
+    imagens, _ = fleet_views.resolver(p, view=view, owner=owner)
+    return labs.inventario(p, imagens)
 
 
 # --- o relatório da frota ----------------------------------------------------

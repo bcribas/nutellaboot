@@ -193,7 +193,8 @@ def test_o_csv_traz_as_mesmas_contas(client, frota, ha):
 def test_a_administracao_ve_tudo_e_o_convidado_so_o_dele(client, frota, ha, data_root):
     from server.app import auth
 
-    ids = {s["id"] for s in client.get("/api/v1/labs", headers=ha).json()["sites"]}
+    # o padrão da ROTA virou "minhas" (tests/test_fleet_views.py); tudo é `?view=all`
+    ids = {s["id"] for s in client.get("/api/v1/labs?view=all", headers=ha).json()["sites"]}
     assert ids == {"sala1", "sala2", "dooutro"}
 
     labs.limpar_cache()

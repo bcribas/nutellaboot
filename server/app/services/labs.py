@@ -149,27 +149,48 @@ def resumo_de(image_id: str, *, desde: float) -> dict:
     }
 
 
-def resumo(p, *, dias: float = DIAS_PADRAO) -> list[dict]:
-    """Uma linha por sede visível a este principal."""
-    chave = (getattr(p, "kind", ""), getattr(p, "owner", ""), getattr(p, "name", ""), float(dias))
-    agora = time.time()
+def _linha_da_sede(image_id: str, dias: float, agora: float) -> dict:
+    """A parte CARA de uma linha (varre as máquinas), guardada por sede.
+
+    O cache era por principal: cada espectador (o admin, cada sub-admin, cada
+    telão com a sua chave, cada olhada `?view=`) recalculava a frota inteira,
+    no worker único. Por sede, uma passada serve a todos. Nada do que é por
+    espectador (o dono, por exemplo) pode morar aqui."""
+    chave = (image_id, float(dias))
     guardado = _cache.get(chave)
     if guardado and (agora - guardado[0]) < CACHE_SEG:
         return guardado[1]
+    for velha in [c for c, (quando, _) in _cache.items() if agora - quando > 4 * CACHE_SEG]:
+        _cache.pop(velha, None)
+    linha = resumo_de(image_id, desde=_janela(dias))
+    _cache[chave] = (agora, linha)
+    return linha
 
-    desde = _janela(dias)
-    linhas = [
-        {
-            "id": i["id"],
-            "fullname": i.get("fullname", ""),
-            "model": i.get("model", ""),
-            **resumo_de(i["id"], desde=desde),
-        }
-        for i in ownership.visible_site_images(p)
-        if store.site_image_visivel_na_frota(i)
-    ]
+
+def resumo(p, *, dias: float = DIAS_PADRAO, imagens: list[dict] | None = None) -> list[dict]:
+    """Uma linha por sede. `imagens` é o recorte já resolvido (a visão da
+    frota); sem ele vale tudo o que o principal pode ver."""
+    agora = time.time()
+    if imagens is None:
+        imagens = [i for i in ownership.visible_site_images(p) if store.site_image_visivel_na_frota(i)]
+    console = getattr(p, "kind", "") in ("admin", "subadmin")
+    linhas = []
+    for i in imagens:
+        dono = str(i.get("owner") or "admin")
+        publico = ownership.owner_publico(dono)
+        if not console:
+            # a chave compartilhada (o telão) vê de quem é, não a referência
+            publico = {k: v for k, v in publico.items() if k != "owner_ref"}
+        linhas.append(
+            {
+                "id": i["id"],
+                "fullname": i.get("fullname", ""),
+                "model": i.get("model", ""),
+                **publico,
+                **_linha_da_sede(i["id"], dias, agora),
+            }
+        )
     linhas.sort(key=lambda l: l["id"])
-    _cache[chave] = (agora, linhas)
     return linhas
 
 
@@ -188,6 +209,8 @@ COLUNAS_CSV = (
     "locked",
     "alerts",
     "unbound",
+    # no fim: quem lê o CSV por posição não pode sair do lugar
+    "owner_label",
 )
 
 
@@ -225,12 +248,18 @@ def limpar_cache_inventario() -> None:
     _cache_inv.clear()
 
 
-def inventario(p) -> dict:
-    chave = (getattr(p, "kind", ""), getattr(p, "owner", ""), getattr(p, "name", ""))
+def inventario(p, imagens: list[dict] | None = None) -> dict:
+    if imagens is None:
+        imagens = [i for i in ownership.visible_site_images(p) if store.site_image_visivel_na_frota(i)]
+    # o resultado é função pura do CONJUNTO de sedes: o admin em "minhas" e o
+    # telão que segue a visão dele dividem a mesma entrada
+    chave = frozenset(i["id"] for i in imagens)
     agora = time.time()
     guardado = _cache_inv.get(chave)
     if guardado and (agora - guardado[0]) < CACHE_INV_SEG:
         return guardado[1]
+    for velha in [c for c, (quando, _) in _cache_inv.items() if agora - quando > 4 * CACHE_INV_SEG]:
+        _cache_inv.pop(velha, None)
 
     from collections import Counter
 
@@ -244,9 +273,7 @@ def inventario(p) -> dict:
     discos: list[dict] = []
     maquinas = 0
     sites_hw: list[dict] = []
-    for img in ownership.visible_site_images(p):
-        if not store.site_image_visivel_na_frota(img):
-            continue
+    for img in imagens:
         image_id = img["id"]
         _rams: list[float] = []
         _cores: list[float] = []

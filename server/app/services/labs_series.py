@@ -97,7 +97,9 @@ def _pode_ver(p, site_id: str) -> bool:
     return info.get("owner") == getattr(p, "owner", None)
 
 
-def serie(p, *, since: float = 0, until: float = 0, site: str = "") -> list[dict]:
+def serie(
+    p, *, since: float = 0, until: float = 0, site: str = "", permitidos: set[str] | None = None
+) -> list[dict]:
     """Os pontos da janela, filtrados pela VISIBILIDADE de quem pergunta.
 
     O total da frota é recalculado do subconjunto visível — devolver o total
@@ -117,8 +119,12 @@ def serie(p, *, since: float = 0, until: float = 0, site: str = "") -> list[dict
     def ve(sid: str) -> bool:
         if sid not in visiveis:
             # pontos gravados antes de a sede ser ocultada também saem do total
-            visiveis[sid] = _pode_ver(p, sid) and store.site_image_visivel_na_frota(
-                store.get_site_image(sid) or {}
+            # `permitidos` é a visão da frota já resolvida: estreita o que o
+            # principal pode ver, nunca alarga
+            visiveis[sid] = (
+                (permitidos is None or sid in permitidos)
+                and _pode_ver(p, sid)
+                and store.site_image_visivel_na_frota(store.get_site_image(sid) or {})
             )
         return visiveis[sid]
 

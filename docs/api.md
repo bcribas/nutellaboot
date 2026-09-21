@@ -576,8 +576,10 @@ que está acontecendo no conjunto, e como ajo num recorte dele".
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/labs` | C | `?dias=7` e `?format=csv` | `{sites:[{id, fullname, machines, active, new, online, locked, alerts, unbound}], days}` |
+| GET | `/api/v1/labs` | C, S`labs:read` | `?dias=7`, `?format=csv`, `?view=all\|mine`, `?owner=<owner_ref>` | `{sites:[{id, fullname, owner_kind, owner_label, owner_ref, machines, active, new, online, locked, alerts, unbound}], days, view}` |
 | POST | `/api/v1/commands` | C | `{command, targets, args?, delay?}` | `{results, machines, failed}` |
+| GET | `/api/v1/labs/view` | C | — | `{view:{mode, owners, images, updated_at, updated_by}, meta:{mode, shown, total, outside, new_outside}, owners?}` (`owners` só para a administração) |
+| PUT | `/api/v1/labs/view` | C | `{mode: mine\|all\|owners\|custom, owners?:[owner_ref], images?:[id]}` | `{view, meta}`; `400` para modo, dono ou imagem desconhecidos |
 | GET | `/api/v1/labs/inventory` | C, S`labs:read` | — | de que é feito o parque: `{machines, processors, ram, sites_hw, editors_now, editors_minutes, disks, disks_low}` |
 | GET | `/api/v1/labs/series` | C, S`labs:read` | `?since=&until=&site=` | o histórico da frota (1 ponto/min, com teto de pontos): `{points:[{t, online, mem, cpu, alerts}]}` |
 
@@ -587,12 +589,39 @@ Cada sede vira uma entrada em `results` — com `command_id` e `machines`, ou co
 
 Sede marcada `dashboard_hidden` não entra em nenhuma das três leituras.
 
+**A visão da frota.** As três leituras mostram um **recorte**, guardado no
+servidor por dono (vale em qualquer navegador e no telão):
+
+| `mode` | O que mostra |
+|---|---|
+| `mine` | só as imagens de quem olha. **É o padrão**: a administração via os laboratórios de todo mundo que entrou por convite misturados às sedes da prova |
+| `all` | tudo o que ele pode ver |
+| `owners` | as imagens dos donos em `owners` (lista de `owner_ref`; `admin` é a administração). Só a administração |
+| `custom` | as imagens em `images`, escolhidas à mão |
+
+A visão só **estreita**: o teto é o que o principal já podia ver (o sub-admin
+continua vendo só as dele) e `dashboard_hidden` segue exclusão dura. Imagem
+criada **depois** de um `custom` salvo fica de fora até ser escolhida (`meta.
+new_outside` a lista): o laboratório novo de alguém não pula para o telão
+sozinho. `?view=all|mine` e `?owner=<owner_ref>` são a olhada **sem salvar**, e
+valem só para o console. **Ferramenta que lê `/labs` com chave de admin e quer a
+frota inteira passa `?view=all`.**
+
+Cada linha diz de quem é a sede: `owner_kind`, `owner_label` e `owner_ref`
+(nunca o código do convite).
+
 As rotas de leitura da frota (`/labs`, `/labs/inventory`, `/labs/series`)
 aceitam também a **chave de serviço com escopo `labs:read`** — é a chave
 compartilhável do dashboard, por `?tk=` na URL ou Bearer. Ela só lê agregados:
 não abre hotconfig (o painel exige `machines:read`, que não é concedido) nem
 roda comando (as rotas de comando exigem console). A visibilidade respeita os
 globs da chave, e os totais são recalculados do subconjunto visível.
+
+Uma chave `labs:read` pode **seguir a visão da administração** (`follow:
+"admin"` na chave): o link compartilhado mostra o que o admin escolheu, e muda
+na hora em que ele muda. Os globs da chave continuam sendo o teto, a chave
+ignora `?view=` e `?owner=` (o link não se alarga sozinho) e não recebe a conta
+do que ficou de fora. Chave sem `follow` se comporta como sempre.
 
 `dias` responde **quantas máquinas de cada sede rodaram nos últimos X dias**, e
 são dois números porque a pergunta tem duas leituras: `active` é quem teve
