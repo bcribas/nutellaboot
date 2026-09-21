@@ -10,9 +10,9 @@ import time
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from .. import auth
+from .. import auth, fsdb
 from ..errors import erro
-from ..services import alerts, command_log, logs
+from ..services import alerts, command_log, logs, presence
 from ..services import machines as m
 from ..services import eventos
 from ..services.notify import notify
@@ -51,6 +51,15 @@ def _machine(image: str, x_nb_machine_key: str | None, mac: str) -> str:
     return mac
 
 
+def _contexto(image: str, mac: str) -> dict:
+    """O que poupa ao destinatário de um alerta uma segunda consulta: em qual
+    boot foi, e de que time é a máquina."""
+    d = m.machine_dir(image, mac)
+    boot = (fsdb.read_json(d / "machine.json", {}) or {}).get("boot_id", "")
+    uid = (fsdb.read_json(d / "binding.json", {}) or {}).get("user_id")
+    return {"boot_id": boot, "binding": {"user_id": uid} if uid else None}
+
+
 def publicar_evento(image: str, event: str, data: dict) -> None:
     """Avisa o painel (SSE) e os sistemas externos inscritos (webhooks)."""
     eventos.publicar(image, event, data)
@@ -78,11 +87,27 @@ async def post_status(
     if not isinstance(body, dict):
         raise HTTPException(400, "telemetria precisa ser um objeto JSON")
     res = m.record_status(image, mac, body)
+    presence.marcar(image, mac)
     publicar_evento(image, "machine.status", {"mac": mac})
     if res["first_seen"]:
         publicar_evento(image, "machine.first_seen", {"mac": mac})
+    info = res["info"]
+    if res["offline_for"]:
+        publicar_evento(image, "machine.online", {"mac": mac, "offline_for": res["offline_for"]})
+    if res["rebooted"]:
+        publicar_evento(
+            image,
+            "machine.rebooted",
+            {
+                "mac": mac,
+                "boot_id": info.get("boot_id", ""),
+                "previous_boot_id": res["previous_boot_id"],
+                "boots": info.get("boots"),
+                "last_boot": int(info.get("last_boot") or 0),
+            },
+        )
     if res.get("alert"):
-        publicar_evento(image, "alert.raised", {"mac": mac, **res["alert"]})
+        publicar_evento(image, "alert.raised", {"mac": mac, **res["alert"], **_contexto(image, mac)})
     return {
         "pending_commands": len(m.ready_commands(image, mac)),
         "lock": m.get_lock(image, mac),
@@ -209,7 +234,7 @@ async def post_event(
     )
     # o mesmo dispositivo com alerta ainda aberto não é mudança de estado
     if not alerta.get("repeated"):
-        publicar_evento(image, "alert.raised", {"mac": mac, **alerta})
+        publicar_evento(image, "alert.raised", {"mac": mac, **alerta, **_contexto(image, mac)})
     return {"ok": True, "id": alerta["id"], "repeated": bool(alerta.get("repeated"))}
 
 
@@ -238,7 +263,7 @@ async def dismiss_alert(
     if alerta is None:
         # dois fiscais clicando ao mesmo tempo é o caso normal, não um erro
         return {"ok": True, "already": True}
-    publicar_evento(image, "alert.dismissed", {"mac": mac, **alerta})
+    publicar_evento(image, "alert.dismissed", {"mac": mac, **alerta, **_contexto(image, mac)})
     return {"ok": True, "alert": alerta}
 
 
@@ -249,7 +274,7 @@ async def dismiss_all_alerts(
     mac = m.normalize_mac(mac)
     limpos = alerts.dismiss_all(image, mac, p.name or "console")
     for a in limpos:
-        publicar_evento(image, "alert.dismissed", {"mac": mac, **a})
+        publicar_evento(image, "alert.dismissed", {"mac": mac, **a, **_contexto(image, mac)})
     return {"ok": True, "dismissed": len(limpos)}
 
 

@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse
 
 from .. import auth
 from ..models import BulkRequest, SiteImageCreate, SiteImagePatch
-from ..services import eventos, ownership, seeders, store, usb
+from ..services import eventos, ownership, presence, seeders, store, usb
 
 router = APIRouter(prefix="/api/v1")
 
@@ -184,6 +184,8 @@ async def patch_image(image: str, body: SiteImagePatch, p=Depends(auth.require_c
 async def delete_image(image: str, p=Depends(auth.require_console)) -> None:
     _minha(p, image)
     store.delete_site_image(image)
+    # senão o vigia anunciaria `machine.offline` de uma sede que não existe mais
+    presence.esquecer_imagem(image)
 
 
 @router.post("/site-images/{image}/token/rotate")

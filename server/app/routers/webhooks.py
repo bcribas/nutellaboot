@@ -27,6 +27,9 @@ router = APIRouter(prefix="/api/v1")
 
 EVENTOS = [
     "machine.first_seen",
+    "machine.rebooted",
+    "machine.online",
+    "machine.offline",
     "machine.status",
     "machine.locked",
     "machine.unlocked",
@@ -34,6 +37,7 @@ EVENTOS = [
     "machine.unbound",
     "command.sent",
     "command.acked",
+    "command.expired",
     "config.updated",
     "seeder.joined",
     "seeder.released",

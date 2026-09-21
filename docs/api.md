@@ -842,7 +842,29 @@ de pacotes extras, gastando a cota dela:
 | GET | `/api/v1/service-keys` | A | — | lista sem as chaves |
 | DELETE | `/api/v1/service-keys/{nome}` | A | — | `204` |
 
-Eventos disponíveis: `machine.first_seen`, `machine.status`, `machine.locked`, `machine.unlocked`, `machine.bound`, `machine.unbound`, `command.sent`, `command.acked`, `config.updated`, `seeder.joined`, `seeder.released`, `alert.raised` e `alert.dismissed` (a lista viva está em `GET /api/v1/events/types`).
+Eventos disponíveis (a lista viva está em `GET /api/v1/events/types`):
+
+| Evento | `data` | Quando |
+|---|---|---|
+| `machine.first_seen` | `{mac}` | o primeiro contato da máquina |
+| `machine.status` | `{mac}` | **a cada telemetria** (dezenas por segundo na frota: não assine sem precisar) |
+| `machine.rebooted` | `{mac, boot_id, previous_boot_id, boots, last_boot}` | o `boot_id` mudou (nunca no primeiro contato) |
+| `machine.offline` | `{mac, last_seen}` | 90 s sem telemetria; o vigia confere a cada 30 s |
+| `machine.online` | `{mac, offline_for}` | voltou a reportar depois de 90 s ou mais fora |
+| `machine.locked`, `machine.unlocked` | `{machines:[mac…]}` | trava e destrava |
+| `machine.bound`, `machine.unbound` | `{mac, …vínculo}` | vínculo com o time |
+| `command.sent` | `{id, command, machines}` | comando enfileirado |
+| `command.acked` | `{mac, id, command_id, command, status}` | a máquina confirmou |
+| `command.expired` | `{command_id, command, machines:[mac…], count}` | o prazo do comando venceu com máquinas sem confirmar (um evento por comando; melhor esforço: a fonte da verdade é `GET …/commands/{command_id}`) |
+| `alert.raised`, `alert.dismissed` | `{mac, id, kind, detail?, vendor?, other_mac?, boot_id, binding}` | `alert.raised` só para alerta NOVO; `binding` é `{user_id}` ou `null` |
+| `config.updated` | `{keys:[…]}` | a sede gravou configuração |
+| `seeder.joined`, `seeder.released` | `{ip}` | modo seed |
+
+`machine.online` e `machine.rebooted` saem da própria telemetria (do que o
+disco lembrava do contato anterior) e sobrevivem a um restart do servidor.
+`machine.offline` depende do vigia em memória: depois de um restart o aviso pode
+sair atrasado ou repetido, e quem já estava desligado quando o servidor subiu
+não é anunciado.
 
 `events` vazio significa "todos os eventos". A URL precisa começar com
 `http://` ou `https://`, e cada evento é validado contra o catálogo.

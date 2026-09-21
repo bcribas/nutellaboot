@@ -106,6 +106,10 @@ async def _vida(app: FastAPI):
         from .services import labs_series
 
         labs_series.iniciar()
+        # o vigia de quem sumiu (machine.offline) e dos comandos que venceram
+        from .services import presence
+
+        presence.iniciar()
     yield
 
 

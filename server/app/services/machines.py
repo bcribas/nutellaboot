@@ -131,6 +131,8 @@ def record_status(image_id: str, mac: str, status: dict) -> dict:
     with fsdb.locked(d):
         info = fsdb.read_json(d / "machine.json", {}) or {}
         first = not info
+        visto_antes = float(info.get("last_seen") or 0)
+        boot_antes = str(info.get("boot_id") or "")
         info.setdefault("mac", mac)
         info.setdefault("first_seen", now)
         info["last_seen"] = now
@@ -153,7 +155,19 @@ def record_status(image_id: str, mac: str, status: dict) -> dict:
     samples.record(image_id, mac, status)
     # fora do lock da máquina: o índice trava o diretório da IMAGEM
     alerta = _indexa_identidade(image_id, mac, hw)
-    return {"first_seen": first, "info": info, "alert": alerta}
+    # O reboot e a volta ao ar saem daqui, do que o disco lembrava do contato
+    # anterior, e por isso sobrevivem a um restart do servidor. O primeiro
+    # contato de uma máquina não é reboot nem volta.
+    reiniciou = bool(not first and boot_antes and info.get("boot_id") != boot_antes)
+    fora_por = int(now - visto_antes) if (not first and now - visto_antes >= ONLINE_WINDOW) else 0
+    return {
+        "first_seen": first,
+        "info": info,
+        "alert": alerta,
+        "rebooted": reiniciou,
+        "previous_boot_id": boot_antes if reiniciou else "",
+        "offline_for": fora_por,
+    }
 
 
 def _indexa_identidade(image_id: str, mac: str, hw: dict) -> dict | None:
@@ -264,6 +278,9 @@ def enqueue(
         "created_at": time.time(),
         "not_before": time.time() + max(0, delay),
     }
+    from . import presence
+
+    presence.acompanhar_comando(image_id, cid, entry["not_before"] + _command_ttl())
     # antes da fila: quem consultar o comando logo em seguida já o encontra
     command_log.abrir(
         image_id, cid, command=command, args=args, by=by, created_at=entry["created_at"],
