@@ -15,6 +15,7 @@ import time
 
 from .. import fsdb
 from .logcap import append_capped
+from . import store
 from .machines import machine_dir
 
 ARQUIVO = "binding.json"
@@ -68,3 +69,17 @@ def history(image_id: str, mac: str, linhas: int = 200) -> list[dict]:
         except ValueError:
             continue
     return out
+
+
+def user_ids_vinculados(image_id: str) -> set[str]:
+    """Os times que têm máquina. Varre os vínculos GRAVADOS, não as máquinas
+    conhecidas: vincular na véspera uma máquina que ainda não bootou vale."""
+    base = store.site_image_dir(image_id) / "machines"
+    if not base.is_dir():
+        return set()
+    achados = set()
+    for f in base.glob(f"*/{ARQUIVO}"):
+        uid = (fsdb.read_json(f) or {}).get("user_id")
+        if uid:
+            achados.add(str(uid))
+    return achados

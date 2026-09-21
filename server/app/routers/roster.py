@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from .. import auth, fsdb
-from ..errors import erro
+from ..errors import codigo_de, erro
 from ..services import bindings
+from ..services import roster as ros
 from ..services import machines as m
 from ..services import store
 from ..services import eventos
@@ -44,39 +45,79 @@ LOGO_TYPES = {
 
 
 def _roster(image: str) -> list[dict]:
-    return fsdb.read_json(store.site_image_dir(image) / "roster.json", []) or []
+    return ros.ler(image)
+
+
+# As rotas de escrita são `def`: seguram lock e varrem disco (invariante 2), e
+# publicam por `_publish` DEPOIS de soltar o lock.
 
 
 @router.get("/site-images/{image}/roster")
 async def get_roster(
     image: str, p=Depends(auth.require_image_access(service_scope="roster:read"))
 ) -> dict:
-    return {"roster": _roster(image)}
+    # `logos`: quais organizações já têm logotipo (a tela não tinha como saber)
+    return {"roster": _roster(image), "logos": ros.logos(image)}
 
 
 @router.put("/site-images/{image}/roster")
-async def put_roster(
+def put_roster(
     image: str, body: dict, p=Depends(auth.require_image_access(service_scope="roster:write"))
 ) -> dict:
+    """A lista inteira. Nunca apaga vínculo: o time omitido que está vinculado a
+    uma máquina continua no roster, marcado `source: "binding"` (`kept_bound`)."""
     roster = body.get("roster", body if isinstance(body, list) else None)
     if not isinstance(roster, list):
         raise HTTPException(400, "esperava {roster: [...]}")
-    limpo = []
-    for entry in roster:
-        if not isinstance(entry, dict) or not entry.get("user_id"):
-            raise HTTPException(400, "cada entrada precisa de user_id")
-        limpo.append(
-            {
-                "user_id": str(entry["user_id"]),
-                "name": str(entry.get("name", "")),
-                "display_name": str(entry.get("display_name", "")),
-                "organization": entry.get("organization") or {},
-                "country": str(entry.get("country", "")),
-                "seat": str(entry.get("seat", "")),
-            }
-        )
-    fsdb.write_json(store.site_image_dir(image) / "roster.json", limpo)
-    return {"ok": True, "entries": len(limpo)}
+    try:
+        n, mantidos = ros.substituir(image, roster)
+    except ValueError as e:
+        raise erro(400, "invalid_roster_entry", str(e))
+    return {"ok": True, "entries": n, "kept_bound": mantidos}
+
+
+@router.post("/site-images/{image}/roster")
+def upsert_roster_entry(
+    image: str, body: dict, p=Depends(auth.require_image_access(service_scope="roster:write"))
+) -> dict:
+    """Acrescenta ou atualiza UM time, pelo `user_id`, sem ler-e-regravar a
+    lista (que era corrida entre a tela e o MOJ)."""
+    try:
+        entrada, criada = ros.upsert(image, body)
+    except ValueError as e:
+        raise erro(400, "invalid_roster_entry", str(e))
+    return {"ok": True, "created": criada, "entry": entrada}
+
+
+@router.delete("/site-images/{image}/roster/{user_id}", status_code=204)
+def delete_roster_entry(
+    image: str, user_id: str, p=Depends(auth.require_image_access(service_scope="roster:write"))
+) -> None:
+    """Tira UM time. O vínculo dele, se houver, NÃO é desfeito: desvincular é
+    outra rota, e a tela de bloqueio segue mostrando o que o vínculo guardou."""
+    if not ros.remover(image, user_id):
+        raise erro(404, "user_not_in_roster", f"user_id {user_id} não está no roster desta imagem")
+
+
+@router.get("/site-images/{image}/roster/logos/{org_id}")
+async def get_logo(image: str, org_id: str, request: Request, tk: str = Query("")) -> FileResponse:
+    """O logotipo, para a tela (`<img>` não manda cabeçalho: vale `?tk=` ou o
+    cookie, como a prévia do wallpaper). O SVG vem de quem tem o token da sede,
+    então sai trancado: aberto direto no navegador não roda script."""
+    p = auth.principal_de_link(request, tk, image)
+    if p is None:
+        raise erro(401, "unauthorized", "credencial ausente ou inválida")
+    if p.kind == "service":
+        if "roster:read" not in p.scopes:
+            raise erro(403, "insufficient_scope", "escopo insuficiente")
+        if not p.can_see_image(image):
+            raise erro(403, "image_out_of_scope", "sem acesso a esta imagem")
+    elif not p.can_see_image(image):
+        raise erro(404, "image_not_found", "imagem não existe")
+    resposta = logo_response(image, org_id)
+    resposta.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    resposta.headers["X-Content-Type-Options"] = "nosniff"
+    return resposta
 
 
 @router.put("/site-images/{image}/roster/logos/{org_id}")
@@ -113,13 +154,19 @@ def _fonte(p, body: dict) -> str:
     return f"service:{p.name}" if p.kind == "service" else "console"
 
 
-@router.put("/site-images/{image}/machines/{mac}/binding")
-async def put_binding(
-    image: str, mac: str, body: dict, p=Depends(auth.require_image_access(service_scope="bindings:write"))
-) -> dict:
-    """Vincula a máquina a um time. `bound_at`/`by` são do servidor; `at` do
-    cliente vira `client_at` (o instante do login no juiz), `boot_id` diz em
-    qual boot, `note` é texto livre. Toda mudança fica no histórico."""
+def _entrada_do_corpo(body: dict, opcao) -> dict:
+    """Os campos do time para `create_roster_entry`: o objeto, ou o próprio
+    corpo do vínculo quando a opção é só `true`."""
+    fonte = opcao if isinstance(opcao, dict) else body
+    return {
+        "user_id": body.get("user_id"),
+        **{k: fonte[k] for k in ("name", "display_name", "organization", "country", "seat") if k in fonte},
+    }
+
+
+def _vincular(image: str, mac: str, body: dict, p, lista: list[dict], criar) -> tuple[dict, bool]:
+    """Monta e grava um vínculo. `lista` é o roster já lido (quem chama segura
+    o lock do roster); devolve o vínculo e se criou entrada no roster."""
     mac = m.normalize_mac(mac)
     if not m.valid_mac(mac):
         raise erro(400, "invalid_mac", "MAC inválido")
@@ -134,8 +181,12 @@ async def put_binding(
         binding["boot_id"] = str(body["boot_id"])[:64]
     if body.get("note"):
         binding["note"] = str(body["note"])[:200]
+    criou = False
     if user_id:
-        entry = next((e for e in _roster(image) if e["user_id"] == str(user_id)), None)
+        entry = ros.achar(lista, user_id)
+        if entry is None and criar:
+            # opt-in: o user_id nasce de um User-Agent, que é entrada do cliente
+            entry, criou = ros.garantir(lista, _entrada_do_corpo(body, criar))
         if entry is None:
             raise erro(404, "user_not_in_roster", f"user_id {user_id} não está no roster desta imagem")
         binding.update({"user_id": entry["user_id"], "seat": body.get("seat", entry.get("seat", ""))})
@@ -147,8 +198,75 @@ async def put_binding(
             }
         )
     bindings.gravar(image, mac, binding)
-    _publish(image, "machine.bound", {"mac": mac, **binding})
-    return binding
+    return {"mac": mac, **binding}, criou
+
+
+@router.put("/site-images/{image}/machines/{mac}/binding")
+def put_binding(
+    image: str, mac: str, body: dict, p=Depends(auth.require_image_access(service_scope="bindings:write"))
+) -> dict:
+    """Vincula a máquina a um time. `bound_at`/`by` são do servidor; `at` do
+    cliente vira `client_at` (o instante do login no juiz), `boot_id` diz em
+    qual boot, `note` é texto livre. Toda mudança fica no histórico.
+
+    `create_roster_entry` (`true`, ou um objeto com os campos do time) cria a
+    entrada do roster quando o `user_id` ainda não está lá, marcada
+    `source: "binding"`: é o login do time funcionando com o roster vazio."""
+    criar = body.get("create_roster_entry")
+    with ros.trava(image):
+        lista = ros.ler(image)
+        com_mac, criou = _vincular(image, mac, body, p, lista, criar)
+        if criou:
+            ros.gravar(image, lista)
+    binding = {k: v for k, v in com_mac.items() if k != "mac"}
+    _publish(image, "machine.bound", com_mac)
+    return {**binding, "roster_entry_created": True} if criou else binding
+
+
+LOTE_MAX = 1000
+
+
+@router.put("/site-images/{image}/bindings")
+def put_bindings(
+    image: str, body: dict, p=Depends(auth.require_image_access(service_scope="bindings:write"))
+) -> dict:
+    """Vários vínculos de uma vez (a largada da prova são milhares de logins em
+    minutos; o replay do MOJ, a frota inteira). Cada item é o corpo do vínculo
+    unitário mais `mac`. Um item ruim não derruba os outros: o resultado vem
+    por item."""
+    itens = body.get("bindings")
+    if not isinstance(itens, list):
+        raise HTTPException(400, "esperava {bindings: [...]}")
+    if len(itens) > LOTE_MAX:
+        raise erro(413, "payload_too_large", f"no máximo {LOTE_MAX} vínculos por pedido")
+    geral = body.get("create_roster_entry")
+    resultados, feitos = [], []
+    with ros.trava(image):
+        lista = ros.ler(image)
+        mexeu = False
+        for item in itens:
+            if not isinstance(item, dict):
+                resultados.append({"mac": "", "ok": False, "code": "bad_request", "detail": "cada item é um objeto"})
+                continue
+            try:
+                com_mac, criou = _vincular(
+                    image, str(item.get("mac", "")), item, p, lista, item.get("create_roster_entry", geral)
+                )
+            except HTTPException as e:
+                resultados.append(
+                    {"mac": str(item.get("mac", "")), "ok": False, "code": codigo_de(e), "detail": e.detail}
+                )
+                continue
+            mexeu = mexeu or criou
+            feitos.append(com_mac)
+            resultados.append({"mac": com_mac["mac"], "ok": True, "binding": {k: v for k, v in com_mac.items() if k != "mac"}})
+        if mexeu:
+            ros.gravar(image, lista)
+    # um evento por vínculo, como no unitário (o painel e os webhooks já o
+    # entendem), e só agora, com o lock solto
+    for com_mac in feitos:
+        _publish(image, "machine.bound", com_mac)
+    return {"results": resultados, "bound": len(feitos), "failed": len(itens) - len(feitos)}
 
 
 @router.delete("/site-images/{image}/machines/{mac}/binding", status_code=204)

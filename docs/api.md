@@ -151,7 +151,7 @@ O cliente lê com `while read MD5 ARQUIVO URLS` e passa `$URLS` inteiro ao
     "name": "Universidade de Brasília",
     "logo_url": "/boot/v3/25brbr/roster/logos/unb"
   },
-  "country": "BRA"
+  "country": "BR"
 }
 ```
 
@@ -389,16 +389,41 @@ mesmo portão do `unlocked`).
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/site-images/{img}/roster` | C, I, S`roster:read` | — | `{roster:[…]}` |
-| PUT | `/api/v1/site-images/{img}/roster` | C, I, S`roster:write` | `{roster:[{user_id, name, display_name, organization, country, seat}]}` | `{ok, entries}` |
+| GET | `/api/v1/site-images/{img}/roster` | C, I, S`roster:read` | — | `{roster:[…], logos:[org_id…]}` |
+| PUT | `/api/v1/site-images/{img}/roster` | C, I, S`roster:write` | `{roster:[{user_id, name, display_name, organization, country, seat}]}` | `{ok, entries, kept_bound}`: a lista inteira; **nunca apaga vínculo** (ver abaixo) |
+| POST | `/api/v1/site-images/{img}/roster` | C, I, S`roster:write` | `{user_id, name?, display_name?, organization?, country?, seat?}` | `{ok, created, entry}`: acrescenta ou atualiza **um** time pelo `user_id` |
+| DELETE | `/api/v1/site-images/{img}/roster/{user_id}` | C, I, S`roster:write` | — | `204` (o vínculo do time, se houver, não é desfeito) |
+| GET | `/api/v1/site-images/{img}/roster/logos/{org}?tk=` | C, I, S`roster:read` | — | o arquivo, para a tela (`<img>`); sai com CSP `sandbox` |
 | PUT | `/api/v1/site-images/{img}/roster/logos/{org}` | C, I, S`roster:write` | multipart `file` (SVG ou PNG) | `{ok, org_id, format, size}` |
-| PUT | `/api/v1/site-images/{img}/machines/{mac}/binding` | C, I, S`bindings:write` | `{user_id}` ou `{name, seat}`, mais `source?`, `at?`, `boot_id?`, `note?` | vínculo criado |
+| PUT | `/api/v1/site-images/{img}/machines/{mac}/binding` | C, I, S`bindings:write` | `{user_id}` ou `{name, seat}`, mais `source?`, `at?`, `boot_id?`, `note?`, `create_roster_entry?` | vínculo criado (`roster_entry_created:true` quando criou a entrada) |
+| PUT | `/api/v1/site-images/{img}/bindings` | C, I, S`bindings:write` | `{bindings:[{mac, …corpo do vínculo}], create_roster_entry?}` (até 1000) | `{results:[{mac, ok, binding \| code, detail}], bound, failed}` |
 | DELETE | `/api/v1/site-images/{img}/machines/{mac}/binding` | C, I, S`bindings:write` | — | `204` |
 | GET | `/api/v1/site-images/{img}/machines/{mac}/binding/history?n=` | C, I, S`machines:read` | — | `{history:[{event, at, by, source, …}]}` |
 | GET | `/api/v1/site-images/{img}/bindings` | C, I, S`machines:read` | — | `{bindings:[{mac, …}]}` |
 
-O `user_id` do vínculo tem que existir no roster da imagem, senão vem 404 —
-é o que impede um número de assento virar vínculo fantasma.
+O `user_id` do vínculo tem que existir no roster da imagem, senão vem 404
+(`code: "user_not_in_roster"`): é o que impede um número de assento virar
+vínculo fantasma. Quem publica o vínculo no login e não controla o roster (o
+MOJ, com o roster ainda vazio) manda `create_roster_entry`: `true` (os campos do
+time vêm do próprio corpo) ou um objeto `{name, display_name, organization,
+country, seat}`. É **opt-in**, porque o `user_id` nasce de um User-Agent, que é
+entrada do cliente. A entrada criada assim leva `source: "binding"`.
+
+**Escrever o roster nunca apaga um vínculo.** O roster oficial enviado depois
+sobrescreve à vontade as entradas `source: "binding"` (e elas perdem a marca);
+se ele **omitir** um time que está vinculado a uma máquina, a entrada fica,
+marcada, e a resposta do `PUT` lista esses ids em `kept_bound`. `POST …/roster`
+e `DELETE …/roster/{user_id}` mexem em **uma** entrada, sob lock: use-os em vez
+de ler, modificar e regravar a lista (é corrida com qualquer outro escritor).
+
+`country` é rótulo: recomenda-se ISO alpha-2 (`BR`), alpha-3 passa, e o
+servidor só uniformiza a caixa. Nenhuma tela de bloqueio desenha bandeira; o
+campo segue para o `lockinfo` e para o relatório.
+
+O **lote** (`PUT …/bindings`) é o vínculo unitário repetido: cada item leva
+`mac` e o corpo de sempre, um item ruim não derruba os outros (o resultado vem
+por item, com `code`), `create_roster_entry` vale para todos e pode ser
+desligado num item, e cada vínculo gravado gera o seu `machine.bound`.
 
 O vínculo gravado tem `bound_at` e `by` (do servidor) e `source` (quem
 afirmou: o valor mandado, ou `service:<nome>` para chave de serviço e
@@ -931,7 +956,7 @@ curl -sS -X PUT https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26brb
             "name": "Os Batatinhas",
             "display_name": "UnB — Os Batatinhas",
             "organization": {"id": "unb", "name": "Universidade de Brasília"},
-            "country": "BRA",
+            "country": "BR",
             "seat": "012"
           }
         ]
@@ -960,9 +985,13 @@ curl -sS -X PUT \
   -d '{"user_id": "team-001"}'
 ```
 
-O `user_id` precisa existir no roster da imagem, senão a resposta é `404`. A
-partir daí a tela de bloqueio daquela máquina mostra o nome do time, o
-logotipo, a bandeira e o lugar.
+O `user_id` precisa existir no roster da imagem, senão a resposta é `404`
+(`code: "user_not_in_roster"`); com `"create_roster_entry": {...}` o vínculo
+cria a entrada que faltar (seção "Roster e vínculo"). A partir daí a tela de
+bloqueio daquela máquina mostra o nome do time, o logotipo e o lugar.
+
+Na largada (milhares de logins em minutos) e no replay, use o lote: `PUT
+…/site-images/<sede>/bindings` com até 1000 itens por pedido.
 
 ### 5. Bloquear e desbloquear
 

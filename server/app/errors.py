@@ -44,6 +44,7 @@ CODIGOS = {
     "image_out_of_scope": "a imagem existe, mas está fora dos globs da chave de serviço",
     "console_only": "rota do console: chave de serviço não entra, com escopo nenhum",
     "image_not_found": "a site-image não existe (ou é de outro dono)",
+    "invalid_roster_entry": "entrada do roster sem user_id, ou malformada",
     "invalid_mac": "MAC fora do formato aa-bb-cc-dd-ee-ff",
     "user_not_in_roster": "o user_id do vínculo não está no roster da imagem",
     "command_not_allowed": "o comando não está na lista de comandos aceitos",
