@@ -26,8 +26,7 @@ async def login(body: dict, request: Request, response: Response) -> dict:
     if p is None or p.kind not in sessions.TIPOS:
         # mesmo limitador da autenticação por cabeçalho: um código de convite é
         # curto o bastante para ser tentado na força bruta
-        if not ratelimit.allow(f"console:{ip}", rate=0.2, burst=10):
-            raise HTTPException(429, "muitas tentativas; tente de novo em instantes")
+        ratelimit.exigir(f"console:{ip}", rate=0.2, burst=10)
         raise HTTPException(401, "chave ou código inválido")
 
     sessao = sessions.create(p.kind, p.name, ip=ip)

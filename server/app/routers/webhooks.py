@@ -12,6 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from .. import auth, fsdb
+from ..errors import CODIGOS
 from ..services import store
 from ..settings import settings
 
@@ -50,7 +51,7 @@ ESCOPOS = [
 async def event_types() -> dict:
     """Catálogo de eventos e escopos — serve de documentação viva para quem
     for integrar (o MOJ, por exemplo)."""
-    return {"events": EVENTOS, "scopes": ESCOPOS}
+    return {"events": EVENTOS, "scopes": ESCOPOS, "error_codes": CODIGOS}
 
 
 @router.get("/site-images/{image}/webhooks")

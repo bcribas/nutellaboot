@@ -17,6 +17,7 @@ from fastapi import Header, HTTPException, Request
 
 from . import fsdb
 from .settings import settings
+from .errors import erro
 
 
 def new_key(prefix: str) -> str:
@@ -159,7 +160,7 @@ def check_boot_key(image_id: str, key: str | None) -> bool:
 
 
 def _unauthorized() -> HTTPException:
-    return HTTPException(401, "credencial ausente ou inválida")
+    return erro(401, "unauthorized", "credencial ausente ou inválida")
 
 
 # Cabeçalho que a autenticação por COOKIE exige. Um <form> de outro site não
@@ -247,8 +248,7 @@ async def require_console(
     if p and p.kind in ("admin", "subadmin"):
         return p
     ip = ratelimit.client_ip(request)
-    if not ratelimit.allow(f"console:{ip}", rate=0.2, burst=10):
-        raise HTTPException(429, "muitas tentativas; tente de novo em instantes")
+    ratelimit.exigir(f"console:{ip}", rate=0.2, burst=10)
     raise _unauthorized()
 
 
@@ -278,17 +278,17 @@ def require_image_access(*, service_scope: str | None = None, allow_machine: boo
             # claro vale mais que sigilo, e quem integra precisa distinguir
             # "faltou escopo" de "essa sala não é sua"
             if service_scope is None or service_scope not in p.scopes:
-                raise HTTPException(403, "escopo insuficiente")
+                raise erro(403, "insufficient_scope", "escopo insuficiente")
             if not _site_image_dir(image).is_dir():
-                raise HTTPException(404, "imagem não existe")
+                raise erro(404, "image_not_found", "imagem não existe")
             if not p.can_see_image(image):
-                raise HTTPException(403, "sem acesso a esta imagem")
+                raise erro(403, "image_out_of_scope", "sem acesso a esta imagem")
             return p
         # invariante 11: para quem entra pelo console (ou com token de outra
         # imagem), o que não é seu não existe. Um 403 aqui viraria oráculo de
         # nomes de sala — e são ~26 rotas herdando esta dependência.
         if not _site_image_dir(image).is_dir() or not p.can_see_image(image):
-            raise HTTPException(404, "imagem não existe")
+            raise erro(404, "image_not_found", "imagem não existe")
         return p
 
     return dep
@@ -297,7 +297,7 @@ def require_image_access(*, service_scope: str | None = None, allow_machine: boo
 def require_machine(image: str, x_nb_machine_key: str | None) -> Principal:
     """Só a chave de máquina da imagem (telemetria/fila)."""
     if not _site_image_dir(image).is_dir():
-        raise HTTPException(404, "imagem não existe")
+        raise erro(404, "image_not_found", "imagem não existe")
     p = identify_machine(x_nb_machine_key, image)
     if not p:
         raise _unauthorized()

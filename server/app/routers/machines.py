@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from .. import auth
+from ..errors import erro
 from ..services import alerts, logs
 from ..services import machines as m
 from ..services import webhook_push
@@ -46,7 +47,7 @@ def _machine(image: str, x_nb_machine_key: str | None, mac: str) -> str:
         # quebrada. Guardar isso é o que faz o painel poder dizer por que não
         # aparece máquina nenhuma, em vez de só mostrar a lista vazia.
         m.record_rejected(image, mac[:64])
-        raise HTTPException(400, "MAC inválido")
+        raise erro(400, "invalid_mac", "MAC inválido")
     return mac
 
 
@@ -356,11 +357,12 @@ async def create_command(
 ) -> dict:
     command = body.get("command", "")
     if command not in m.ALLOWED_COMMANDS:
-        raise HTTPException(400, f"comando não permitido: {command}")
+        raise erro(400, "command_not_allowed", f"comando não permitido: {command}")
     bloqueados = comandos_bloqueados(image, is_admin=(p.kind == "admin"))
     if command in bloqueados:
-        raise HTTPException(
+        raise erro(
             403,
+            "command_blocked",
             f"{command}: {bloqueados[command]} está bloqueado pela organização da maratona",
         )
     # Sem `target` o padrão é a sala inteira (é contrato). O perigo é o corpo
@@ -368,15 +370,15 @@ async def create_command(
     # `macs` por meses e um "desligue esta máquina" desligava a sala. Quem
     # manda um desses campos sem `target` errou, e o erro tem de aparecer.
     if "target" not in body and any(k in body for k in ("macs", "mac", "targets")):
-        raise HTTPException(400, 'as máquinas vão em "target": "all" ou uma lista de MACs')
+        raise erro(400, "no_target", 'as máquinas vão em "target": "all" ou uma lista de MACs')
     target = body.get("target", "all")
     if target != "all" and not isinstance(target, list):
         # uma string aqui seria percorrida letra a letra
-        raise HTTPException(400, '"target" é "all" ou uma lista de MACs')
+        raise erro(400, "no_target", '"target" é "all" ou uma lista de MACs')
     macs = m.list_macs(image) if target == "all" else [m.normalize_mac(str(x)) for x in target]
     macs = [x for x in macs if m.valid_mac(x)]
     if not macs:
-        raise HTTPException(400, "nenhuma máquina alvo")
+        raise erro(400, "no_target", "nenhuma máquina alvo")
 
     cid = m.enqueue(image, macs, command, body.get("args", ""), int(body.get("delay", 0)))
     # `precontest` inclui travar a tela, e a trava só dura se o SERVIDOR souber

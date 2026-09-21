@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from .. import auth, fsdb
+from ..errors import erro
 from ..services import bindings
 from ..services import machines as m
 from ..services import store
@@ -123,7 +124,7 @@ async def put_binding(
     qual boot, `note` é texto livre. Toda mudança fica no histórico."""
     mac = m.normalize_mac(mac)
     if not m.valid_mac(mac):
-        raise HTTPException(400, "MAC inválido")
+        raise erro(400, "invalid_mac", "MAC inválido")
     user_id = body.get("user_id")
     binding = {"bound_at": time.time(), "by": p.name, "source": _fonte(p, body)}
     if body.get("at") is not None:
@@ -138,7 +139,7 @@ async def put_binding(
     if user_id:
         entry = next((e for e in _roster(image) if e["user_id"] == str(user_id)), None)
         if entry is None:
-            raise HTTPException(404, f"user_id {user_id} não está no roster desta imagem")
+            raise erro(404, "user_not_in_roster", f"user_id {user_id} não está no roster desta imagem")
         binding.update({"user_id": entry["user_id"], "seat": body.get("seat", entry.get("seat", ""))})
     else:
         binding.update(

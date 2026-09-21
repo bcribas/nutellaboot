@@ -1028,4 +1028,25 @@ comando de bloqueio — o envio acontece em segundo plano.
 | `404` | imagem, modelo, job ou recurso inexistente |
 | `413` | arquivo grande demais (wallpaper acima de 12 MB, logotipo acima de 2 MB) |
 
-O corpo do erro segue o padrão do FastAPI: `{"detail": "mensagem em português"}`.
+| `429` | muitas tentativas; o cabeçalho `Retry-After` diz em quantos segundos tentar de novo |
+
+O corpo do erro é `{"detail": "mensagem em português", "code": "codigo_estavel"}`.
+**Decida pelo `code`, nunca pelo texto de `detail`** (a frase pode mudar) nem só
+pelo status: um `404` do vínculo pode ser `user_not_in_roster` ou
+`image_not_found`, e são providências diferentes. Erro que não tem código
+próprio leva o padrão do status. O catálogo vivo está em
+`GET /api/v1/events/types` (`error_codes`).
+
+| `code` | Status | Quando |
+|---|---|---|
+| `unauthorized` | 401 | credencial ausente ou inválida |
+| `insufficient_scope` | 403 | a chave de serviço não tem o escopo que a rota pede |
+| `image_out_of_scope` | 403 | a imagem existe, mas está fora dos globs da chave de serviço |
+| `image_not_found` | 404 | a site-image não existe (para o console, também a que é de outro dono) |
+| `user_not_in_roster` | 404 | o `user_id` do vínculo não está no roster da imagem |
+| `invalid_mac` | 400 | MAC fora do formato `aa-bb-cc-dd-ee-ff` |
+| `command_not_allowed` | 400 | comando fora da lista |
+| `command_blocked` | 403 | comando bloqueado pelo cadeado do modelo |
+| `no_target` | 400 | nenhuma máquina alvo, ou `target` malformado |
+| `rate_limited` | 429 | veja `Retry-After` |
+| `bad_request`, `forbidden`, `not_found`, `conflict`, `payload_too_large`, `validation_error` | 400, 403, 404, 409, 413, 422 | os padrões do status, para o erro sem código próprio (`validation_error` traz `detail` como lista) |

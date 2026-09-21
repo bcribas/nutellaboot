@@ -33,8 +33,7 @@ def _limit(request: Request, escopo: str, padrao: dict) -> None:
     if not cfg.get("rate"):  # rate 0 = desligado
         return
     ip = ratelimit.client_ip(request)
-    if not ratelimit.allow(f"{escopo}:{ip}", rate=cfg["rate"], burst=cfg["burst"]):
-        raise HTTPException(429, "muitas tentativas; tente de novo em instantes")
+    ratelimit.exigir(f"{escopo}:{ip}", rate=cfg["rate"], burst=cfg["burst"])
 
 
 @router.get("/models")

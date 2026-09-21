@@ -5,6 +5,8 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 
+from . import errors
+
 from .routers import (
     boot,
     config,
@@ -117,6 +119,7 @@ def create_app() -> FastAPI:
         openapi_url="/api/v1/openapi.json",
         generate_unique_id_function=_operation_id,
     )
+    errors.instalar(app)
     app.include_router(health.router)
     app.include_router(boot.router)
     app.include_router(models.router)

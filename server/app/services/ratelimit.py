@@ -11,6 +11,7 @@ o limite por IP funcionar de verdade, o nginx precisa repassar
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 
@@ -32,6 +33,28 @@ def allow(key: str, *, rate: float, burst: float, now: float | None = None) -> b
             return False
         _buckets[key] = (tokens - 1.0, now)
         return True
+
+
+def espera(key: str, *, rate: float) -> int:
+    """Segundos até haver um token de novo: é o `Retry-After` do 429."""
+    with _lock:
+        tokens, _ = _buckets.get(key, (1.0, 0.0))
+    return max(1, math.ceil((1.0 - tokens) / rate)) if rate > 0 else 1
+
+
+def exigir(key: str, *, rate: float, burst: float) -> None:
+    """`allow` que já levanta o 429, com `Retry-After`. Sem o cabeçalho, quem
+    integra (o drenador do MOJ) só sabe tentar de novo às cegas."""
+    if allow(key, rate=rate, burst=burst):
+        return
+    from ..errors import erro
+
+    raise erro(
+        429,
+        "rate_limited",
+        "muitas tentativas; tente de novo em instantes",
+        headers={"Retry-After": str(espera(key, rate=rate))},
+    )
 
 
 def client_ip(request) -> str:
