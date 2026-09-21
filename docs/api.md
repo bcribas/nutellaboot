@@ -508,6 +508,14 @@ curl -sN "$SERVER/api/v1/site-images/26brbr/samples?since=$SINCE&until=$UNTIL&li
     -H "Authorization: Bearer $NB3S" | while IFS= read -r linha; do echo "$linha" | jq -c '{mac, n: .native_points}'; done
 ```
 
+No lote, `limit` vale **por máquina** (cada linha tem até `limit` pontos), e
+`truncated` é **de cada linha**: diz que o arquivo daquela máquina foi cortado
+pelo teto dentro da janela pedida, não que a resposta HTTP veio incompleta.
+`since` e `until` voltam inteiros. A rota comprime quando o cliente pede
+(`Accept-Encoding: gzip`, que o `curl --compressed` manda): uma sede de 300
+máquinas são vários MB de JSON repetitivo, que encolhem umas dez vezes. É a
+única rota que comprime; o SSE e o long-poll não passam por gzip.
+
 O agente manda o journal do boot na partida e, a cada 5 minutos, só o que
 apareceu desde o envio anterior (usando `journalctl --cursor-file`, que não
 repete nem perde linha). Incremento vazio não vira requisição.

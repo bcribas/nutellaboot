@@ -48,3 +48,28 @@ def test_instantes_do_vinculo_sao_inteiros(client, img):
     hist = client.get(f"{base}/machines/{MAC}/binding/history", headers=hi).json()["history"]
     solto = next(h for h in hist if h["event"] == "unbound")
     assert _int(solto["at"])
+
+
+def test_lote_comprimido_so_quando_pedido(client, img):
+    """Uma sede de 300 máquinas são vários MB de JSON repetitivo. O gzip é só
+    desta rota e só a pedido: um middleware embrulharia também o SSE."""
+    import gzip
+
+    hm = {"X-NB-Machine-Key": img["machine_key"]}
+    hi = {"Authorization": f"Bearer {img['token']}"}
+    base = "/api/v1/site-images/testes3"
+    for i in range(40):
+        client.post(f"{base}/machines/52-54-00-00-00-{i:02x}/status", json={"sysresources": {"mem_pct": i}}, headers=hm)
+
+    puro = client.get(f"{base}/samples", headers={**hi, "Accept-Encoding": "identity"})
+    assert "content-encoding" not in puro.headers and puro.headers["vary"] == "Accept-Encoding"
+    assert len(puro.text.splitlines()) == 40
+
+    with client.stream("GET", f"{base}/samples", headers={**hi, "Accept-Encoding": "gzip"}) as r:
+        assert r.headers["content-encoding"] == "gzip"
+        cru = b"".join(r.iter_raw())
+    assert gzip.decompress(cru).decode() == puro.text
+    assert len(cru) < len(puro.content) / 3
+
+    recusa = client.get(f"{base}/samples", headers={**hi, "Accept-Encoding": "gzip;q=0, identity"})
+    assert "content-encoding" not in recusa.headers

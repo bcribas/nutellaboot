@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import time
+import zlib
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -185,6 +186,7 @@ def get_samples_lote(
     until: float = Query(0, ge=0),
     limit: int = Query(MAX_AMOSTRAS, ge=1, le=MAX_AMOSTRAS_TETO),
     active_since: float = Query(0, ge=0),
+    request: Request = None,
     p=Depends(auth.require_image_access(service_scope="machines:read")),
 ) -> StreamingResponse:
     """Todas as máquinas da sede de uma vez: uma linha NDJSON por máquina, no
@@ -207,11 +209,40 @@ def get_samples_lote(
                 continue
             yield json.dumps(corpo, ensure_ascii=False, separators=(",", ":")) + "\n"
 
-    return StreamingResponse(
-        gerar(),
-        media_type="application/x-ndjson",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    cabecalhos = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Vary": "Accept-Encoding"}
+    corpo = gerar()
+    if _aceita_gzip(request.headers.get("accept-encoding", "")):
+        # Só aqui, e à mão: um GZipMiddleware embrulharia também o SSE e o
+        # long-poll, que vivem de entregar cada byte na hora. Uma sede de 300
+        # máquinas são vários MB de JSON repetitivo; comprime ~10x.
+        cabecalhos["Content-Encoding"] = "gzip"
+        corpo = _gzip(corpo)
+    return StreamingResponse(corpo, media_type="application/x-ndjson", headers=cabecalhos)
+
+
+def _aceita_gzip(valor: str) -> bool:
+    for parte in valor.lower().split(","):
+        nome, _, params = parte.strip().partition(";")
+        if nome.strip() in ("gzip", "*"):
+            q = params.replace(" ", "").partition("q=")[2]
+            try:
+                return float(q) > 0 if q else True
+            except ValueError:
+                return True
+    return False
+
+
+def _gzip(linhas, a_cada: int = 16):
+    """Comprime o fluxo sem juntá-lo: descarrega a cada `a_cada` máquinas, para
+    o cliente ir recebendo (e o proxy não achar que a conexão morreu)."""
+    z = zlib.compressobj(6, zlib.DEFLATED, 31)  # 31 = contêiner gzip
+    for i, linha in enumerate(linhas, 1):
+        pedaco = z.compress(linha.encode())
+        if i % a_cada == 0:
+            pedaco += z.flush(zlib.Z_SYNC_FLUSH)
+        if pedaco:
+            yield pedaco
+    yield z.flush()
 
 
 @router.post("/site-images/{image}/machines/{mac}/events")
