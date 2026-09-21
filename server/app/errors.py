@@ -47,6 +47,7 @@ CODIGOS = {
     "invalid_roster_entry": "entrada do roster sem user_id, ou malformada",
     "invalid_mac": "MAC fora do formato aa-bb-cc-dd-ee-ff",
     "user_not_in_roster": "o user_id do vínculo não está no roster da imagem",
+    "command_not_found": "o comando não existe, é anterior ao registro ou já foi podado",
     "command_not_allowed": "o comando não está na lista de comandos aceitos",
     "command_blocked": "o comando está bloqueado pelo cadeado do modelo",
     "webhook_not_found": "o webhook não existe (ou é de outro dono)",

@@ -251,7 +251,11 @@ def _expirada(entry: dict, now: float, ttl: int) -> bool:
     return now > piso + ttl
 
 
-def enqueue(image_id: str, macs: list[str], command: str, args: str = "", delay: int = 0) -> str:
+def enqueue(
+    image_id: str, macs: list[str], command: str, args: str = "", delay: int = 0, by: str = ""
+) -> str:
+    from . import command_log
+
     cid = secrets.token_hex(6)
     entry = {
         "id": cid,
@@ -260,6 +264,11 @@ def enqueue(image_id: str, macs: list[str], command: str, args: str = "", delay:
         "created_at": time.time(),
         "not_before": time.time() + max(0, delay),
     }
+    # antes da fila: quem consultar o comando logo em seguida já o encontra
+    command_log.abrir(
+        image_id, cid, command=command, args=args, by=by, created_at=entry["created_at"],
+        not_before=entry["not_before"], ttl=_command_ttl(), targets=macs,
+    )
     for mac in macs:
         q = machine_dir(image_id, mac) / "queue"
         q.mkdir(parents=True, exist_ok=True)
@@ -290,6 +299,9 @@ def pending_commands(image_id: str, mac: str) -> list[dict]:
             continue
         if _expirada(entry, now, ttl):
             f.unlink(missing_ok=True)
+            from . import command_log
+
+            command_log.anotar(image_id, str(entry.get("id", "")), mac, "expired")
             append_capped(
                 machine_dir(image_id, mac) / "acks.log",
                 json.dumps(
@@ -336,6 +348,12 @@ def ack(image_id: str, mac: str, cid: str, result: dict) -> bool:
     from .logcap import append_capped
 
     append_capped(d / "acks.log", json.dumps(linha, ensure_ascii=False))
+    from . import command_log
+
+    command_log.anotar(
+        image_id, cid, mac, str(result.get("status", "done")),
+        output_bytes=len(str(result.get("output", "")).encode()),
+    )
     if comando in RESET_EDITORES and str(result.get("status", "done")) not in ("error", "failed"):
         # quem lê `editors_time` precisa saber desde quando ele conta
         with fsdb.locked(d):

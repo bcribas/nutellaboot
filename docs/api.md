@@ -646,6 +646,7 @@ token e a chave de máquina de cada sede. Nome fora da lista é `404`.
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
 | POST | `/api/v1/site-images/{img}/commands` | C, I, S`commands:write` | `{command, target, args?, delay?}` | `{command_id, machines}` |
+| GET | `/api/v1/site-images/{img}/commands/{command_id}` | C, I, S`commands:write` | — | `{command_id, command, args, by, created_at, not_before, expires_at, machines, summary:{acked, pending, expired}, targets:[{mac, state, status?, at?, output_bytes?}]}` |
 | GET | `/api/v1/site-images/{img}/commands` | C, I, S`commands:write` | — | `{allowed:[…], blocked:{comando: campo}}` |
 | GET | `/api/v1/site-images/{img}/machines/{mac}/commands?wait=25` | M | — | `{commands:[…], lock}` (long-poll) |
 | POST | `/api/v1/site-images/{img}/machines/{mac}/commands/{cid}/ack` | M | `{status, output?}` | `{ok, found}` |
@@ -661,6 +662,14 @@ token e a chave de máquina de cada sede. Nome fora da lista é `404`.
 > desbloqueia a sala inteira.
 
 `target` é `"all"` ou uma lista de MACs. `delay` adia a execução em segundos.
+
+**Quem executou.** `GET …/commands/{command_id}` responde por máquina:
+`acked` (com o `status` que a máquina mandou; `error` também é confirmação),
+`pending` (o comando ainda vale e ela não confirmou) ou `expired` (caducou; a
+máquina desligada nunca escreve nada, o estado dela se deduz do prazo). O
+registro guarda os últimos 500 comandos da sede, por 7 dias; comando anterior a
+isso responde `404 command_not_found`. O evento `command.acked` traz
+`command_id` e `command` (`id` continua, é o mesmo valor).
 Sem `target` o comando vale para **a sala inteira**; por isso um corpo que traz
 `macs`, `mac` ou `targets` sem `target` responde **400**: quem mandou um desses
 quis escolher máquinas e errou o campo, e obedecer o padrão ali desligaria a

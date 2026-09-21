@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from .. import auth
 from ..errors import erro
-from ..services import alerts, logs
+from ..services import alerts, command_log, logs
 from ..services import machines as m
 from ..services import eventos
 from ..services.notify import notify
@@ -292,7 +292,12 @@ async def ack_command(
 ) -> dict:
     mac = _machine(image, x_nb_machine_key, mac)
     found = m.ack(image, mac, cid, {"status": body.get("status", "done"), "output": body.get("output", "")})
-    publicar_evento(image, "command.acked", {"mac": mac, "id": cid, "status": body.get("status")})
+    # `id` é o nome antigo do campo; `command_id` é o que o POST devolve
+    dados = {"mac": mac, "id": cid, "command_id": cid, "status": body.get("status")}
+    comando = (command_log.ler(image, cid) or {}).get("command")
+    if comando:
+        dados["command"] = comando
+    publicar_evento(image, "command.acked", dados)
     return {"ok": True, "found": found}
 
 
@@ -385,7 +390,7 @@ async def create_command(
     if not macs:
         raise erro(400, "no_target", "nenhuma máquina alvo")
 
-    cid = m.enqueue(image, macs, command, body.get("args", ""), int(body.get("delay", 0)))
+    cid = m.enqueue(image, macs, command, body.get("args", ""), int(body.get("delay", 0)), by=p.name or p.kind)
     # `precontest` inclui travar a tela, e a trava só dura se o SERVIDOR souber
     # dela: o agente obedece o lockstate que vem no long-poll, então o
     # ensure_locked que o comando faz na máquina seria desfeito no ciclo
@@ -400,13 +405,29 @@ async def create_command(
     return {"command_id": cid, "machines": len(macs)}
 
 
+@router.get("/site-images/{image}/commands/{command_id}")
+def command_status(
+    image: str,
+    command_id: str,
+    p=Depends(auth.require_image_access(service_scope="commands:write")),
+) -> dict:
+    """Quem executou a ordem: por máquina, `acked`, `pending` (ainda vale e
+    ninguém confirmou) ou `expired`. É a fonte da verdade; os eventos
+    `command.acked`/`command.expired` são o aviso."""
+    estado = command_log.estado(image, command_id)
+    if estado is None:
+        # também o comando de antes desta versão e o que já foi podado (7 dias)
+        raise erro(404, "command_not_found", "comando não existe (ou já saiu do registro)")
+    return estado
+
+
 async def _lock(image: str, macs: list[str], locked: bool, by: str) -> dict:
     """Trava/destrava por DOIS caminhos ao mesmo tempo: grava o estado (que a
     própria tela consulta) e enfileira o comando (que o agente executa). Se um
     falhar, o outro resolve."""
     for mac in macs:
         m.set_lock(image, mac, locked, by)
-    cid = m.enqueue(image, macs, "donottouch" if locked else "cantouch")
+    cid = m.enqueue(image, macs, "donottouch" if locked else "cantouch", by=by)
     for mac in macs:
         notify.wake_machine(image, mac)
     publicar_evento(image, "machine.locked" if locked else "machine.unlocked", {"machines": macs})
