@@ -251,3 +251,4 @@ def test_attach_coloca_camada_na_frente(client, admin_key, data_root):
     r = client.delete("/api/v1/site-images/alvo/layers/extra.squash", headers=h)
     assert r.status_code == 204
     assert len(client.get("/boot/v3/alvo/manifest", headers=bk).text.strip().splitlines()) == 1
+

@@ -38,7 +38,15 @@ QUEUE = DATA / "layerbuilds"
 BLOBS = DATA / "blobs"
 WORKROOT = Path(os.environ.get("NB3_BUILD_DIR", "/var/tmp/nb3-build"))
 
-FERRAMENTAS = ["unshare", "squashfuse", "fuse-overlayfs", "bwrap", "mksquashfs", "fusermount3"]
+# `newuidmap`/`newgidmap` (pacote uidmap no Ubuntu): sem eles o
+# `unshare --map-auto` morre com "failed to execute newuidmap" (código 127),
+# depois de baixar a base inteira. Faltaram na produção e o --check dizia ok.
+FERRAMENTAS = ["unshare", "newuidmap", "newgidmap", "squashfuse", "fuse-overlayfs", "bwrap",
+               "mksquashfs", "fusermount3"]
+PACOTES = {
+    "Ubuntu": "sudo apt-get install -y --no-install-recommends uidmap bubblewrap squashfuse fuse-overlayfs squashfs-tools",
+    "Fedora": "sudo dnf install shadow-utils bubblewrap squashfuse fuse-overlayfs squashfs-tools",
+}
 
 # O que nunca pode entrar numa camada publicada.
 PODA = [
@@ -80,6 +88,46 @@ def run(cmd: list[str], job_log: Path, **kw) -> subprocess.CompletedProcess:
 
 def checar_ferramentas() -> list[str]:
     return [t for t in FERRAMENTAS if shutil.which(t) is None]
+
+
+# O que o stderr do `unshare` quer dizer, e o que fazer. Ter as ferramentas
+# não basta: a construção precisa de uma faixa de subuid para o usuário, do
+# newuidmap para mapeá-la, e de o kernel deixar criar o namespace.
+DICAS_UNSHARE = (
+    ("newuidmap", "faltam newuidmap/newgidmap: instale o pacote uidmap"),
+    ("/etc/subuid", "o usuário não tem faixa de subuid: "
+                    "usermod --add-subuids 100000-165535 --add-subgids 100000-165535 <usuário>"),
+    ("propagation", "o kernel deixou criar o namespace de usuário mas não o de montagem "
+                    "(kernel.apparmor_restrict_unprivileged_userns=1 no Ubuntu 24.04): "
+                    "grave kernel.apparmor_restrict_unprivileged_userns = 0 em /etc/sysctl.d/ e rode sysctl --system"),
+    ("uid_map", "o kernel proíbe namespace de usuário sem privilégio "
+                "(kernel.apparmor_restrict_unprivileged_userns=1 no Ubuntu 24.04): "
+                "grave kernel.apparmor_restrict_unprivileged_userns = 0 em /etc/sysctl.d/ e rode sysctl --system"),
+    ("Operation not permitted", "o kernel recusou o namespace (sysctl ou AppArmor): veja docs/operations.md §1.7"),
+)
+
+
+def dica_do_unshare(stderr: str) -> str:
+    for marca, dica in DICAS_UNSHARE:
+        if marca in stderr:
+            return dica
+    return "o unshare falhou; veja docs/operations.md §1.7"
+
+
+def checar_namespace() -> str | None:
+    """Faz o que a construção faz (o namespace com a faixa de subuid) e devolve
+    a dica do que falta, ou None. É isto que separa "os binários existem" de
+    "dá para construir"."""
+    try:
+        proc = subprocess.run(
+            ["unshare", "--user", "--map-auto", "--map-root-user", "--mount", "true"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"não consegui rodar o unshare: {e}"
+    if proc.returncode == 0:
+        return None
+    return dica_do_unshare(proc.stderr) + f"\n  ({proc.stderr.strip()})"
 
 
 def md5_of(path: Path) -> str:
@@ -392,7 +440,14 @@ def main() -> int:
     faltando = checar_ferramentas()
     if faltando:
         print("faltam ferramentas: " + ", ".join(faltando), file=sys.stderr)
-        print("no Fedora: sudo dnf install bubblewrap squashfuse fuse-overlayfs squashfs-tools", file=sys.stderr)
+        for distro, cmd in PACOTES.items():
+            print(f"  {distro}: {cmd}", file=sys.stderr)
+        return 1
+    # antes de tocar a fila: um worker que não consegue criar o namespace
+    # consumiria a fila inteira falhando job a job, cada um depois do download
+    problema = checar_namespace()
+    if problema:
+        print(f"a construção não vai rodar nesta máquina: {problema}", file=sys.stderr)
         return 1
     if args.check:
         print("pré-requisitos ok (construção roda sem root)")

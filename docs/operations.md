@@ -388,20 +388,40 @@ Antes de subir o serviço, a máquina precisa das ferramentas do caminho sem
 root e de uma faixa de subuid para o usuário do serviço:
 
 ```bash
-apt-get install -y --no-install-recommends bubblewrap fuse-overlayfs
+# uidmap traz newuidmap/newgidmap: sem eles o `unshare --map-auto` morre com
+# "failed to execute newuidmap" (código 127), depois de baixar a base inteira
+apt-get install -y --no-install-recommends uidmap bubblewrap squashfuse fuse-overlayfs squashfs-tools
 
 # unshare --map-auto não funciona sem faixa: falha na hora com
 # "no line matching user nutellaboot in /etc/subuid"
 usermod --add-subuids 100000-165535 --add-subgids 100000-165535 nutellaboot
 
-# confere as seis ferramentas sem tocar na fila
+# O Ubuntu 24.04 proíbe namespace de usuário sem privilégio por padrão
+# (kernel.apparmor_restrict_unprivileged_userns = 1): o namespace de montagem
+# do worker morre com "cannot change root filesystem propagation". A linha que
+# libera já está no sysctl versionado (é o mesmo arquivo do deploy; num
+# arquivo, não com `sysctl -w`, que some no boot):
+install -m 0644 /opt/nutellaboot3/deploy/sysctl-nutellaboot3.conf /etc/sysctl.d/60-nutellaboot3.conf
+sysctl --system
+
+# confere as ferramentas E cria um namespace de verdade, como a construção
+# faz; se falhar, diz qual dos três pré-requisitos acima faltou
 sudo -u nutellaboot NB3_DATA_ROOT=/var/lib/nutellaboot3 \
     /opt/nutellaboot3/tools/nb3-layer-worker --check
 ```
 
-No Ubuntu 24.04 vale conferir também o `kernel.apparmor_restrict_unprivileged_userns`.
-Se estiver em `1` e a construção falhar ao criar o namespace, o perfil do
-AppArmor para o `unshare` e o `bwrap` é o que libera.
+O `--check` mentia: conferia só os binários, disse "ok" numa máquina sem
+`uidmap` e com o userns proibido, e o primeiro job morreu depois de dois
+minutos de download. Agora ele faz o `unshare` real, e o worker o refaz ao
+subir, antes de tocar a fila (um worker que não constrói consumiria a fila
+inteira falhando job a job). Liberar o userns é global para a máquina de
+gestão; a alternativa mais estreita, um perfil AppArmor para `unshare` e
+`bwrap`, exigiria manter à mão perfis de binários que o pacote atualiza.
+
+Um job que falhou fica em `data/layerbuilds/failed/`. Para tentar de novo
+depois de corrigir a máquina, mova o `.json` de `failed/` para `queue/`
+(apagando `error` e `finished_at` dele); o worker o pega em 5 s e anexa ao
+`.log` antigo.
 
 Então instale a unit e suba:
 

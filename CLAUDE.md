@@ -433,6 +433,14 @@ O ambiente de teste tem um nginx externo que faz proxy de
   com aspa dentro de classe (`/[",]/`). Escreva `const f = () => …` e
   `{ acompanhar, ack }`, declare antes de usar, e monte a aspa com
   `String.fromCharCode(34)`.
+- **`--check` que só confere `which` mente.** O worker de camadas dizia
+  "pré-requisitos ok" numa máquina sem `uidmap` e com userns proibido pelo
+  kernel; o job morreu com código 127 depois de baixar a base. A construção
+  precisa de faixa de subuid + newuidmap + userns E mount namespace liberados
+  (sysctl `kernel.apparmor_restrict_unprivileged_userns` no Ubuntu 24.04): o
+  check faz um `unshare --user --map-auto --mount true` de verdade e traduz o
+  stderr em providência. Pré-requisito novo de construção entra no check, não
+  só na doc.
 
 ## Estilo
 
