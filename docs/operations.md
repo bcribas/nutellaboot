@@ -418,6 +418,14 @@ inteira falhando job a job). Liberar o userns é global para a máquina de
 gestão; a alternativa mais estreita, um perfil AppArmor para `unshare` e
 `bwrap`, exigiria manter à mão perfis de binários que o pacote atualiza.
 
+Se o log terminar em `apt-get` com "Temporary failure resolving", é o DNS do
+sandbox: o worker grava dentro do sistema montado a lista de servidores de
+verdade (`/run/systemd/resolve/resolv.conf` do host, ou `/etc/resolv.conf`; se
+só houver loopback, um resolvedor público), porque o `resolv.conf` da
+imagem-mestre é um link para dentro de `/run`, que o `bwrap` monta vazio, e o
+do host com systemd-resolved é o stub `127.0.0.53`, que não existe dentro do
+namespace.
+
 Um job que falhou fica em `data/layerbuilds/failed/`. Para tentar de novo
 depois de corrigir a máquina, mova o `.json` de `failed/` para `queue/`
 (apagando `error` e `finished_at` dele); o worker o pega em 5 s e anexa ao

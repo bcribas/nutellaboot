@@ -35,3 +35,16 @@ def test_o_check_conhece_os_tres_motivos_de_o_namespace_falhar():
     assert "apparmor_restrict_unprivileged_userns" in mod.dica_do_unshare(
         "unshare: cannot change root filesystem propagation: Permission denied"
     )
+
+
+def test_o_sandbox_recebe_resolvedor_de_verdade_num_arquivo_comum():
+    """Na imagem-mestre /etc/resolv.conf é um link para dentro de /run, que o
+    bwrap monta vazio; e no host com systemd-resolved o /etc/resolv.conf é o
+    stub 127.0.0.53, que não existe dentro do namespace. O apt morria com
+    "Temporary failure resolving" depois de tudo o mais ter dado certo."""
+    mod = _modulo()
+    sh = mod.MOUNT_SH
+    assert 'rm -f "$WORK/merged/etc/resolv.conf"' in sh, "o link para /run tem de sair antes de escrever"
+    assert "/run/systemd/resolve/resolv.conf" in sh, "os servidores de verdade, não o stub"
+    assert "127\\." in sh and "1.1.1.1" in sh, "só loopback cai num resolvedor público"
+    assert sh.index("resolv.conf") < sh.index("bwrap --bind"), "antes de entrar no sandbox"

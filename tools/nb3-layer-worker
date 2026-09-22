@@ -187,7 +187,24 @@ fuse-overlayfs -o lowerdir="$LOWERS",upperdir="$WORK/upper",workdir="$WORK/work"
 # apt não pode iniciar serviços dentro do chroot
 printf '#!/bin/sh\nexit 101\n' > "$WORK/merged/usr/sbin/policy-rc.d"
 chmod +x "$WORK/merged/usr/sbin/policy-rc.d"
-cp /etc/resolv.conf "$WORK/merged/etc/resolv.conf" 2>/dev/null || true
+# DNS dentro do sandbox. Dois enganos silenciosos aqui: (1) na imagem-mestre
+# /etc/resolv.conf é um link para /run/systemd/resolve/stub-resolv.conf, e o
+# bwrap monta um tmpfs vazio em /run, então o link aponta para o nada; (2) no
+# host com systemd-resolved o /etc/resolv.conf é o STUB (nameserver
+# 127.0.0.53), que só existe fora do namespace. O que vale é a lista de
+# servidores de verdade, num arquivo comum. Sem isto o apt morre com
+# "Temporary failure resolving" depois de tudo o mais ter dado certo.
+rm -f "$WORK/merged/etc/resolv.conf"
+if [ -s /run/systemd/resolve/resolv.conf ]; then
+    cat /run/systemd/resolve/resolv.conf > "$WORK/merged/etc/resolv.conf"
+else
+    cat /etc/resolv.conf > "$WORK/merged/etc/resolv.conf"
+fi
+if ! grep -qE '^nameserver +([0-9]|[a-f0-9]*:)' "$WORK/merged/etc/resolv.conf" || \
+   ! grep -E '^nameserver' "$WORK/merged/etc/resolv.conf" | grep -qvE '127\.|::1'; then
+    # só loopback (ou nada): resolvedor público
+    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$WORK/merged/etc/resolv.conf"
+fi
 
 bwrap --bind "$WORK/merged" / \
       --proc /proc --dev /dev \
