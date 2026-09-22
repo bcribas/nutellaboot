@@ -39,7 +39,7 @@ async def get_config(image: str, p=Depends(auth.require_image_access())) -> dict
             "model": info.get("model", ""),
             "unlocked": bool(info.get("unlocked")),
         },
-        "schema": cfg.schema_for(image),
+        "schema": cfg.esquema_publico(cfg.schema_for(image)),
         "values": cfg.effective_values(image),
         "wallpaper": wallpaper,
         "can_edit_locked": can_edit_locked,

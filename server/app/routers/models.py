@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from .. import auth
 from ..models import ModelLayers
 from ..services import layer_roles, ownership, store
+from ..services.config import esquema_publico
 from ..services import wallpaper as wp
 from ..settings import settings
 
@@ -56,6 +57,7 @@ async def create_model(body: dict, p=Depends(auth.require_console)) -> dict:
     except store.ImageError as e:
         raise HTTPException(400, str(e))
 
+    modelo["schema"] = esquema_publico(modelo.get("schema", {}))
     if not modelo.get("layers"):
         modelo["warning"] = "modelo sem camadas: uma site-image derivada dele não vai bootar"
     return modelo
@@ -80,6 +82,7 @@ async def get_model(name: str, p=Depends(auth.require_console)) -> dict:
     if not ownership.can_use_model(p, name):
         raise HTTPException(404, "modelo não existe")
     tpl = dict(store.get_model(name) or {})
+    tpl["schema"] = esquema_publico(tpl.get("schema", {}))
     dono = store.model_owner(name)
     if not ownership.pode_ver_dono(p, dono):
         tpl.pop("owner", None)
@@ -98,7 +101,8 @@ async def patch_model(name: str, body: dict, p=Depends(auth.require_console)) ->
         description=body.get("description"),
         wallpaper_locked=body.get("wallpaper_locked"),
     )
-    return store.get_model(name) or {}
+    tpl = store.get_model(name) or {}
+    return {**tpl, "schema": esquema_publico(tpl.get("schema", {}))}
 
 
 @router.delete("/models/{name}", status_code=204)
@@ -230,7 +234,7 @@ async def layers_catalog(p=Depends(auth.require_console)) -> dict:
 async def get_model_schema(name: str, p=Depends(auth.require_console)) -> dict:
     if not ownership.can_use_model(p, name):
         raise HTTPException(404, "modelo não existe")
-    schema = store.get_schema(name)
+    schema = esquema_publico(store.get_schema(name))
     return {
         "name": name,
         "fields": [
@@ -245,6 +249,7 @@ async def get_model_schema(name: str, p=Depends(auth.require_console)) -> dict:
                 # idioma ficava impossível pela tela
                 "options": f.get("options"),
                 "locked": bool(f.get("locked")),
+                **({"has_default": f["has_default"]} if "has_default" in f else {}),
             }
             for f in schema.get("fields", [])
         ],

@@ -11,7 +11,7 @@ que o token alcança.
 import pytest
 
 from server.app import fsdb
-from server.app.services import owners, store
+from server.app.services import owners, ratelimit, store
 
 MD5 = "0" * 32
 
@@ -23,6 +23,8 @@ def ha(admin_key):
 
 @pytest.fixture
 def lab(data_root, client, ha):
+    # o pedido público tem limite por IP, e todo teste daqui cria uma sede
+    ratelimit.reset()
     fsdb.write_json(data_root / "server.json", {"reserved_prefix_regex": "^[0-9]"})
     client.post("/api/v1/models", json={"name": "oficial", "public": True}, headers=ha)
     client.post("/api/v1/models/oficial/layers", json={"file": "b.squashfs", "md5": MD5}, headers=ha)
@@ -105,3 +107,44 @@ def test_convite_revogado_nao_cria_imagem(client, lab, ha):
     )
     assert r.status_code in (400, 403), r.text
     assert not store.site_image_exists("outrolab")
+
+
+def test_o_hash_da_senha_de_root_do_modelo_nao_sai_pela_api(client, lab, ha):
+    """O padrão do ROOT_PASSWORD é guardado como `default_hash` (`$6$…`) no
+    esquema do modelo, e o configureitor recebia o esquema cru: o token da sede
+    levava o hash da senha de root da organização, quebrável offline. Mesmo
+    funil de antes, mesma conferência pelo valor."""
+    r = client.patch(
+        "/api/v1/models/oficial/schema/fields/ROOT_PASSWORD",
+        json={"default": "da-organizacao", "locked": True},
+        headers=ha,
+    )
+    assert r.status_code == 200, r.text
+    campo = next(f for f in store.get_schema("oficial")["fields"] if f["key"] == "ROOT_PASSWORD")
+    segredo = campo["default_hash"]
+    assert segredo.startswith("$6$")
+
+    ht = {"Authorization": f"Bearer {lab['token']}"}
+    hs = {"Authorization": f"Bearer {lab['code']}"}
+    respostas = [client.get(rota, headers=ht) for rota in _rotas_get_da_imagem(client)]
+    respostas += [
+        client.get("/api/v1/models/oficial", headers=hs),
+        client.get("/api/v1/models/oficial/schema", headers=hs),
+        client.get("/api/v1/models/oficial", headers=ha),
+        # o derivado copia o formulário, e com ele o hash
+        client.post("/api/v1/models/oficial/duplicate", json={"name": "copia"}, headers=hs),
+        client.get("/api/v1/models/copia", headers=hs),
+    ]
+    for r in respostas[-5:]:
+        assert r.status_code < 400, (r.request.url, r.text)
+    for r in respostas:
+        assert segredo not in r.text and "default_hash" not in r.text, f"{r.request.url} entregou o hash de root"
+
+    # quem olha ainda sabe que há um padrão definido
+    config = client.get("/api/v1/site-images/meulab/config", headers=ht).json()
+    root = next(f for f in config["schema"]["fields"] if f["key"] == "ROOT_PASSWORD")
+    assert root["has_default"] is True
+    # e o stuff, que é quem precisa dele, continua recebendo
+    from server.app.services import stuffgen
+
+    assert f"NB_ROOT_PW_HASH='{segredo}'" in stuffgen.render("meulab")

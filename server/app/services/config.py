@@ -200,6 +200,24 @@ def hash_do_campo(field: dict, password: str) -> str:
     return hash_password(password)
 
 
+def esquema_publico(schema: dict) -> dict:
+    """O esquema como sai pela API: sem `default_hash`, com `has_default`.
+
+    O `default_hash` do ROOT_PASSWORD é o `$6$` da senha de root que a
+    organização escolheu, e quebra-se offline. O configureitor recebia o
+    esquema cru com o token da sede — justamente quem o cadeado do campo
+    impede de mexer no root. Quem lê precisa só saber que há um padrão.
+    """
+    campos = []
+    for f in schema.get("fields", []):
+        if isinstance(f, dict) and f.get("type") == "password":
+            f = {k: v for k, v in f.items() if k != "default_hash"} | {
+                "has_default": bool(f.get("default_hash"))
+            }
+        campos.append(f)
+    return {**schema, "fields": campos}
+
+
 def check_password(stored: str, password: str) -> bool:
     if not stored or "$" not in stored:
         return False
