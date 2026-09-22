@@ -184,6 +184,13 @@ LOWERS="${LOWERS%:}"
 
 fuse-overlayfs -o lowerdir="$LOWERS",upperdir="$WORK/upper",workdir="$WORK/work" "$WORK/merged"
 
+# A base publicada não tem /var/log/apt nem /var/log/dpkg.log (a poda os
+# tira): o dpkg recusa instalar sem onde escrever o log (código 100). Voltam a
+# sair na poda, no fim.
+mkdir -p "$WORK/merged/var/log/apt" "$WORK/merged/var/cache/apt/archives/partial" \
+         "$WORK/merged/var/lib/apt/lists/partial"
+: > "$WORK/merged/var/log/dpkg.log"
+
 # apt não pode iniciar serviços dentro do chroot
 printf '#!/bin/sh\nexit 101\n' > "$WORK/merged/usr/sbin/policy-rc.d"
 chmod +x "$WORK/merged/usr/sbin/policy-rc.d"
@@ -206,9 +213,12 @@ if ! grep -qE '^nameserver +([0-9]|[a-f0-9]*:)' "$WORK/merged/etc/resolv.conf" |
     printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$WORK/merged/etc/resolv.conf"
 fi
 
+# --perms 1777 no /tmp: o apt confere as assinaturas como o usuário _apt, e
+# um tmpfs 0755 de root o deixa sem onde criar o arquivo temporário
+# ("GetTempFile (13: Permission denied)"), o que derruba o apt-get update
 bwrap --bind "$WORK/merged" / \
       --proc /proc --dev /dev \
-      --tmpfs /tmp --tmpfs /run \
+      --perms 1777 --tmpfs /tmp --tmpfs /run \
       --setenv DEBIAN_FRONTEND noninteractive \
       --setenv LC_ALL C \
       --unshare-uts --hostname maratona-build \

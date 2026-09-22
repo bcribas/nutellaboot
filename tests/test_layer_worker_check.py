@@ -48,3 +48,15 @@ def test_o_sandbox_recebe_resolvedor_de_verdade_num_arquivo_comum():
     assert "/run/systemd/resolve/resolv.conf" in sh, "os servidores de verdade, não o stub"
     assert "127\\." in sh and "1.1.1.1" in sh, "só loopback cai num resolvedor público"
     assert sh.index("resolv.conf") < sh.index("bwrap --bind"), "antes de entrar no sandbox"
+
+
+def test_o_sandbox_tem_onde_o_apt_escrever():
+    """A base publicada sai sem /var/log/apt (a poda tira), e o dpkg recusa
+    instalar sem log (código 100); e o /tmp do bwrap nascia 0755 de root, sem
+    lugar para o _apt criar o temporário da assinatura."""
+    mod = _modulo()
+    sh = mod.MOUNT_SH
+    assert 'mkdir -p "$WORK/merged/var/log/apt"' in sh
+    assert '"$WORK/merged/var/log/dpkg.log"' in sh
+    assert "--perms 1777 --tmpfs /tmp" in sh
+    assert "var/log" in mod.PODA, "o log volta a sair da camada publicada"
