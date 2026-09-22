@@ -374,6 +374,59 @@ encontrá-la) e envia para o diretório configurado em `paths.usb`.
 Trocar o files.mdp por uma CDN no futuro é editar `base_urls` — nenhum outro
 lugar do sistema sabe o nome do servidor.
 
+### 1.7 Worker de camadas extras
+
+A API **só enfileira** pedido de camada: ela grava o job em
+`data/layerbuilds/queue/` e devolve o `id`. Quem constrói é um processo
+separado, `tools/nb3-layer-worker`. Sem ele no ar, o pedido fica em "na fila"
+para sempre, e **sem log** — o log só nasce quando o job sai de `queue` para
+`running`, então a tela mostra um pedido parado e uma caixa de log vazia. Esse
+par (parado + log vazio) é a assinatura de worker ausente, não de construção
+lenta.
+
+Antes de subir o serviço, a máquina precisa das ferramentas do caminho sem
+root e de uma faixa de subuid para o usuário do serviço:
+
+```bash
+apt-get install -y --no-install-recommends bubblewrap fuse-overlayfs
+
+# unshare --map-auto não funciona sem faixa: falha na hora com
+# "no line matching user nutellaboot in /etc/subuid"
+usermod --add-subuids 100000-165535 --add-subgids 100000-165535 nutellaboot
+
+# confere as seis ferramentas sem tocar na fila
+sudo -u nutellaboot NB3_DATA_ROOT=/var/lib/nutellaboot3 \
+    /opt/nutellaboot3/tools/nb3-layer-worker --check
+```
+
+No Ubuntu 24.04 vale conferir também o `kernel.apparmor_restrict_unprivileged_userns`.
+Se estiver em `1` e a construção falhar ao criar o namespace, o perfil do
+AppArmor para o `unshare` e o `bwrap` é o que libera.
+
+Então instale a unit e suba:
+
+```bash
+install -m 0644 systemd/nutellaboot3-layer-worker.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now nutellaboot3-layer-worker
+systemctl status nutellaboot3-layer-worker
+```
+
+A fila é em disco e sobrevive a reinício, então um job que ficou esperando é
+pego assim que o worker sobe (ele varre a cada 5 s). O andamento de cada job
+continua no log do próprio job, na tela; o que o serviço tem a dizer sobre si
+mesmo vai para o journal:
+
+```bash
+journalctl -u nutellaboot3-layer-worker -f
+```
+
+**Um build por vez, e por isso um cuidado.** Se o worker for morto no meio de
+uma construção, o job fica em `data/layerbuilds/running/` e ninguém o recolhe:
+ao subir, o worker só olha `queue/`. O sintoma é um pedido eternamente em
+"construindo". Para devolvê-lo à fila, mova o `.json` de `running/` para
+`queue/` e reinicie o worker.
+
 ## 2. Criar imagens
 
 Uma **imagem** é um sistema que as máquinas de uma sala baixam ao ligar. Há

@@ -1,0 +1,62 @@
+[Unit]
+Description=NutellaBoot 3 — construtor de camadas extras (worker sem root)
+Documentation=https://github.com/bcribas/nutellaboot
+# O `apt-get` roda dentro do sandbox e a camada pronta sobe para o files.mdp
+# por rsync: sem rede, todo job falha na primeira linha.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=nutellaboot
+Group=nutellaboot
+WorkingDirectory=/opt/nutellaboot3
+
+Environment=NB3_DATA_ROOT=/var/lib/nutellaboot3
+# Mesmo motivo do nutellaboot3.service: com ProtectHome=yes, o ~/.ssh que
+# publica no files.mdp só é enxergado se o HOME for o diretório de dados.
+Environment=HOME=/var/lib/nutellaboot3
+# Entra na URL de reserva da camada quando a publicação falha (_url_local).
+Environment=NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br
+# O diretório de trabalho fica no volume de dados, que já é o único caminho de
+# escrita liberado abaixo. Em /tmp ou /run seria RAM, e o NutellaBoot 2 já
+# perdeu construção por manter o upper em memória.
+Environment=NB3_BUILD_DIR=/var/lib/nutellaboot3/build
+
+# O python do venv, não o do sistema. `publicar()` importa
+# server.app.services.publish para mandar a camada ao files.mdp, e num
+# interpretador sem as dependências esse import falha dentro de um
+# `except ImportError` — a camada fica pronta e simplesmente não é publicada,
+# sem erro nenhum no log.
+ExecStart=/opt/nutellaboot3/.venv/bin/python /opt/nutellaboot3/tools/nb3-layer-worker
+
+Restart=always
+RestartSec=5
+
+# Uma construção não pode disputar CPU e disco com o long-poll de 1600
+# máquinas. Ninguém espera camada em segundos: é trabalho de fundo por
+# natureza, e a fila é em disco.
+Nice=10
+IOSchedulingClass=idle
+
+# ATENÇÃO às três opções de isolamento que NÃO estão aqui, e por quê:
+#
+#   NoNewPrivileges=yes    quebra a montagem. O squashfuse e o fuse-overlayfs
+#                          montam através do fusermount3, que é setuid root;
+#                          com NoNewPrivileges o bit setuid é ignorado e a
+#                          montagem morre com "Operation not permitted".
+#   PrivateDevices=yes     esconde /dev/fuse, sem o qual não há montagem.
+#   RestrictSUIDSGID=yes   impede o apt de instalar, dentro da camada, pacote
+#                          que traga binário setuid.
+#
+# O isolamento de verdade aqui não vem do systemd: vem do namespace de usuário
+# sem privilégio em que o worker se re-executa (unshare --map-auto), que é o
+# ponto inteiro deste construtor.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/nutellaboot3
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target
