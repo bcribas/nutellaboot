@@ -441,6 +441,16 @@ O ambiente de teste tem um nginx externo que faz proxy de
   check faz um `unshare --user --map-auto --mount true` de verdade e traduz o
   stderr em providência. Pré-requisito novo de construção entra no check, não
   só na doc.
+- **GApplication cujo `activate` só dispara trabalho assíncrono encerra em
+  1 ms.** Sem janela e sem `hold()`, a contagem de uso é zero e `app.run()`
+  volta antes de o callback rodar. A tela de bloqueio (`maratona-wait`) montava
+  a janela no callback do curl do lockinfo: com `mac` vazio o caminho era
+  síncrono e funcionava por acaso; o `--mac` do agente novo virou o caminho
+  assíncrono e a tela morreu em toda máquina por uma semana, em silêncio,
+  porque o agente nasce com stderr em /dev/null. `app.hold()` antes do
+  assíncrono, `release()` no `finally`, e o que a tela imprime vai para o
+  journal (`logger -t nb3-lock`). Teste com gjs de verdade em
+  `tests/test_lock_screen.py`.
 
 ## Estilo
 

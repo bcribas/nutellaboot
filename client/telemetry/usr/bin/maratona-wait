@@ -140,7 +140,16 @@ function loadLockInfo(onDone) {
 const app = new Gtk.Application({ application_id: "br.com.naquadah.MaratonaLock" });
 
 app.connect("activate", () => {
+    // O lockinfo chega por um curl ASSÍNCRONO: o `activate` volta antes da
+    // resposta, sem janela nenhuma, e um GApplication sem janela e sem hold()
+    // encerra ali mesmo (contagem de uso zero), em 1 ms. Foi assim que a tela
+    // morreu em toda máquina a partir de setembro de 2026: até então o `mac`
+    // vinha vazio (pendrive sem BOOTIF), o loadLockInfo era síncrono, e a
+    // janela nascia dentro do activate por acaso. O hold segura o app até a
+    // janela existir.
+    app.hold();
     loadLockInfo((info) => {
+      try {
         const display = Gdk.Display.get_default();
         const nMonitors = display ? display.get_n_monitors() : 1;
 
@@ -220,6 +229,14 @@ app.connect("activate", () => {
                 return GLib.SOURCE_CONTINUE;
             });
         }
+      } catch (e) {
+        // sem o quit, uma exceção aqui deixaria um processo vivo e INVISÍVEL,
+        // que o pgrep do agente tomaria por tela aberta
+        logError(e, "maratona-lock: falha ao montar a tela");
+        app.quit();
+      } finally {
+        app.release();
+      }
     });
 });
 

@@ -148,7 +148,10 @@ ensure_locked() {
         NB_BOOT_KEY='$NB_BOOT_KEY' \
         /usr/bin/maratona-wait --image '$IMAGEROOT' --server '$NB_SERVER' \
         --theme '${NB_LOCK_THEME:-classico}' --lang '${NB_LANGUAGE:-pt}' \
-        --mac '$MAC' --fifo '$NB_UNLOCK_FIFO'" &
+        --mac '$MAC' --fifo '$NB_UNLOCK_FIFO'" 2>&1 | logger -t nb3-lock &
+    # o que a tela disser vai para o journal: o agente nasce com o stderr no
+    # /dev/null, e uma tela que morria em 1 s ficou uma semana sem explicação.
+    # A tag NÃO pode conter "maratona-wait": o pgrep -f casaria o logger.
     disown
 }
 
