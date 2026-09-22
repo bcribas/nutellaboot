@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -100,6 +101,16 @@ class SessionCookieMiddleware:
 
 @asynccontextmanager
 async def _vida(app: FastAPI):
+    # campo novo do esquema padrão vai para o schema.json de todo modelo aqui,
+    # no restart do deploy: fora do gate abaixo porque não é tarefa de fundo, e
+    # é idempotente (modelo completo não é regravado)
+    from .services import store
+
+    for modelo, campos in store.completar_esquemas().items():
+        logging.getLogger("uvicorn.error").info(
+            "formulario do modelo %s completado com o esquema padrao: %s", modelo, ", ".join(campos)
+        )
+
     # o gravador da série da frota vive no worker único (invariante 2): um
     # ponto por minuto para o histórico do dashboard. No lifespan e não no
     # import: os testes criam apps aos montes e não querem tarefa de fundo.

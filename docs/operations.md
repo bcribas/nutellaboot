@@ -1740,6 +1740,15 @@ curl -s https://nutellaboot.mdp.naquadah.com.br/api/v1/health
 O `stuff` é lido do disco a cada boot, então mudança em `client/stuff/` chega às
 máquinas sem reiniciar o serviço. Rota nova, sim, precisa de reinício.
 
+Campo novo no formulário padrão (`server/app/services/default_schema.py`) chega
+aos modelos que já existem no reinício: ao subir, o serviço grava o campo no
+`schema.json` de cada modelo que não o tem, com o padrão e o cadeado do esquema
+padrão, sem mexer no que o modelo já tinha. O journal diz quais:
+
+```bash
+journalctl -u nutellaboot3 --since -5min | grep "formulario do modelo"
+```
+
 O reinício leva uns 10 s: o long-poll das máquinas e o SSE dos painéis são
 conexões que nunca terminam sozinhas, e o uvicorn as corta depois do
 `--timeout-graceful-shutdown 10` da unidade. Máquinas e painéis reconectam

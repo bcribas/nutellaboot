@@ -441,11 +441,14 @@ O ambiente de teste tem um nginx externo que faz proxy de
   com aspa dentro de classe (`/[",]/`). Escreva `const f = () => …` e
   `{ acompanhar, ack }`, declare antes de usar, e monte a aspa com
   `String.fromCharCode(34)`.
-- **Quem valida chave de campo do formulário lê o schema por `_com_padroes`.**
-  Campo novo do esquema padrão não está no `schema.json` do modelo até alguém
-  gravar; o `GET /schema` já o mostra, e a tela devolve todos os campos no
-  "Salvar" dos cadeados. O `set_schema_locks` validava contra o arquivo cru e
-  recusou o "Salvar" de todo modelo no dia em que entrou o `MAXMONITORS`.
+- **O formulário do modelo se lê por `store.get_schema` (`_esquema`), nunca o
+  arquivo.** O `schema.json` cru não tem o campo acrescentado ao esquema padrão
+  depois da criação do modelo. Três leitores crus viraram três defeitos no dia
+  do `MAXMONITORS`: o "Salvar" dos cadeados recusou todo modelo (a tela devolve
+  os campos que o `GET /schema` mostrou), o `schema` de `GET /models/{nome}`
+  vinha sem o campo, e o modelo derivado nascia copiando a falta. Há teste que
+  conta os leitores. E o servidor grava os campos novos em todos os modelos ao
+  subir (`store.completar_esquemas`, no lifespan): o deploy de sempre propaga.
 - **`--check` que só confere `which` mente.** O worker de camadas dizia
   "pré-requisitos ok" numa máquina sem `uidmap` e com userns proibido pelo
   kernel; o job morreu com código 127 depois de baixar a base. A construção

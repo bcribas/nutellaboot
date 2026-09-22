@@ -91,18 +91,23 @@ def test_locks_preserva_o_resto_do_schema(client, base, ha):
         assert a.get("label") == d.get("label")
 
 
+def _modelo_antigo(data_root, nome="t"):
+    """schema.json de antes do MAXMONITORS, com um campo que é do modelo."""
+    antigo = build_default_schema()
+    antigo["fields"] = [f for f in antigo["fields"] if f["key"] != "MAXMONITORS"]
+    minram = next(f for f in antigo["fields"] if f["key"] == "MINRAM")
+    minram["default"], minram["locked"] = "8", True
+    fsdb.write_json(data_root / "models" / nome / "schema.json", antigo)
+    return data_root / "models" / nome / "schema.json"
+
+
 def test_salvar_travas_com_campo_novo_do_padrao(client, base, ha, data_root):
     """A tela do /admin/ manda o cadeado de TODOS os campos que o GET /schema
     devolveu, e o GET já inclui campo novo do esquema padrão que o arquivo do
     modelo ainda não tem. Validar contra o arquivo cru recusava o "Salvar"
     inteiro (400, "campos que não existem no modelo: MAXMONITORS") em todo
     modelo, no dia em que o campo entrou."""
-    arq = data_root / "models" / "t" / "schema.json"
-    antigo = build_default_schema()
-    antigo["fields"] = [f for f in antigo["fields"] if f["key"] != "MAXMONITORS"]
-    minram = next(f for f in antigo["fields"] if f["key"] == "MINRAM")
-    minram["default"], minram["locked"] = "8", True
-    fsdb.write_json(arq, antigo)
+    arq = _modelo_antigo(data_root)
 
     campos = client.get("/api/v1/models/t/schema", headers=ha).json()["fields"]
     estado = {f["key"]: f["locked"] for f in campos}
@@ -116,6 +121,77 @@ def test_salvar_travas_com_campo_novo_do_padrao(client, base, ha, data_root):
     assert gravado["MAXMONITORS"]["default"] == "1"
     # o que o modelo já tinha continua sendo dele
     assert gravado["MINRAM"]["default"] == "8" and gravado["MINRAM"]["locked"] is True
+
+
+def test_so_um_leitor_do_schema_json():
+    """O formulário do modelo se lê pelo `store._esquema`, que completa com o
+    esquema padrão. Cada leitor do arquivo cru foi um defeito: o "Salvar" dos
+    cadeados, o `schema` de GET /models/{nome} e o modelo derivado, que nascia
+    sem o campo novo."""
+    import re
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parents[1] / "server" / "app"
+    leituras, cruas = [], []
+    for arq in sorted(raiz.rglob("*.py")):
+        texto = arq.read_text()
+        rel = str(arq.relative_to(raiz))
+        leituras += [rel for _ in re.finditer(r"read_json\([^)]*schema\.json", texto, re.S)]
+        cruas += [rel for _ in re.finditer(r"_esquema_cru\(", texto)]
+    assert leituras == ["services/store.py"], leituras
+    # a definição, o `_esquema` e o `completar_esquemas`, que compara os dois
+    assert cruas == ["services/store.py"] * 3, cruas
+
+
+def test_o_modelo_devolve_o_esquema_completo(client, base, ha, data_root):
+    _modelo_antigo(data_root)
+    campos = {f["key"] for f in client.get("/api/v1/models/t", headers=ha).json()["schema"]["fields"]}
+    assert "MAXMONITORS" in campos
+
+
+def test_modelo_derivado_nasce_completo(client, base, ha, data_root):
+    _modelo_antigo(data_root)
+    r = client.post("/api/v1/models", json={"name": "derivado", "from": "t"}, headers=ha)
+    assert r.status_code == 201, r.text
+    gravado = {f["key"]: f for f in fsdb.read_json(data_root / "models" / "derivado" / "schema.json")["fields"]}
+    assert gravado["MAXMONITORS"]["default"] == "1" and gravado["MAXMONITORS"]["locked"] is True
+    assert gravado["MINRAM"]["default"] == "8" and gravado["MINRAM"]["locked"] is True
+
+
+def test_completar_esquemas_grava_so_o_que_falta(base, data_root):
+    """O restart do deploy grava o campo novo do esquema padrão em todo modelo:
+    só acrescenta, e o que já está completo não é regravado."""
+    arq = _modelo_antigo(data_root)
+    fsdb.write_json(data_root / "models" / "novo" / "model.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "novo" / "schema.json", build_default_schema())
+    completo = data_root / "models" / "novo" / "schema.json"
+    antes = completo.stat().st_mtime_ns
+
+    assert store.completar_esquemas() == {"t": ["MAXMONITORS"]}
+    gravado = {f["key"]: f for f in fsdb.read_json(arq)["fields"]}
+    assert gravado["MAXMONITORS"]["default"] == "1" and gravado["MAXMONITORS"]["locked"] is True
+    assert gravado["MINRAM"]["default"] == "8" and gravado["MINRAM"]["locked"] is True
+    assert completo.stat().st_mtime_ns == antes
+    # idempotente: a segunda passada não tem o que fazer
+    assert store.completar_esquemas() == {}
+
+
+def test_completar_esquemas_nao_apaga_arquivo_estragado(base, data_root):
+    arq = data_root / "models" / "t" / "schema.json"
+    arq.write_text("{ isto não é json")
+    assert "t" in store.completar_esquemas()
+    assert arq.read_text() == "{ isto não é json"
+
+
+def test_o_servidor_completa_os_modelos_ao_subir(base, data_root):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    arq = _modelo_antigo(data_root)
+    with TestClient(create_app()):
+        pass
+    assert "MAXMONITORS" in {f["key"] for f in fsdb.read_json(arq)["fields"]}
 
 
 def test_campo_inexistente_recusado(client, base, ha):

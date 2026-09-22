@@ -230,12 +230,7 @@ async def layers_catalog(p=Depends(auth.require_console)) -> dict:
 async def get_model_schema(name: str, p=Depends(auth.require_console)) -> dict:
     if not ownership.can_use_model(p, name):
         raise HTTPException(404, "modelo não existe")
-    from ..services.config import _com_padroes
-
-    # `_com_padroes` é o mesmo caminho que o `set_schema_field` usa para
-    # validar: traz do esquema padrão os metadados de formato que um
-    # `schema.json` gravado antes deles não tem.
-    schema = _com_padroes(store.get_schema(name))
+    schema = store.get_schema(name)
     return {
         "name": name,
         "fields": [

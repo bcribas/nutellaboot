@@ -17,7 +17,7 @@ import re
 import secrets
 
 from .. import fsdb
-from .store import config_values, get_site_image, model_dir, site_image_dir
+from .store import config_values, get_schema, get_site_image, site_image_dir
 
 
 class ConfigError(ValueError):
@@ -41,8 +41,7 @@ HERDADOS_DO_PADRAO = ("sep", "item_pattern", "item_reserved", "hash", "options")
 
 def schema_for(image_id: str) -> dict:
     info = get_site_image(image_id) or {}
-    schema = fsdb.read_json(model_dir(info.get("model", "")) / "schema.json", {"fields": []})
-    return _com_padroes(schema)
+    return get_schema(info.get("model", ""))
 
 
 def _com_padroes(schema: dict) -> dict:

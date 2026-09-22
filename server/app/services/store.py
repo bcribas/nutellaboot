@@ -89,12 +89,32 @@ def list_public_models() -> list[dict]:
     return out
 
 
+def _esquema_cru(d: Path) -> dict:
+    # o arquivo como está: só o `_esquema` e o `completar_esquemas` (que
+    # compara os dois) podem usar isto (há teste)
+    return fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []}
+
+
+def _esquema(d: Path) -> dict:
+    """O formulário do modelo como todo leitor tem de vê-lo: o arquivo mais os
+    campos novos do esquema padrão (`config._com_padroes`).
+
+    O arquivo cru não tem o campo acrescentado ao padrão depois da criação do
+    modelo: o "Salvar" dos cadeados validava contra ele e recusou todo modelo no
+    dia em que entrou o MAXMONITORS, e o modelo derivado nascia copiando a
+    falta.
+    """
+    from .config import _com_padroes
+
+    return _com_padroes(_esquema_cru(d))
+
+
 def get_model(name: str) -> dict | None:
     tpl = fsdb.read_json(model_dir(name) / "model.json")
     if tpl is None:
         return None
     tpl["name"] = name
-    tpl["schema"] = fsdb.read_json(model_dir(name) / "schema.json", {})
+    tpl["schema"] = _esquema(model_dir(name))
     return tpl
 
 
@@ -106,7 +126,40 @@ def set_model_layers(name: str, layers: list[dict]) -> None:
 
 
 def get_schema(name: str) -> dict:
-    return fsdb.read_json(model_dir(name) / "schema.json", {"fields": []}) or {"fields": []}
+    return _esquema(model_dir(name))
+
+
+def completar_esquemas() -> dict[str, list[str]]:
+    """Grava em cada modelo o que o `_esquema` acrescenta ao arquivo.
+
+    Roda quando o servidor sobe: o deploy é `git pull` + restart, e assim o
+    campo novo do esquema padrão chega ao `schema.json` de TODO modelo sem passo
+    à mão. Só acrescenta (o `_com_padroes` nunca sobrescreve o que o modelo
+    tem) e não regrava o que já está completo. Devolve {modelo: campos novos}.
+    """
+    base = settings.data_root / "models"
+    feitos: dict[str, list[str]] = {}
+    if not base.is_dir():
+        return feitos
+    for d in sorted(base.iterdir()):
+        if not (d / "model.json").is_file():
+            continue
+        try:
+            with fsdb.locked(d):
+                cru = _esquema_cru(d)
+                antes = {f.get("key") for f in cru.get("fields", [])}
+                completo = _esquema(d)
+                if completo == cru:
+                    continue
+                fsdb.write_json(d / "schema.json", completo)
+            feitos[d.name] = [
+                f["key"] for f in completo.get("fields", []) if f.get("key") not in antes
+            ]
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+            # um modelo com arquivo estragado não pode impedir o servidor de
+            # subir nem os outros de serem completados
+            feitos[d.name] = [f"erro: {e}"]
+    return feitos
 
 
 def set_schema_locks(name: str, locks: dict) -> dict:
@@ -118,13 +171,8 @@ def set_schema_locks(name: str, locks: dict) -> dict:
     """
     d = model_dir(name)
     with fsdb.locked(d):
-        from .config import _com_padroes
-
-        # pelo mesmo caminho do GET /schema: a tela manda TODOS os campos que
-        # leu de lá, e um campo novo do esquema padrão ainda não está no
-        # arquivo. Validar contra o arquivo cru recusava o "Salvar" de todo
-        # modelo no dia em que entrou o MAXMONITORS.
-        schema = _com_padroes(fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []})
+        # a tela manda o cadeado de TODOS os campos que o GET /schema mostrou
+        schema = _esquema(d)
         conhecidos = {f["key"] for f in schema.get("fields", [])}
         desconhecidos = set(locks) - conhecidos
         if desconhecidos:
@@ -143,12 +191,10 @@ def set_schema_field(name: str, key: str, patch: dict) -> dict:
     """
     d = model_dir(name)
     with fsdb.locked(d):
-        from .config import _com_padroes
-
         # com os metadados de formato do esquema padrão: o schema.json gravado
         # na criação do modelo não os tem, e sem eles a validação abaixo não
         # sabe o que exigir
-        schema = _com_padroes(fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []})
+        schema = _esquema(d)
         alvo = next((f for f in schema.get("fields", []) if f["key"] == key), None)
         if alvo is None:
             raise ImageError(f"campo '{key}' não existe neste modelo")
@@ -243,7 +289,9 @@ def create_model(
             raise ImageError(f"modelo de origem '{from_model}' não existe")
         base = fsdb.read_json(model_dir(from_model) / "model.json", {}) or {}
         layers = list(base.get("layers", []))
-        schema = fsdb.read_json(model_dir(from_model) / "schema.json", schema) or schema
+        # completo: copiar o arquivo cru fazia o derivado nascer sem os campos
+        # acrescentados ao padrão depois da origem
+        schema = _esquema(model_dir(from_model))
 
     d = model_dir(name)
     with fsdb.locked(d):
