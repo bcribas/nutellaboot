@@ -619,6 +619,7 @@ async function locksEditor(m) {
       padrao[f.key] = v;
     });
     ed.disabled = !m.can_manage;
+    if (!m.can_manage) ed.querySelectorAll("button, select").forEach((x) => (x.disabled = true));
     td1.appendChild(ed);
 
     const td2 = document.createElement("td");
@@ -751,18 +752,89 @@ function editorDePadrao(f, aoMudar) {
     s.onchange = () => aoMudar(s.value);
     return s;
   }
+  if (f.type === "list" && (f.options || []).length) {
+    // Lista com opções (INPUT_SOURCES): o mesmo controle do configureitor,
+    // ordenado, com ↑ × e +. Era uma caixa de texto partida na vírgula, e os
+    // valores TÊM vírgula dentro ("('xkb','br')"): "('xkb','latam'),('xkb','br')"
+    // virava "('xkb'", "'latam')"… e o servidor recusava, com razão.
+    return editorDeLista(f, aoMudar);
+  }
   const i = document.createElement("input");
   i.type = f.type === "int" ? "number" : "text";
   i.className = "mono";
   i.style.width = "18ch";
-  // lista vira texto separado por vírgula, que é o mesmo separador do stuff
-  i.value = Array.isArray(f.default) ? f.default.join(",") : (f.default ?? "");
+  // lista livre (sem opções) vira texto separado por vírgula ou espaço
+  i.value = Array.isArray(f.default) ? f.default.join(", ") : (f.default ?? "");
   i.oninput = () => {
-    if (f.type === "list") aoMudar(i.value ? i.value.split(",").map((s) => s.trim()) : []);
+    if (f.type === "list") aoMudar(i.value.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean));
     else if (f.type === "int") aoMudar(i.value === "" ? null : Number(i.value));
     else aoMudar(i.value);
   };
   return i;
+}
+
+function editorDeLista(f, aoMudar) {
+  const box = document.createElement("div");
+  box.className = "list-editor";
+  const opcoes = (f.options || []).map((o) => (typeof o === "string" ? { value: o, label: o } : o));
+  const atual = Array.isArray(f.default) ? [...f.default] : [];
+  const rotulo = (v) => {
+    const o = opcoes.find((x) => x.value === v);
+    return o ? tr_(o.label) || o.value : v;
+  };
+  const redraw = () => {
+    box.innerHTML = "";
+    atual.forEach((item, i) => {
+      const row = document.createElement("div");
+      row.className = "list-item";
+      const span = document.createElement("span");
+      span.className = "grow mono";
+      span.textContent = rotulo(item);
+      const up = document.createElement("button");
+      up.className = "small";
+      up.textContent = "↑";
+      up.disabled = i === 0;
+      up.onclick = () => {
+        [atual[i - 1], atual[i]] = [atual[i], atual[i - 1]];
+        aoMudar([...atual]);
+        redraw();
+      };
+      const rm = document.createElement("button");
+      rm.className = "small danger";
+      rm.textContent = "×";
+      rm.onclick = () => {
+        atual.splice(i, 1);
+        aoMudar([...atual]);
+        redraw();
+      };
+      row.append(span, up, rm);
+      box.appendChild(row);
+    });
+    const sobra = opcoes.filter((o) => !atual.includes(o.value));
+    if (!sobra.length) return;
+    const add = document.createElement("div");
+    add.className = "list-item";
+    const sel = document.createElement("select");
+    sel.className = "grow";
+    for (const o of sobra) {
+      const op = document.createElement("option");
+      op.value = o.value;
+      op.textContent = tr_(o.label) || o.value;
+      sel.appendChild(op);
+    }
+    const btn = document.createElement("button");
+    btn.className = "small";
+    btn.textContent = "+";
+    btn.onclick = () => {
+      atual.push(sel.value);
+      aoMudar([...atual]);
+      redraw();
+    };
+    add.append(sel, btn);
+    box.appendChild(add);
+  };
+  redraw();
+  return box;
 }
 
 // Papel de parede do MODELO: definido uma vez pela organização e herdado por

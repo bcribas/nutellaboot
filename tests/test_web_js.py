@@ -500,3 +500,16 @@ def test_texto_de_fora_nao_entra_cru_no_innerhtml():
                     linha = texto[: m.start()].count("\n") + 1
                     ruins.append(f"{arq.relative_to(WEB)}:{linha}: ${{{e.strip()[:60]}}}")
     assert ruins == [], "\n".join(ruins)
+
+
+def test_o_padrao_de_lista_com_opcoes_nao_e_partido_na_virgula():
+    """INPUT_SOURCES tem vírgula DENTRO de cada valor ("('xkb','br')"): partir
+    o texto na vírgula quebrava "('xkb','latam'),('xkb','br')" em quatro
+    pedaços e o servidor recusava ("item inválido"). Lista com opções usa o
+    controle ordenado, como no configureitor."""
+    texto = (REPO / "web" / "admin" / "app.js").read_text(encoding="utf-8")
+    assert 'i.value.split(",")' not in texto
+    inicio = texto.index("function editorDePadrao(")
+    fim = texto.index("function editorDeLista(")
+    assert "editorDeLista(f, aoMudar)" in texto[inicio:fim]
+    assert 'f.type === "list" && (f.options || []).length' in texto[inicio:fim]
