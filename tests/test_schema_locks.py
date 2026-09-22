@@ -183,15 +183,24 @@ def test_completar_esquemas_nao_apaga_arquivo_estragado(base, data_root):
     assert arq.read_text() == "{ isto não é json"
 
 
-def test_o_servidor_completa_os_modelos_ao_subir(base, data_root):
+def test_o_servidor_completa_os_modelos_ao_subir(base, data_root, caplog):
+    """E diz no journal quais: a produção roda com --log-level warning, e em
+    nível info a linha que a doc manda procurar não aparecia."""
+    import logging
+
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
 
     arq = _modelo_antigo(data_root)
-    with TestClient(create_app()):
+    with caplog.at_level(logging.WARNING, logger="uvicorn.error"), TestClient(create_app()):
         pass
     assert "MAXMONITORS" in {f["key"] for f in fsdb.read_json(arq)["fields"]}
+    assert any(
+        "formulario do modelo t" in r.getMessage() and "MAXMONITORS" in r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.WARNING
+    ), caplog.records
 
 
 def test_campo_inexistente_recusado(client, base, ha):

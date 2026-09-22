@@ -103,11 +103,12 @@ class SessionCookieMiddleware:
 async def _vida(app: FastAPI):
     # campo novo do esquema padrão vai para o schema.json de todo modelo aqui,
     # no restart do deploy: fora do gate abaixo porque não é tarefa de fundo, e
-    # é idempotente (modelo completo não é regravado)
+    # é idempotente (modelo completo não é regravado). Aviso e não info: a
+    # unidade roda com --log-level warning, e a doc manda procurar esta linha.
     from .services import store
 
     for modelo, campos in store.completar_esquemas().items():
-        logging.getLogger("uvicorn.error").info(
+        logging.getLogger("uvicorn.error").warning(
             "formulario do modelo %s completado com o esquema padrao: %s", modelo, ", ".join(campos)
         )
 
