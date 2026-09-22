@@ -409,6 +409,9 @@ def anexar_camada(image_id: str, saida: dict, job_id: str) -> None:
         "file": saida["file"],
         "cdn_url": saida.get("url") or _url_local(saida["file"]),
         "size": saida.get("size"),
+        # camada extra de sede é sempre "extra": sem papel ela é a órfã que o
+        # replace_role não reconhece (invariante 13)
+        "role": "extra",
         "from_build": job_id,
     }
     p = d / "layers-extra.json"

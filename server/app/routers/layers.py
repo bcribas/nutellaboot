@@ -257,7 +257,7 @@ async def attach(job_id: str, body: dict, p=Depends(auth.require_console)) -> di
         with fsdb.locked(d):
             extras = fsdb.read_json(d / "layers-extra.json", []) or []
             extras = [c for c in extras if c.get("file") != camada["file"]]
-            extras.insert(0, camada)
+            extras.insert(0, {**camada, "role": "extra"})
             fsdb.write_json(d / "layers-extra.json", extras)
         aplicadas.append(image_id)
     return {"ok": True, "layer": camada, "images": aplicadas}
@@ -289,7 +289,7 @@ async def add_layer(image: str, body: dict, p=Depends(auth.require_console)) -> 
     with fsdb.locked(d):
         extras = fsdb.read_json(d / "layers-extra.json", []) or []
         extras = [c for c in extras if c.get("file") != arquivo]
-        extras.insert(0, camada)
+        extras.insert(0, {**camada, "role": "extra"})
         fsdb.write_json(d / "layers-extra.json", extras)
     return {"ok": True, "layer": camada}
 

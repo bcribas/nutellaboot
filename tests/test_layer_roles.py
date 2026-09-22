@@ -258,3 +258,39 @@ def test_migracao_respeita_papel_ja_marcado(data_root):
     _migrar(data_root)
     camada = fsdb.read_json(data_root / "models" / "antigo" / "model.json")["layers"][0]
     assert camada["role"] == "wifi", "a ultima da lista viraria base pela deducao"
+
+
+def test_camada_extra_de_sede_nasce_com_papel(client, modelo, ha, data_root):
+    """Os três caminhos que gravam layers-extra.json de uma sede (registro
+    pela API, attach de um build, e o worker) pulavam o papel: a camada
+    ficava órfã para o replace_role e para a trava que conta bases."""
+    import json
+
+    from server.app import fsdb
+
+    r = client.post("/api/v1/site-images", json={"id": "sede1", "fullname": "S", "model": "temporada"}, headers=ha)
+    assert r.status_code == 201, r.text
+    client.post("/api/v1/site-images/sede1/layers", json={"file": "x.squash", "md5": "0" * 32}, headers=ha)
+    d = data_root / "site-images" / "sede1"
+    assert fsdb.read_json(d / "layers-extra.json")[0]["role"] == "extra"
+
+    # o attach de um build pronto
+    job = {"id": "abc123abc123", "name": "n", "state": "done",
+           "output": {"file": "y.squash", "md5": "1" * 32, "size": 1, "url": "https://x/y.squash"}}
+    fsdb.write_json(data_root / "layerbuilds" / "done" / "abc123abc123.json", job)
+    r = client.post("/api/v1/layerbuilds/abc123abc123/attach", json={"image_ids": ["sede1"]}, headers=ha)
+    assert r.status_code == 200, r.text
+    assert [c["role"] for c in fsdb.read_json(d / "layers-extra.json")] == ["extra", "extra"]
+
+    # o worker, direto no disco
+    import importlib.util
+    from pathlib import Path
+
+    worker = Path(__file__).resolve().parents[1] / "tools" / "nb3-layer-worker"
+    spec = importlib.util.spec_from_loader("w", loader=None)
+    mod = importlib.util.module_from_spec(spec)
+    mod.__file__ = str(worker)
+    exec(compile(worker.read_text(), str(worker), "exec"), mod.__dict__)
+    mod.DATA = data_root
+    mod.anexar_camada("sede1", {"file": "z.squash", "md5": "2" * 32, "size": 1, "url": "https://x/z"}, "j")
+    assert json.loads((d / "layers-extra.json").read_text())[0]["role"] == "extra"
