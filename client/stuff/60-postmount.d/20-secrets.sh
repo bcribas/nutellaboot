@@ -8,6 +8,7 @@ nb3_post_secrets() {
     # aspas simples precisa do escape do shell, não do que veio do servidor
     _nb3_theme=$(nb3_sh_escape "${LOCK_THEME:-classico}")
     _nb3_lang=$(nb3_sh_escape "${LANGUAGE:-pt}")
+    _nb3_monitores=$(nb3_sh_escape "${MAXMONITORS:-1}")
     cat > "${rootmnt?}/etc/.nb3" << EOF
 NB_SERVER='$NB_SERVER'
 IMAGEROOT='$IMAGEROOT'
@@ -16,6 +17,7 @@ NB_BOOT_KEY='${NB_BOOT_KEY:-}'
 NB_LOCK_THEME='$_nb3_theme'
 NB_LOCK_FALLBACK_HASH='${NB_LOCK_FALLBACK_HASH:-}'
 NB_LANGUAGE='$_nb3_lang'
+NB_MAX_MONITORS='$_nb3_monitores'
 EOF
     chmod 600 "${rootmnt?}/etc/.nb3"
     chmod go-rw "${rootmnt?}/root/"

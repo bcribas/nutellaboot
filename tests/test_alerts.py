@@ -368,3 +368,13 @@ def test_historico_da_sede_inteira(client, imagem, hm, ha):
     assert [(x["mac"][-1], x["event"]) for x in h] == [("1", "dismissed"), ("2", "raised"), ("1", "raised")]
     assert h[0]["dismissed_by"]
     assert client.get("/api/v1/site-images/sala1/alerts/history?n=1", headers=ha).json()["history"][0]["event"] == "dismissed"
+
+
+def test_mais_de_um_monitor_vira_alerta_e_nao_repete(client, imagem, hm, ha):
+    """O agente manda `display.multiple` pela mesma rota dos dispositivos USB."""
+    corpo = {"kind": "display.multiple", "vendor": "", "detail": "2 monitores: DP-1, HDMI-A-1"}
+    a = client.post(f"/api/v1/site-images/sala1/machines/{MAC}/events", json=corpo, headers=hm).json()
+    b = client.post(f"/api/v1/site-images/sala1/machines/{MAC}/events", json=corpo, headers=hm).json()
+    assert a["repeated"] is False and b["repeated"] is True and b["id"] == a["id"]
+    abertos = client.get("/api/v1/site-images/sala1/alerts", headers=ha).json()["alerts"]
+    assert [(x["kind"], x["detail"]) for x in abertos] == [("display.multiple", "2 monitores: DP-1, HDMI-A-1")]

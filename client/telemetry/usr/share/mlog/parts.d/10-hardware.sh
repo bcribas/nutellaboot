@@ -8,6 +8,7 @@ import json, os, socket, time
 DMI = os.environ.get("NB_DMI_DIR", "/sys/class/dmi/id")
 UPTIME = os.environ.get("NB_PROC_UPTIME", "/proc/uptime")
 MAC_ARQ = os.environ.get("NB_MAC_ARQ", "/etc/mac-icpc")
+DRM = os.environ.get("NB_SYSFS_DRM", "/sys/class/drm")
 
 def read(path, default=""):
     try:
@@ -42,6 +43,19 @@ hw = {
     "product_name": read(f"{DMI}/product_name").strip(),
     "product_vendor": read(f"{DMI}/sys_vendor").strip(),
 }
+# monitores acesos: conectados E com saída ativa (o eDP de um notebook com a
+# tampa fechada fica "connected" mas apagado; o Writeback é "unknown")
+if os.path.isdir(DRM):
+    saidas = sorted(
+        nome.split("-", 1)[1]
+        for nome in os.listdir(DRM)
+        if nome.startswith("card") and "-" in nome
+        and read(f"{DRM}/{nome}/status").strip() == "connected"
+        and read(f"{DRM}/{nome}/enabled").strip() == "enabled"
+    )
+    hw["monitors"] = len(saidas)
+    if saidas:
+        hw["monitor_outputs"] = saidas
 if uptime is not None:
     hw["uptime_s"] = uptime
     hw["last_boot"] = int(time.time()) - uptime

@@ -471,7 +471,7 @@ O MAC é aceito com `:` ou `-` e normalizado para minúsculas com hífen.
 
 O agente novo manda, além do que sempre mandou, `t_agent` (relógio da
 máquina) no topo, `hwinfo.{mac, hostname, dmi_uuid, product_name,
-product_vendor, uptime_s, last_boot}`, `sysresources.{psi_mem, psi_cpu,
+product_vendor, uptime_s, last_boot, monitors, monitor_outputs}`, `sysresources.{psi_mem, psi_cpu,
 psi_io, oom_kills, idle_s}` e `operations.editors_time_since`. Tudo
 opcional: máquina com agente antigo continua válida.
 
@@ -559,7 +559,9 @@ eram gravadas e não podiam ser lidas por rota nenhuma.
 | GET | `/api/v1/site-images/{img}/machines/{mac}/alerts/history` | C, I, S`machines:read` | — | `{history:[…]}` datado |
 
 `kind` conhecido: `usb.storage` (pendrive, HD externo), `usb.phone` (MTP/PTP),
-`usb.network` (tethering) e `usb.other`. Um `kind` desconhecido **é aceito** —
+`usb.network` (tethering), `usb.other` e `display.multiple` (mais monitores
+acesos que o campo "Monitores permitidos", `MAXMONITORS`; o `detail` diz
+quantos e em quais saídas, como `2 monitores: DP-1, HDMI-A-1`). Um `kind` desconhecido **é aceito** —
 o cliente pode ganhar um detector novo sem esperar o servidor.
 
 **O alerta fica até alguém dispensar.** Não some quando o dispositivo é

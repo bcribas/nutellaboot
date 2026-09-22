@@ -682,5 +682,6 @@
   "webhook_deliveries": "Entregas que fallaron",
   "webhook_deliveries_none": "Ninguna entrega falló.",
   "select_all_events": "todos",
-  "select_no_events": "ninguno"
+  "select_no_events": "ninguno",
+  "display_multiple": "MÁS DE UN MONITOR"
 }

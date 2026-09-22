@@ -149,7 +149,12 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
     label `NB3CFG` da partição ainda não estava no udev durante o boot — o
     pendrive de boot alarmava a cada ligada, e a faixa virou ruído na
     Maratona 2026), e alerta igual ainda aberto não repete (`repeated`).
-    Está em `services/alerts.py`, com teste.
+    Está em `services/alerts.py`, com teste. **Exceção declarada:
+    `display.multiple`** (mais monitores acesos que `MAXMONITORS`) alarma
+    também no boot — a regra do boot existe por causa do pendrive de boot, e
+    um segundo monitor já ligado é justamente o caso. Conta só saída
+    `connected` + `enabled` (o eDP de notebook com a tampa fechada não) e
+    exige duas leituras seguidas (`monitores_tick` no agente).
 
 18. **O código de convite nunca sai para quem não é o console dono.** Ele é a
     credencial do console de sub-admin, e o `owner` gravado no `image.json` (e

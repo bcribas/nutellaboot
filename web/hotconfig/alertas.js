@@ -11,6 +11,7 @@ export const KIND_LABEL = {
   "usb.network": "usb_network",
   "usb.other": "usb_other",
   "media.cd": "media_cd",
+  "display.multiple": "display_multiple",
 };
 const EVENT_LABEL = { raised: "alert_ev_raised", dismissed: "alert_ev_dismissed" };
 

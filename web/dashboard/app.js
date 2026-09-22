@@ -121,6 +121,7 @@ const KIND_LABEL = {
   "usb.network": "usb_network",
   "usb.other": "usb_other",
   "media.cd": "media_cd",
+  "display.multiple": "display_multiple",
 };
 
 function hora(ts) {

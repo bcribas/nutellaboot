@@ -33,6 +33,10 @@ TIPOS = (
     # disco inserido num drive óptico — que costuma ser interno, e por isso
     # não é `usb.*`. Ter o leitor não alarma; pôr um disco nele, sim.
     "media.cd",
+    # mais monitores acesos que o permitido (campo MAXMONITORS). Exceção à
+    # regra de mudança de estado: vale também para o que já estava ligado no
+    # boot, porque um segundo monitor já ligado é justamente o caso
+    "display.multiple",
     # o servidor mesmo: duas máquinas da sede reportaram o mesmo machine-id
     # (home clonada, imagem de disco) — confunde tudo que usa o id como chave
     "identity.duplicate",

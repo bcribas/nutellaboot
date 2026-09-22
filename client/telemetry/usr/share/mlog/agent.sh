@@ -382,7 +382,7 @@ send_usb_event() {
         esac
     done < "$arq"
     [ -n "$kind" ] || return 0
-    log "dispositivo USB detectado: $kind $vendor $detail"
+    log "dispositivo detectado: $kind $vendor $detail"
     curl_api "machines/$MAC/events" 15 \
         -X POST -H 'Content-Type: application/json' \
         --data "$(nb3-json --escape kind "$kind" vendor "$vendor" detail "$detail")" \
@@ -416,6 +416,70 @@ usb_loop() {
     done
 }
 
+# --- monitores ---------------------------------------------------------------
+#
+# Na prova, normalmente um monitor só (campo "Monitores permitidos",
+# NB_MAX_MONITORS no /etc/.nb3; 0 = sem limite). Acima disso vira alerta pela
+# mesma fila dos dispositivos USB. Diferente do pendrive, vale também o que já
+# estava ligado no boot: a exceção do boot existe por causa do pendrive de boot
+# espetado, e um segundo monitor já ligado é justamente o que se quer pegar.
+NB3_SYSFS_DRM=${NB3_SYSFS_DRM:-/sys/class/drm}
+MONITORES_ARQ="$STATE_DIR/monitores"
+
+# Os monitores ACESOS: conectados E com saída ativa. Só `status` daria dois
+# falsos alarmes: notebook com a tampa fechada num monitor externo (o eDP
+# continua "connected", apagado) e o conector Writeback ("unknown"). Ler o
+# `status` no sysfs devolve o estado em cache, não sonda a porta.
+monitores_ativos() {
+    for _c in "$NB3_SYSFS_DRM"/card*-*; do
+        [ "$(cat "$_c/status" 2> /dev/null)" = connected ] || continue
+        [ "$(cat "$_c/enabled" 2> /dev/null)" = enabled ] || continue
+        _n=${_c##*/}
+        printf '%s\n' "${_n#card*-}"
+    done
+}
+
+# Uma passada (separada do laço para ser testável). Duas passadas seguidas
+# acima do limite antes de avisar: na subida da sessão, e no notebook que
+# acabou de ser acoplado, os dois painéis ficam acesos por um instante.
+monitores_tick() {
+    _lim=${NB_MAX_MONITORS:-1}
+    case "$_lim" in '' | *[!0-9]*) _lim=1 ;; esac
+    [ "$_lim" -eq 0 ] && return 0
+    _lista=$(monitores_ativos)
+    _qtd=$(printf '%s' "$_lista" | grep -c .)
+    _acima=$(sed -n 's/^acima=//p' "$MONITORES_ARQ" 2> /dev/null | sed -n 1p)
+    _avisado=$(sed -n 's/^avisado=//p' "$MONITORES_ARQ" 2> /dev/null | sed -n 1p)
+    if [ "$_qtd" -gt "$_lim" ]; then
+        _acima=$((${_acima:-0} + 1))
+        if [ "$_acima" -ge 2 ] && [ "${_avisado:-0}" != 1 ]; then
+            mkdir -p "$USB_FILA"
+            _arq="$USB_FILA/$(date +%s)-monitores-$RANDOM"
+            {
+                echo "kind=display.multiple"
+                echo "vendor="
+                echo "detail=$_qtd monitores: $(printf '%s' "$_lista" | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+            } > "$_arq.tmp" && mv "$_arq.tmp" "$_arq"
+            log "mais monitores que o permitido ($_qtd > $_lim): $(printf '%s' "$_lista" | tr '\n' ' ')"
+            _avisado=1
+        fi
+    else
+        _acima=0
+        _avisado=0
+    fi
+    printf 'acima=%s\navisado=%s\n' "$_acima" "${_avisado:-0}" > "$MONITORES_ARQ"
+}
+
+monitores_loop() {
+    # começa depois do descarte da fila no boot (usb_loop), e o debounce de
+    # duas passadas garante que nenhum aviso chega antes dele
+    rm -f "$MONITORES_ARQ"
+    while :; do
+        sleep 5
+        monitores_tick
+    done
+}
+
 > "$STATE_DIR/mac" printf '%s\n' "$MAC"
 
 # Sem MAC válido não há o que reportar: o servidor recusa tudo com 400 e a
@@ -435,6 +499,7 @@ setup_unlock_fifo && unlock_listener &
 telemetry_loop &
 logs_loop &
 usb_loop &
+monitores_loop &
 editors_loop &
 lock_watchdog &
 commands_loop

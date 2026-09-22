@@ -242,6 +242,25 @@ def build_default_schema() -> dict:
                 ),
             },
             {
+                "key": "MAXMONITORS",
+                # sem tipo numérico no schema: select, como SEEDMAX e MINRAM.
+                # "0" é sem limite (nenhum alerta de monitor)
+                "type": "select",
+                "default": "1",
+                "options": [{"value": str(n), "label": str(n)} for n in (1, 2, 3, 4)]
+                + [{"value": "0", "label": _t("sem limite", "no limit", "sin límite")}],
+                "locked": True,
+                "label": _t("Monitores permitidos", "Allowed monitors", "Monitores permitidos"),
+                "help": _t(
+                    "Com mais monitores acesos que isto, a máquina gera um alerta para o fiscal "
+                    "(no boot e ao conectar). Não bloqueia nada.",
+                    "With more active monitors than this, the machine raises an alert for the "
+                    "proctor (at boot and on connect). It blocks nothing.",
+                    "Con más monitores encendidos que esto, la máquina genera una alerta para el "
+                    "fiscal (al arrancar y al conectar). No bloquea nada.",
+                ),
+            },
+            {
                 "key": "LOCK_THEME",
                 "type": "select",
                 "default": "classico",

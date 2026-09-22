@@ -275,6 +275,9 @@ def test_campo_novo_do_esquema_padrao_chega_a_modelo_antigo(data_root):
 
     campos = {f["key"]: f for f in cfg.schema_for("sala9").get("fields", [])}
     assert "ROOT_PASSWORD" in campos, "campo novo não chegou ao modelo antigo"
+    # e o limite de monitores (alerta display.multiple), trancado, padrão 1
+    assert campos["MAXMONITORS"]["default"] == "1" and campos["MAXMONITORS"]["locked"] is True
+    assert {o["value"] for o in campos["MAXMONITORS"]["options"]} == {"0", "1", "2", "3", "4"}
     assert campos["ROOT_PASSWORD"]["hash"] == "crypt"
     # e o que o modelo já tinha continua sendo dele
     assert campos["TIMEZONE"]["default"] == "America/Bahia"

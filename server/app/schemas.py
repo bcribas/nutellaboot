@@ -51,6 +51,8 @@ class HwInfo(Aberto):
     product_name: str | None = None
     uptime_s: int | None = None
     last_boot: int | None = None
+    monitors: int | None = Field(None, description="monitores acesos (conectados e com saída ativa)")
+    monitor_outputs: list[str] | None = Field(None, description="os conectores deles: DP-1, HDMI-A-1…")
 
 
 class Operations(Aberto):
@@ -82,7 +84,7 @@ class MachineStatus(Aberto):
 
 class Alert(Aberto):
     id: str | None = None
-    kind: str | None = Field(None, description="usb.storage, usb.phone, …, identity.duplicate")
+    kind: str | None = Field(None, description="usb.storage, usb.phone, …, display.multiple, identity.duplicate")
     detail: str | None = None
     vendor: str | None = None
     other_mac: str | None = Field(None, description="só em identity.duplicate")

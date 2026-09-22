@@ -19,7 +19,7 @@ except OSError:
     versao = ""
 
 # o que as outras partes deste mesmo pacote emitem
-capacidades = ["psi", "oom", "idle", "skew", "editors_since"]
+capacidades = ["psi", "oom", "idle", "skew", "editors_since", "monitors"]
 # o MAC no User-Agent não é do agente: quem o põe é o stuff do boot, que também
 # grava /etc/mac-icpc. Com o arquivo, o UA desta máquina tem o MAC no fim.
 try:

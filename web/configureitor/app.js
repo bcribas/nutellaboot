@@ -71,7 +71,8 @@ function renderSelect(field, locked) {
   for (const opt of field.options || []) {
     const o = document.createElement("option");
     o.value = opt.value;
-    o.textContent = opt.label;
+    // o rótulo da opção pode ser {pt,en,es} ("sem limite"): cru, sairia [object Object]
+    o.textContent = tr(opt.label) || opt.value;
     o.selected = String(values[field.key]) === String(opt.value);
     sel.appendChild(o);
   }

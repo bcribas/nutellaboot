@@ -682,5 +682,6 @@
   "webhook_deliveries": "Failed deliveries",
   "webhook_deliveries_none": "No delivery failed.",
   "select_all_events": "all",
-  "select_no_events": "none"
+  "select_no_events": "none",
+  "display_multiple": "MORE THAN ONE MONITOR"
 }

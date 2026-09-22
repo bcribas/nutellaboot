@@ -348,7 +348,7 @@ def test_o_agente_diz_a_versao_e_o_que_sabe_medir(tmp_path):
     mac.write_text("52-54-00-12-34-56\n")
     d = _parte("00-agente.sh", tmp_path, NB_AGENTE_DIR=PARTS.parent, NB_MAC_ARQ=mac)
     assert d["agent_version"] == (PARTS.parent / "VERSION").read_text().strip() != ""
-    assert d["capabilities"] == ["psi", "oom", "idle", "skew", "editors_since", "ua_mac"]
+    assert d["capabilities"] == ["psi", "oom", "idle", "skew", "editors_since", "monitors", "ua_mac"]
 
     sem = _parte("00-agente.sh", tmp_path, NB_AGENTE_DIR=PARTS.parent, NB_MAC_ARQ=tmp_path / "nao")
     assert "ua_mac" not in sem["capabilities"]
@@ -365,6 +365,7 @@ def test_cada_capacidade_anunciada_tem_quem_a_produza():
         "idle": ("20-recursos.sh", "idle_s"),
         "skew": ("05-relogio.sh", "t_agent"),
         "editors_since": ("30-operacoes.sh", "editors_time_since"),
+        "monitors": ("10-hardware.sh", '"monitors"'),
     }
     anunciadas = (PARTS / "00-agente.sh").read_text(encoding="utf-8")
     for cap, (arquivo, literal) in produtor.items():
@@ -380,3 +381,28 @@ def test_o_servidor_devolve_a_versao_do_agente(client, image_testes3):
                 json={"agent_version": "2026.09.2", "capabilities": ["psi", "oom"], "t_agent": 1}, headers=hm)
     st = client.get(base, headers=hi).json()["machines"][0]["status"]
     assert st["agent_version"] == "2026.09.2" and st["capabilities"] == ["psi", "oom"]
+
+
+def _drm(tmp_path, conectores):
+    drm = tmp_path / "drm"
+    for nome, status, enabled in conectores:
+        d = drm / nome
+        d.mkdir(parents=True)
+        (d / "status").write_text(status + "\n")
+        (d / "enabled").write_text(enabled + "\n")
+    (drm / "card1").mkdir(parents=True, exist_ok=True)  # o nó da placa não é conector
+    return drm
+
+
+def test_o_hardware_conta_os_monitores_acesos(tmp_path):
+    drm = _drm(tmp_path, [
+        ("card1-DP-1", "connected", "enabled"),
+        ("card1-HDMI-A-1", "connected", "enabled"),
+        ("card1-eDP-1", "connected", "disabled"),     # notebook com a tampa fechada
+        ("card1-Writeback-1", "unknown", "disabled"),
+        ("card1-DP-2", "disconnected", "disabled"),
+    ])
+    hw = _parte("10-hardware.sh", tmp_path, NB_SYSFS_DRM=drm)["hwinfo"]
+    assert hw["monitors"] == 2 and hw["monitor_outputs"] == ["DP-1", "HDMI-A-1"]
+    sem = _parte("10-hardware.sh", tmp_path, NB_SYSFS_DRM=tmp_path / "nao")["hwinfo"]
+    assert "monitors" not in sem and "monitor_outputs" not in sem

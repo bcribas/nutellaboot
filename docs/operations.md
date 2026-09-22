@@ -1037,6 +1037,7 @@ O que é detectado, e como:
 | Pendrive, HD externo, leitor de cartão | dispositivo de bloco no barramento USB |
 | Celular em modo de transferência (MTP/PTP) | propriedade `ID_MTP_DEVICE` ou interface de câmera |
 | Tethering pelo celular (RNDIS/CDC/NCM) | interface de rede que aparece no barramento USB |
+| Mais monitores que o permitido | o agente conta, a cada 5 s, as saídas de vídeo conectadas **e acesas** |
 
 O alerta é de **mudança de estado**: alguém espetou algo com a máquina já
 de pé. O que já estava conectado quando ela ligou — o pendrive de boot (label
@@ -1047,7 +1048,18 @@ dispensar a primeira. Na Maratona 2026 toda máquina que ficava com o
 pendrive de boot espetado aparecia na faixa a cada boot, e a faixa virou
 ruído — era uma corrida entre a regra de udev e a label da partição.
 
-A detecção é feita por regra de `udev`, não por varredura: o ciclo de
+**Monitores** são a exceção declarada a essa regra. Na prova normalmente só
+um monitor é permitido, e o campo **Monitores permitidos** (padrão 1,
+trancado pela organização; *sem limite* desliga o alerta) define o teto. A
+máquina que passa dele gera o alerta **também se já ligou assim**: a exceção
+do boot existe por causa do pendrive de boot espetado, e um segundo monitor
+já ligado é justamente o que se quer ver. Contam só as saídas acesas: o painel
+de um notebook com a tampa fechada, ligado num monitor externo, não conta. O
+agente espera duas leituras seguidas (uns 10 s) antes de avisar, para não
+alarmar no instante em que a sessão sobe. O alerta não bloqueia nada: é aviso
+ao fiscal. A contagem também sai na telemetria (`hwinfo.monitors`).
+
+A detecção de USB é feita por regra de `udev`, não por varredura: o ciclo de
 telemetria é de ~50 segundos e um pendrive espetado por dez segundos passaria
 batido.
 

@@ -678,3 +678,21 @@ def test_sem_placa_nenhuma_avisa_e_deixa_o_systemd_gerar(imagem, raiz, tmp_path)
     assert (raiz / "etc/mac-icpc").read_text().strip() == ""
     assert (raiz / "home/.machine-id").read_text() == ""
     assert "no stable MAC" in r.stdout + r.stderr
+
+
+def _nb3_le(raiz, var):
+    r = subprocess.run(["sh", "-c", f'. "{raiz}/etc/.nb3"; printf %s "${var}"'],
+                       capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"})
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def test_o_limite_de_monitores_chega_ao_agente(imagem, raiz):
+    """Campo "Monitores permitidos" → stuff (MAXMONITORS) → /etc/.nb3
+    (NB_MAX_MONITORS), que o agente lê para o alerta display.multiple."""
+    assert "MAXMONITORS='1'" in stuffgen.render(imagem), "o padrão é um monitor"
+    assert roda_consumidor(imagem, "nb3_post_secrets", raiz).returncode == 0
+    assert _nb3_le(raiz, "NB_MAX_MONITORS") == "1"
+    config.write_values(imagem, {"MAXMONITORS": "2"}, is_admin=True)
+    assert roda_consumidor(imagem, "nb3_post_secrets", raiz).returncode == 0
+    assert _nb3_le(raiz, "NB_MAX_MONITORS") == "2"
