@@ -21,12 +21,15 @@ sem_squashfs = pytest.mark.skipif(
 )
 
 
-def rodar(*args: str, esperar_ok: bool = True) -> subprocess.CompletedProcess:
+def rodar(*args: str, esperar_ok: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
+    import os
+
     r = subprocess.run(
         ["python3", str(FERRAMENTA), *args],
         capture_output=True,
         text=True,
         timeout=180,
+        env={**os.environ, **(env or {})},
     )
     if esperar_ok:
         assert r.returncode == 0, r.stderr or r.stdout
@@ -140,6 +143,30 @@ def test_nome_muda_quando_o_conteudo_muda(tmp_path, monkeypatch):
     assert primeiro in nomes
 
 
+@sem_squashfs
+def test_o_nome_leva_a_hora_de_brasilia(tmp_path):
+    """Duas camadas do mesmo dia (uma por modelo) só se distinguiam pelo hash.
+    A hora vai no nome, no fuso de quem escolhe no /admin/, e não no do
+    servidor: a produção roda em UTC."""
+    import re
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    fuso = ZoneInfo("America/Sao_Paulo")
+    antes = datetime.now(fuso)
+    rodar("--out", str(tmp_path), env={"TZ": "UTC"})
+    depois = datetime.now(fuso)
+    nome = next(tmp_path.glob("telemetria-*.squash")).name
+    m = re.fullmatch(r"telemetria-(\d{4}-\d{2}-\d{2}-\d{4})-[0-9a-f]{6}\.squash", nome)
+    assert m, nome
+    validos = set()
+    t = antes.replace(second=0, microsecond=0)
+    while t <= depois:
+        validos.add(t.strftime("%Y-%m-%d-%H%M"))
+        t += timedelta(minutes=1)
+    assert m.group(1) in validos, (nome, validos)
+
+
 def test_recusa_arvore_incompleta(tmp_path, monkeypatch):
     """Sem o agente a camada não serve para nada, e o erro tem que aparecer
     aqui e não no boot de 40 máquinas."""
@@ -173,6 +200,82 @@ def test_a_troca_da_telemetria_casa_por_papel():
     texto = FERRAMENTA.read_text()
     assert '"replace_role"' in texto
     assert '"telemetry"' in texto
+
+
+def _modelo(data_root, nome: str, dono: str, camadas: list[dict]) -> None:
+    from server.app import fsdb
+    from server.app.services.default_schema import build_default_schema
+
+    fsdb.write_json(data_root / "models" / nome / "schema.json", build_default_schema())
+    fsdb.write_json(
+        data_root / "models" / nome / "model.json",
+        {"name": nome, "owner": dono, "layers": camadas},
+    )
+
+
+def _camadas(data_root, nome: str) -> list[dict]:
+    from server.app import fsdb
+
+    return fsdb.read_json(data_root / "models" / nome / "model.json")["layers"]
+
+
+@sem_squashfs
+def test_all_models_troca_todos_com_uma_camada_so(servidor, data_root):
+    """Um squash por --model era o mesmo conteúdo com md5 diferente (duas
+    "telemetria" do mesmo dia no catálogo), e modelo não citado ficava para
+    trás: o do sub-admin do Chile, copiado do modelo da temporada, continuou
+    com a tela de bloqueio quebrada depois do conserto. --all-models gera UMA
+    camada e a põe em todo modelo que já tem telemetria."""
+    base, chave = servidor
+    velha = {"file": "telemetria-2026-09-21-a5ee80.squash", "md5": "a" * 32, "role": "telemetry"}
+    raiz = {"file": "maratonalinux2026.squash", "md5": "c" * 32, "role": "base"}
+    _modelo(data_root, "temporada", "admin", [dict(velha), dict(raiz)])
+    _modelo(data_root, "do-chile", "invite:NB3-AAAA-BBBB-CCCC", [dict(velha), dict(raiz)])
+    _modelo(data_root, "so-base", "admin", [dict(raiz)])
+
+    r = rodar(
+        "--all-models", "--out", str(data_root / "blobs"),
+        env={"NB3_BASE_URL": base, "NB3_ADMIN_KEY": chave},
+    )
+    novas = [p.name for p in (data_root / "blobs").glob("telemetria-*.squash")]
+    assert len(novas) == 1, novas
+    for nome in ("temporada", "do-chile"):
+        camadas = _camadas(data_root, nome)
+        assert camadas[0]["file"] == novas[0] and camadas[0]["role"] == "telemetry", camadas
+        assert [c["role"] for c in camadas].count("telemetry") == 1, camadas
+        assert camadas[-1]["file"] == raiz["file"]
+    assert _camadas(data_root, "so-base") == [raiz]
+    assert "so-base" in r.stdout
+
+
+@sem_squashfs
+def test_model_repetido_tambem_gera_uma_camada_so(servidor, data_root):
+    base, chave = servidor
+    raiz = {"file": "maratonalinux2026.squash", "md5": "c" * 32, "role": "base"}
+    _modelo(data_root, "a", "admin", [dict(raiz)])
+    _modelo(data_root, "b", "admin", [dict(raiz)])
+    rodar(
+        "--model", "a", "--model", "b", "--model", "a", "--out", str(data_root / "blobs"),
+        env={"NB3_BASE_URL": base, "NB3_ADMIN_KEY": chave},
+    )
+    novas = [p.name for p in (data_root / "blobs").glob("telemetria-*.squash")]
+    assert len(novas) == 1, novas
+    assert _camadas(data_root, "a")[0]["file"] == _camadas(data_root, "b")[0]["file"] == novas[0]
+    assert [c["file"] for c in _camadas(data_root, "a")].count(novas[0]) == 1
+
+
+@sem_squashfs
+def test_dry_run_com_all_models_so_lista(servidor, data_root):
+    base, chave = servidor
+    velha = {"file": "telemetria-2026-09-21-a5ee80.squash", "md5": "a" * 32, "role": "telemetry"}
+    _modelo(data_root, "temporada", "admin", [dict(velha)])
+    r = rodar(
+        "--dry-run", "--all-models", "--out", str(data_root / "blobs"),
+        env={"NB3_BASE_URL": base, "NB3_ADMIN_KEY": chave},
+    )
+    assert "iria para: temporada" in r.stdout
+    assert not list((data_root / "blobs").glob("telemetria-*.squash"))
+    assert _camadas(data_root, "temporada") == [velha]
 
 
 def test_a_parte_de_disco_emite_json_valido(tmp_path):

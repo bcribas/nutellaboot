@@ -91,6 +91,33 @@ def test_locks_preserva_o_resto_do_schema(client, base, ha):
         assert a.get("label") == d.get("label")
 
 
+def test_salvar_travas_com_campo_novo_do_padrao(client, base, ha, data_root):
+    """A tela do /admin/ manda o cadeado de TODOS os campos que o GET /schema
+    devolveu, e o GET já inclui campo novo do esquema padrão que o arquivo do
+    modelo ainda não tem. Validar contra o arquivo cru recusava o "Salvar"
+    inteiro (400, "campos que não existem no modelo: MAXMONITORS") em todo
+    modelo, no dia em que o campo entrou."""
+    arq = data_root / "models" / "t" / "schema.json"
+    antigo = build_default_schema()
+    antigo["fields"] = [f for f in antigo["fields"] if f["key"] != "MAXMONITORS"]
+    minram = next(f for f in antigo["fields"] if f["key"] == "MINRAM")
+    minram["default"], minram["locked"] = "8", True
+    fsdb.write_json(arq, antigo)
+
+    campos = client.get("/api/v1/models/t/schema", headers=ha).json()["fields"]
+    estado = {f["key"]: f["locked"] for f in campos}
+    assert "MAXMONITORS" in estado
+    estado["MAXMONITORS"] = False
+    r = client.put("/api/v1/models/t/schema/locks", json={"locks": estado}, headers=ha)
+    assert r.status_code == 200, r.text
+
+    gravado = {f["key"]: f for f in fsdb.read_json(arq)["fields"]}
+    assert gravado["MAXMONITORS"]["locked"] is False
+    assert gravado["MAXMONITORS"]["default"] == "1"
+    # o que o modelo já tinha continua sendo dele
+    assert gravado["MINRAM"]["default"] == "8" and gravado["MINRAM"]["locked"] is True
+
+
 def test_campo_inexistente_recusado(client, base, ha):
     r = client.put(
         "/api/v1/models/t/schema/locks", json={"locks": {"NAO_EXISTE": True}}, headers=ha

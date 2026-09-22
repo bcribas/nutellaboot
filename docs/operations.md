@@ -26,7 +26,7 @@ camada base .squash  em data/blobs/  e no servidor de arquivos
    ▼
 MODELO da temporada  (base nova + telemetria, wifi e extras herdados)
    │
-   │  1.3  nb3-camada-telemetria --model <ano> --publish    (se o agente mudou)
+   │  1.3  nb3-camada-telemetria --all-models --publish     (se o agente mudou)
    │  2.   criar a site-image de cada sede a partir do modelo
    ▼
 SITE-IMAGE  →  GET /boot/v3/<sede>/manifest  →  a máquina baixa e monta
@@ -142,15 +142,25 @@ transforma em camada, publica e registra no modelo:
 export NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br
 export NB3_ADMIN_KEY=nb3a_...
 
-tools/nb3-camada-telemetria --dry-run                       # ver antes
-tools/nb3-camada-telemetria --model maratona2026 --publish
+tools/nb3-camada-telemetria --dry-run --all-models          # ver antes
+tools/nb3-camada-telemetria --all-models --publish
 ```
 
 Na produção, rode como o usuário `nutellaboot` com
 `NB3_DATA_ROOT=/var/lib/nutellaboot3`: o blob vai para `blobs/` do diretório
-de dados e o envio ao servidor de arquivos usa a chave ssh dele. É um
-`--model` por modelo em uso com camada `telemetry` (`GET /api/v1/models`
-lista; `replace_role` tira a anterior de cada um).
+de dados e o envio ao servidor de arquivos usa a chave ssh dele.
+
+`--all-models` gera UMA camada e a registra em todo modelo que já tem uma
+camada `telemetry`, **inclusive os dos sub-admins** (`replace_role` tira a
+anterior de cada um). O sub-admin cria o modelo dele copiando o da temporada, e
+a cópia leva a telemetria daquele dia: sem `--all-models`, o modelo dele fica
+no agente velho. Foi assim que o conserto da tela de bloqueio não chegou ao
+modelo do Chile. Modelo sem telemetria não é tocado e aparece na saída.
+`--model` (pode repetir) escolhe os modelos um a um, com a mesma camada.
+
+O nome leva data e hora de Brasília, qualquer que seja o fuso do servidor
+(`telemetria-2026-09-22-1418-f2002a.squash`): no catálogo do /admin/, a mais
+recente é a última do dia.
 
 **Mudou algo em `client/telemetry/`? Suba a versão** em
 `client/telemetry/usr/share/mlog/VERSION` (ano.mês.sequência) no mesmo commit. É

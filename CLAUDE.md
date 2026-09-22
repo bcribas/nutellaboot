@@ -210,6 +210,9 @@ O nome antigo era *template*/*image*; a migração está em
   regra de udev) empacotado por `tools/nb3-camada-telemetria`, que também
   publica e registra no modelo — removendo a anterior, senão duas versões do
   agente disputam o mesmo caminho e a primeira da lista vence em silêncio.
+  Use `--all-models`: o modelo de sub-admin é cópia do da temporada e leva a
+  telemetria daquele dia. Citar só o modelo da temporada deixou o do Chile
+  com a tela de bloqueio quebrada depois do conserto.
 
 ## Credenciais
 
@@ -438,6 +441,11 @@ O ambiente de teste tem um nginx externo que faz proxy de
   com aspa dentro de classe (`/[",]/`). Escreva `const f = () => …` e
   `{ acompanhar, ack }`, declare antes de usar, e monte a aspa com
   `String.fromCharCode(34)`.
+- **Quem valida chave de campo do formulário lê o schema por `_com_padroes`.**
+  Campo novo do esquema padrão não está no `schema.json` do modelo até alguém
+  gravar; o `GET /schema` já o mostra, e a tela devolve todos os campos no
+  "Salvar" dos cadeados. O `set_schema_locks` validava contra o arquivo cru e
+  recusou o "Salvar" de todo modelo no dia em que entrou o `MAXMONITORS`.
 - **`--check` que só confere `which` mente.** O worker de camadas dizia
   "pré-requisitos ok" numa máquina sem `uidmap` e com userns proibido pelo
   kernel; o job morreu com código 127 depois de baixar a base. A construção

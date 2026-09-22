@@ -54,3 +54,42 @@ def client(data_root):
     from server.app.main import create_app
 
     return TestClient(create_app())
+
+
+@pytest.fixture
+def servidor(data_root, admin_key):
+    """Sobe um uvicorn de verdade: as ferramentas falam HTTP, não importam o app
+    (`nb3-nova-temporada`, `nb3-camada-telemetria`)."""
+    import socket
+    import subprocess
+    import time
+
+    porta = socket.socket()
+    porta.bind(("127.0.0.1", 0))
+    _, p = porta.getsockname()
+    porta.close()
+
+    env = {**os.environ, "NB3_DATA_ROOT": str(data_root), "PYTHONPATH": str(REPO)}
+    proc = subprocess.Popen(
+        [".venv/bin/python", "-m", "uvicorn", "server.app.main:app",
+         "--host", "127.0.0.1", "--port", str(p), "--log-level", "warning"],
+        cwd=REPO, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    base = f"http://127.0.0.1:{p}"
+    import urllib.request
+
+    for _ in range(80):
+        try:
+            urllib.request.urlopen(f"{base}/api/v1/health", timeout=1)
+            break
+        except Exception:
+            time.sleep(0.25)
+    else:
+        proc.kill()
+        pytest.skip("uvicorn nao subiu")
+    yield base, admin_key
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()

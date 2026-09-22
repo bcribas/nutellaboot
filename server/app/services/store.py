@@ -118,7 +118,13 @@ def set_schema_locks(name: str, locks: dict) -> dict:
     """
     d = model_dir(name)
     with fsdb.locked(d):
-        schema = fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []}
+        from .config import _com_padroes
+
+        # pelo mesmo caminho do GET /schema: a tela manda TODOS os campos que
+        # leu de lá, e um campo novo do esquema padrão ainda não está no
+        # arquivo. Validar contra o arquivo cru recusava o "Salvar" de todo
+        # modelo no dia em que entrou o MAXMONITORS.
+        schema = _com_padroes(fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []})
         conhecidos = {f["key"] for f in schema.get("fields", [])}
         desconhecidos = set(locks) - conhecidos
         if desconhecidos:
