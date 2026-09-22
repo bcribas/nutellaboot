@@ -118,8 +118,13 @@ def set_schema_locks(name: str, locks: dict) -> dict:
     """
     d = model_dir(name)
     with fsdb.locked(d):
-        schema = fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []}
-        conhecidos = {f["key"] for f in schema.get("fields", [])}
+        from .config import _com_padroes
+
+        # o console mostra o esquema COM os campos novos do padrão e manda o
+        # cadeado de todos eles; conferir contra o schema.json cru recusava o
+        # salvamento inteiro no primeiro campo acrescentado depois do modelo
+        schema = _com_padroes(fsdb.read_json(d / "schema.json", {"fields": []}) or {"fields": []})
+        conhecidos ={f["key"] for f in schema.get("fields", [])}
         desconhecidos = set(locks) - conhecidos
         if desconhecidos:
             raise ImageError(f"campos que não existem no modelo: {', '.join(sorted(desconhecidos))}")

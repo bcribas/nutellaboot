@@ -253,3 +253,28 @@ def test_sub_admin_nao_desliga_a_propria_trava_de_wallpaper(client, base, ha):
         "/api/v1/site-images/dosub1", json={"wallpaper_locked": False}, headers=ha
     ).status_code == 200
 
+
+
+def test_cadeado_de_campo_novo_em_modelo_antigo(client, data_root, admin_key, ha):
+    """A tela lista o esquema com os campos novos do padrão (`_com_padroes`) e
+    devolve o cadeado de TODOS. O `set_schema_locks` conferia contra o
+    schema.json cru, e o MAXMONITORS recém-criado derrubava o salvamento com
+    "campos que não existem no modelo"."""
+    fsdb.write_json(data_root / "models" / "velho" / "model.json", {"layers": []})
+    fsdb.write_json(
+        data_root / "models" / "velho" / "schema.json",
+        {"fields": [{"key": "TIMEZONE", "type": "select", "default": "America/Bahia"}]},
+    )
+    exibidos = client.get("/api/v1/models/velho/schema", headers=ha).json()["fields"]
+    locks = {f["key"]: bool(f.get("locked")) for f in exibidos}
+    assert "MAXMONITORS" in locks
+    locks["MAXMONITORS"] = False
+
+    r = client.put("/api/v1/models/velho/schema/locks", json={"locks": locks}, headers=ha)
+    assert r.status_code == 200, r.text
+    campos = {f["key"]: f for f in r.json()["fields"]}
+    assert campos["MAXMONITORS"]["locked"] is False
+    assert campos["TIMEZONE"]["default"] == "America/Bahia"
+
+    r = client.put("/api/v1/models/velho/schema/locks", json={"locks": {"INVENTADO": True}}, headers=ha)
+    assert r.status_code == 400
