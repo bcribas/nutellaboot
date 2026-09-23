@@ -53,7 +53,7 @@ async function parse(resp) {
   return body;
 }
 
-export async function request(method, path, { body, kind = "image", raw, contentType, token } = {}) {
+export async function request(method, path, { body, kind = "image", raw, contentType, token, signal } = {}) {
   const headers = { ...CONSOLE_HEADER };
   // no console a credencial é o cookie; nas telas de sede, o token da URL.
   // `token` é para quem tem o token em mãos mas não na URL — a tela de
@@ -63,7 +63,8 @@ export async function request(method, path, { body, kind = "image", raw, content
   } else if (kind !== "admin" && imageToken()) {
     headers.Authorization = `Bearer ${imageToken()}`;
   }
-  const opts = { method, headers, credentials: "same-origin" };
+  // `signal`: a vista do console que saiu da tela cancela o que pediu
+  const opts = { method, headers, credentials: "same-origin", signal };
   if (raw) {
     opts.body = raw;
     if (contentType) opts.headers["Content-Type"] = contentType;

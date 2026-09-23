@@ -122,6 +122,11 @@ main.wide { max-width: 1500px; }
 
 input[type="text"],
 input[type="password"],
+input[type="number"],
+input[type="url"],
+input[type="search"],
+input[type="date"],
+input[type="email"],
 select,
 textarea {
   background: var(--panel2);
@@ -188,15 +193,19 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 a.btn { text-decoration: none; display: inline-block; }
 a.btn:hover { border-color: var(--accent); }
 
-button.primary {
+/* `.btn` também: um <a class="btn primary"> ficava com cara de botão comum */
+button.primary,
+.btn.primary {
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
   font-weight: 600;
 }
 
-button.danger { border-color: var(--bad); color: var(--bad); }
+button.danger, .btn.danger { border-color: var(--bad); color: var(--bad); }
 button.small, .btn.small { padding: 4px 9px; font-size: 13px; }
+select.small { width: auto; padding: 4px 8px; font-size: 13px; }
+button[aria-busy="true"] { cursor: progress; opacity: 0.7; }
 
 .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
@@ -211,6 +220,7 @@ button.small, .btn.small { padding: 4px 9px; font-size: 13px; }
   padding: 12px 16px;
   max-width: 420px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  z-index: 70;
 }
 
 .toast.err { border-left-color: var(--bad); }
@@ -313,3 +323,88 @@ dialog.reauth.wide { max-width: 860px; }
 .whrow { border-top: 1px solid var(--line); padding: 10px 0; }
 .whrow input[type="text"] { margin: 6px 0; }
 .registrar { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 8px; }
+
+/* --- componentes comuns (console e telas de sede) ---
+   Cada um existia só no CSS de uma tela e era usado em outra que não o
+   carrega: o /admin/ tinha 28 `label.fld` sem estilo e as abas sem marca de
+   ativa. Um teste confere que toda classe usada por uma tela está no CSS que
+   ela carrega (tests/test_web_css.py). */
+
+/* rótulo em cima do controle */
+.fld { display: block; margin-bottom: 8px; }
+.fld > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px; }
+.fld > .help { display: block; margin-top: 3px; }
+.help { color: var(--muted); font-size: 13px; }
+p.small, span.small, div.small { font-size: 13px; }
+
+/* avisos no lugar, em vez de só a cor do texto */
+.msg { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
+.msg.ok { border-color: var(--ok); color: var(--ok); }
+.msg.warn { border-color: var(--warn); color: var(--warn); }
+.msg.bad { border-color: var(--bad); color: var(--bad); }
+
+/* abas: um assunto por vez */
+.tabs { display: flex; flex-wrap: wrap; gap: 2px 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.tabs a,
+.tabs button {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 8px 12px;
+  color: var(--muted);
+  text-decoration: none;
+  font: inherit;
+  cursor: pointer;
+}
+.tabs a:hover, .tabs button:hover:not(:disabled) { color: var(--fg); border-color: transparent; }
+.tabs .on,
+.tabs [aria-current="page"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* página de um objeto: trilha, título e seções */
+.trilha { font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+.trilha a { color: var(--muted); }
+.cabecalho { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; }
+.cabecalho h1 { font-size: 21px; margin: 0; }
+.cabecalho .acoes { margin-left: auto; }
+.card-topo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.card-topo > h2 { margin: 0; }
+.card-topo .acoes { margin-left: auto; }
+section.card { scroll-margin-top: 70px; }
+.card.perigo { border-color: var(--bad); }
+dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 8px 0; }
+dl.kv dt { color: var(--muted); }
+dl.kv dd { margin: 0; min-width: 0; }
+.grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0 16px; }
+.rolagem { overflow-x: auto; }
+tr.clicavel { cursor: pointer; }
+pre.log {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* o único diálogo (web/common/dialogo.js) */
+dialog.dlg {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  width: calc(100% - 32px);
+  max-width: 560px;
+  max-height: calc(100vh - 40px);
+}
+dialog.dlg.largo { max-width: 860px; }
+dialog.dlg::backdrop { background: rgba(0, 0, 0, 0.6); }
+dialog.dlg > h2 { margin: 0 0 12px; font-size: 17px; }
+dialog.dlg .acoes-dlg { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+dialog.dlg .acoes-dlg:empty { display: none; }
+dialog.dlg input:not([type="checkbox"]):not([type="radio"]),
+dialog.dlg select,
+dialog.dlg textarea { max-width: none; }

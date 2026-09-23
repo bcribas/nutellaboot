@@ -12,12 +12,18 @@ export function esc(s) {
 
 export const $ = (s) => document.querySelector(s);
 
+// Dentro do <dialog> modal aberto, se houver: o diálogo fica na camada de
+// cima, e um aviso no <body> ficava ATRÁS dele e da cortina (o erro de um
+// "Salvar" feito dentro do diálogo não aparecia). Quem fecha um diálogo e avisa
+// fecha ANTES de chamar o toast, senão o aviso some junto com o diálogo.
 export function toast(msg, isError = false) {
-  const el = document.createElement("div");
-  el.className = "toast" + (isError ? " err" : "");
-  el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 4500);
+  const aviso = document.createElement("div");
+  aviso.className = "toast" + (isError ? " err" : "");
+  aviso.setAttribute("role", isError ? "alert" : "status");
+  aviso.textContent = msg;
+  const abertos = document.querySelectorAll("dialog[open]");
+  (abertos.length ? abertos[abertos.length - 1] : document.body).appendChild(aviso);
+  setTimeout(() => aviso.remove(), isError ? 7000 : 4500);
 }
 
 // Um elemento com filhos, sem innerHTML: `el("td", {class: "mono"}, texto)`.
@@ -42,15 +48,27 @@ export function quando(epoch) {
   return new Date(epoch * 1000).toLocaleString();
 }
 
-// Valor que só aparece UMA vez (uma chave recém-criada): mostra com botão de
-// copiar. `rotulos` = {copy, copied}.
-export function copiavel(valor, rotulos) {
-  const code = el("code", {}, valor);
+// Um valor com botão de copiar (uma chave recém-criada, um md5, um link).
+// `rotulos` = {copy, copied} e, com `oculto`, também {show, hide}: o segredo
+// que fica na tela (token, chave de boot) aparece mascarado até pedirem.
+export function copiavel(valor, rotulos, { oculto = false } = {}) {
+  const MASCARA = "••••••••••••";
+  const code = el("code", {}, oculto ? MASCARA : valor);
   const btn = el("button", { class: "small", type: "button" }, rotulos.copy);
   btn.onclick = async () => {
     await navigator.clipboard.writeText(valor);
     btn.textContent = rotulos.copied;
     setTimeout(() => (btn.textContent = rotulos.copy), 1500);
   };
-  return el("span", { class: "copiavel" }, code, " ", btn);
+  const partes = [code, " ", btn];
+  if (oculto) {
+    const ver = el("button", { class: "small", type: "button" }, rotulos.show);
+    ver.onclick = () => {
+      const aberto = code.textContent === valor;
+      code.textContent = aberto ? MASCARA : valor;
+      ver.textContent = aberto ? rotulos.show : rotulos.hide;
+    };
+    partes.push(" ", ver);
+  }
+  return el("span", { class: "copiavel" }, ...partes);
 }

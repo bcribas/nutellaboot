@@ -683,5 +683,14 @@
   "webhook_deliveries_none": "Ninguna entrega falló.",
   "select_all_events": "todos",
   "select_no_events": "ninguno",
-  "display_multiple": "MÁS DE UN MONITOR"
+  "display_multiple": "MÁS DE UN MONITOR",
+  "act_show": "Mostrar",
+  "act_hide": "Ocultar",
+  "act_confirm": "Confirmar",
+  "dlg_confirm_title": "Confirmar",
+  "dlg_type_to_confirm": "Para confirmar, escriba {texto}",
+  "dlg_copied_close": "Ya lo copié",
+  "dlg_required": "Complete: {campo}",
+  "err_network": "Sin respuesta del servidor. Verifique la conexión e intente de nuevo.",
+  "saved_ok": "Guardado."
 }

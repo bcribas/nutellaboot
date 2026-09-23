@@ -51,6 +51,8 @@ GLOBALS = {
     "Boolean", "Set", "Map", "Error", "TypeError", "RegExp",
     "encodeURIComponent", "decodeURIComponent", "parseInt", "parseFloat",
     "isNaN", "isFinite", "structuredClone", "requestAnimationFrame",
+    # a vista do console que sai da tela cancela o que pediu
+    "AbortController",
 }
 
 IDENT = r"[A-Za-z_$][\w$]*"

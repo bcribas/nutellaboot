@@ -55,18 +55,6 @@
   min-height: 42px;
 }
 
-.fld {
-  display: block;
-  margin-bottom: 8px;
-}
-
-.fld > span {
-  display: block;
-  font-size: 13px;
-  color: var(--muted);
-  margin-bottom: 3px;
-}
-
 .card.entry .actions {
   margin-top: 6px;
 }
