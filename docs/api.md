@@ -258,7 +258,7 @@ telemetria, wifi, pacotes) e o formulário que cada sede preenche
 | POST | `/api/v1/models` | C | `{name, description?, public?, from?}` | modelo criado |
 | POST | `/api/v1/models/{n}/duplicate` | C | `{name, description?}` | cópia com as mesmas camadas e o mesmo formulário |
 | GET | `/api/v1/models` | C | — | `{models:[{name, description, public, owner, mine, layers, used_by, can_manage}]}` |
-| GET | `/api/v1/models/{n}` | C | — | `model.json` + `schema` + `can_manage`, `mine` e `image_extras:[{id, fullname, unlocked, layers:[{file, md5, role, from_build}]}]` (as imagens deste modelo que quem pergunta enxerga, com as camadas só delas) |
+| GET | `/api/v1/models/{n}` | C | — | `model.json` + `schema` + `can_manage`, `mine` e `image_extras:[{id, fullname, unlocked, layers:[{file, md5, role, from_build}]}]` (as imagens deste modelo que quem pergunta enxerga, com as camadas só delas) e `wallpaper` (a meta do papel de parede do modelo, ou `null`) |
 | PATCH | `/api/v1/models/{n}` | C | `{public?, description?}` | modelo atualizado (só **A** publica) |
 | DELETE | `/api/v1/models/{n}` | C | — | `204`; **409** se alguma site-image ainda deriva dele |
 | POST | `/api/v1/models/{n}/layers` | C | `{file, md5, cdn_url?, size?, position?, role?, replace_role?}` | `{layers:[…]}` |

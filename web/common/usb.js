@@ -55,7 +55,8 @@ function motivoDesatualizada(razoes) {
 // `token` é para quem tem o token em mãos mas não na URL (a tela de criação).
 // `sinal`: quando a página do console que mostra o bloco sai da tela, a
 // sondagem de 4 s para junto (senão continuava batendo no servidor para sempre).
-export function usbBlock(imageId, token = "", { sinal } = {}) {
+// `semTitulo`: dentro de uma seção que já tem título (a página da imagem).
+export function usbBlock(imageId, token = "", { sinal, semTitulo = false } = {}) {
   const caixa = document.createElement("div");
   caixa.className = "usb";
   let timer = null;
@@ -79,7 +80,9 @@ export function usbBlock(imageId, token = "", { sinal } = {}) {
   }
 
   function desenhar(d) {
-    caixa.innerHTML = `<h3>${t("usb_title")}</h3><p class="help muted">${t("usb_help")}</p>`;
+    caixa.innerHTML = semTitulo
+      ? `<p class="help muted">${t("usb_help")}</p>`
+      : `<h3>${t("usb_title")}</h3><p class="help muted">${t("usb_help")}</p>`;
 
     if (!d.kernel.ok) {
       const aviso = document.createElement("p");

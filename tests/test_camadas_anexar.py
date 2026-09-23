@@ -201,5 +201,6 @@ def test_o_modelo_mostra_as_camadas_so_das_imagens(client, base, ha, data_root):
     corpo = sub.json()
     assert [i["id"] for i in corpo["image_extras"]] == ["sub1"]
     assert corpo["can_manage"] is False and corpo["mine"] is False
+    assert corpo["wallpaper"] is None
     # o código do sub-admin é credencial: nada aqui o repete
     assert base["code"] not in sub.text

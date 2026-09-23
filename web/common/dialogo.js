@@ -32,6 +32,13 @@ export const abrirDialogo = ({ titulo = "", largo = false, fixo = false, aoFecha
   const rodape = el("div", { class: "acoes-dlg" });
   form.append(corpo, rodape);
   dlg.append(el("h2", {}, titulo), form);
+  // O `cancel` só é cancelável depois de um gesto do usuário (regra do
+  // navegador contra janelas que não fecham), e o segredo abre depois de uma
+  // chamada assíncrona: o Esc fechava assim mesmo. Barrar o próprio keydown do
+  // Esc impede o pedido de fechamento antes de ele existir.
+  dlg.addEventListener("keydown", (ev) => {
+    if (fixo && ev.key === "Escape") ev.preventDefault();
+  });
   dlg.addEventListener("cancel", (ev) => {
     if (fixo) ev.preventDefault();
   });

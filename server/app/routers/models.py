@@ -104,12 +104,15 @@ async def get_model(name: str, p=Depends(auth.require_console)) -> dict:
                 ],
             }
         )
+    achado = wp.do_modelo(name)
     return {
         **tpl,
         **ownership.owner_publico(dono),
         "can_manage": ownership.can_manage_model(p, name),
         "mine": dono == p.owner,
         "image_extras": imagens,
+        # a tela sabe se há papel de parede sem pedir o arquivo e levar 404
+        "wallpaper": achado[1] if achado else None,
     }
 
 

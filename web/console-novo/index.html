@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NutellaBoot 3 — Administração</title>
+<link rel="icon" href="/common/favicon.png">
+<link rel="stylesheet" href="/common/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="admin_title"></h1>
+  <span id="quem" class="sub hidden"></span>
+  <span class="spacer"></span>
+  <!-- só aparecem depois de entrar: sem sessão, a frota responde 401 -->
+  <span id="healthinfo" class="sub hidden"></span>
+  <a id="gofrota" class="btn small hidden" href="/laboratorios/" data-i18n="fleet_title"></a>
+  <a id="godash" class="btn small hidden" href="/dashboard/" target="_blank" rel="noopener" data-i18n="fleet_dashboard"></a>
+  <button type="button" id="logout" class="small hidden" data-i18n="admin_logout"></button>
+  <span id="lang"></span>
+</header>
+
+<main class="wide">
+  <!-- <form> de verdade, com o par usuário/senha que o gerenciador de senhas
+       do navegador reconhece (o mesmo da home, para o autofill valer nas duas) -->
+  <form class="card" id="login" method="post" action="/api/v1/session">
+    <h2 data-i18n="admin_key"></h2>
+    <p class="help muted" data-i18n="admin_key_help"></p>
+    <input type="text" id="login_user" name="username" autocomplete="username" value="admin"
+           readonly tabindex="-1" aria-hidden="true" class="vh">
+    <div class="actions">
+      <div class="pwd" style="max-width:420px">
+        <input type="password" id="key" name="password" autocomplete="current-password" spellcheck="false" required>
+        <button type="button" class="eye" id="key_eye" aria-pressed="false">👁</button>
+      </div>
+      <button type="submit" id="enter" class="primary" data-i18n="admin_enter"></button>
+    </div>
+  </form>
+
+  <div id="panel" class="hidden">
+    <!-- Um assunto por aba. As três de baixo são só da administração: o
+         sub-admin nem as vê, e o endereço delas o leva de volta a Imagens. -->
+    <nav id="abas" class="tabs">
+      <a href="#imagens" data-aba="imagens" data-i18n="nav_images"></a>
+      <a href="#modelos" data-aba="modelos" data-i18n="nav_models"></a>
+      <a href="#camadas" data-aba="camadas" data-i18n="nav_layers"></a>
+      <a href="#pessoas" data-aba="pessoas" data-admin-only data-i18n="nav_people"></a>
+      <a href="#chaves" data-aba="chaves" data-admin-only data-i18n="nav_keys"></a>
+      <a href="#sistema" data-aba="sistema" data-admin-only data-i18n="nav_system"></a>
+    </nav>
+    <p id="cota" class="help hidden"></p>
+    <div id="vista"></div>
+  </div>
+</main>
+
+<!-- Depois do painel, de propósito: o formulário de login continua sendo o
+     primeiro <form> com campo de senha da página (é o que o gerenciador de
+     senhas preenche, e o que os testes conferem). Estático porque o
+     gerenciador de senhas precisa encontrá-lo. -->
+<dialog id="reauth" class="dlg">
+  <form id="reauth_form" method="dialog">
+    <h2 data-i18n="reauth_title"></h2>
+    <p class="help" data-i18n="reauth_help"></p>
+    <input type="text" name="username" autocomplete="username" value="admin"
+           readonly tabindex="-1" aria-hidden="true" class="vh">
+    <input type="password" id="reauth_key" name="password" autocomplete="current-password"
+           spellcheck="false" required>
+    <p id="reauth_err" class="msg bad hidden" data-i18n="reauth_bad"></p>
+    <div class="acoes-dlg">
+      <button type="submit" class="primary" data-i18n="reauth_submit"></button>
+      <button type="button" id="reauth_cancel" data-i18n="cancel"></button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
