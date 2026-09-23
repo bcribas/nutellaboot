@@ -358,6 +358,28 @@ def test_o_hotconfig_pergunta_o_que_pode_mandar():
     assert "b.disabled = true" in trecho
 
 
+def test_a_selecao_nao_reabilita_comando_travado():
+    """O render() reabilitava a barra inteira a cada seleção, desfazendo o que
+    desabilitarComandosBloqueados() tinha marcado."""
+    js = (REPO / "web" / "hotconfig" / "app.js").read_text(encoding="utf-8")
+    trecho = js[js.index("function render()") :]
+    trecho = trecho[: trecho.index("\n}\n")]
+    assert "bloqueados.has(" in trecho
+    assert "bloqueados.set(" in js[js.index("async function desabilitarComandosBloqueados") :]
+
+
+def test_a_frota_trava_so_as_maquinas_marcadas():
+    """Com só algumas máquinas marcadas, o painel da frota chamava a rota da
+    SEDE (que trava a sala inteira) para cada sede tocada, e a confirmação
+    mostrava o número menor. Máquina marcada vai pela rota dela; a da sede só
+    para sede marcada inteira."""
+    js = (REPO / "web" / "laboratorios" / "app.js").read_text(encoding="utf-8")
+    trecho = js[js.index("async function mandar(") :]
+    trecho = trecho[: trecho.index("\n}\n")]
+    assert "/machines/${" in trecho
+    assert 'alvo === "all"' in trecho
+
+
 def test_todo_arquivo_do_relatorio_tem_rotulo():
     """A tela traduz o nome do arquivo por um `ARQ_LABEL[nome]`, e essa chave é
     montada em tempo de execução — o guarda de i18n, que lê `t("literal")`, não

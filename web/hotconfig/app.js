@@ -14,6 +14,10 @@ const $ = (s) => document.querySelector(s);
 let machines = [];
 let rejeitadas = [];
 let selected = new Set();
+// comando → campo que o trava no modelo. O render() reabilitava a barra inteira
+// a cada seleção, desfazendo o que desabilitarComandosBloqueados() marcou: o
+// botão voltava a prometer o que o servidor nega.
+const bloqueados = new Map();
 // o padrão é ver as LIGADAS: listar máquina desligada por padrão é ruído numa
 // sala — quem quiser o cemitério marca "Todas". `stale` (piscou há pouco)
 // conta como ligada: sumir com ela esconderia problema.
@@ -266,7 +270,9 @@ function render() {
     n: machines.length,
   })}`;
   $("#selcount").textContent = t("selected_n", { n: selected.size });
-  $("#actionbar").querySelectorAll("button").forEach((b) => (b.disabled = selected.size === 0));
+  $("#actionbar")
+    .querySelectorAll("button")
+    .forEach((b) => (b.disabled = selected.size === 0 || bloqueados.has(b.dataset.cmd)));
 }
 
 // --- gráfico com eixo do tempo -----------------------------------------------
@@ -485,7 +491,9 @@ async function desabilitarComandosBloqueados() {
   } catch {
     return;
   }
+  bloqueados.clear();
   for (const [cmd, campo] of Object.entries(d.blocked || {})) {
+    bloqueados.set(cmd, campo);
     const b = $(`[data-cmd="${cmd}"]`);
     if (!b) continue;
     b.disabled = true;

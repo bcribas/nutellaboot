@@ -375,13 +375,34 @@ async function mandar(cmd) {
         if (motivo) toast(`${sede}: ${motivo}`, true);
       }
     } else {
-      const sedes = Object.keys(targets);
-      await Promise.all(
-        sedes.map((sede) =>
-          api.post(`/api/v1/site-images/${encodeURIComponent(sede)}/${cmd}`, {}, { kind: "admin" })
-        )
+      // A rota da sede trava a sala INTEIRA: só vale para a sede marcada
+      // inteira. Máquina marcada uma a uma vai pela rota dela. Mandar a da sede
+      // com seleção parcial travava todo mundo, e a confirmação acima mostrava
+      // o número menor.
+      const pedidos = [];
+      for (const [sede, alvo] of Object.entries(targets)) {
+        const base = `/api/v1/site-images/${encodeURIComponent(sede)}`;
+        if (alvo === "all") {
+          pedidos.push({ sede, url: `${base}/${cmd}` });
+        } else {
+          for (const mac of alvo) {
+            pedidos.push({ sede, url: `${base}/machines/${encodeURIComponent(mac)}/${cmd}` });
+          }
+        }
+      }
+      const res = await Promise.allSettled(pedidos.map((x) => api.post(x.url, {}, { kind: "admin" })));
+      let feitas = 0;
+      const falhas = new Set();
+      res.forEach((r, i) => {
+        if (r.status === "fulfilled") feitas += r.value.machines || 0;
+        else falhas.add(pedidos[i].sede);
+      });
+      toast(
+        falhas.size
+          ? t("fleet_partial", { n: feitas, falhas: [...falhas].join(", ") })
+          : t("command_sent", { n: feitas }),
+        falhas.size > 0
       );
-      toast(t("command_sent", { n }));
     }
     carregar();
   } catch (e) {
