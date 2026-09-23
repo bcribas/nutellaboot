@@ -12,42 +12,60 @@ sem root descrito abaixo.
 
 ## Pela interface
 
-O jeito normal de pedir uma camada é pela seção **Camadas adicionais** do
-`/admin/`, sem tocar em `curl`. Ela tem duas abas.
+O jeito normal de pedir uma camada é pelo `/admin/`, sem tocar em `curl`. Há
+dois pontos de partida.
 
-**Por modelo** — constrói uma vez e anexa a várias imagens. Preencha o nome da
-camada, escolha o modelo, liste os pacotes (separados por espaço ou vírgula) e
-marque, na lista abaixo, as imagens em que ela deve entrar. É o caminho para
-quando várias sedes precisam do mesmo pacote: uma construção só, anexada a
-todas.
+**Para um modelo** (aba **Camadas**, ou a seção **Camadas** da página do
+modelo): **Construir camada**. Preencha o nome da camada, escolha o modelo e
+liste os pacotes (separados por espaço ou vírgula). Os pacotes são instalados
+por cima das camadas daquele modelo. Se quiser, marque as imagens do modelo em
+que ela deve entrar quando ficar pronta. É o caminho para quando várias sedes
+precisam do mesmo pacote: uma construção só.
 
-**Por imagem** — camada de uma imagem só. Escolha a imagem, o nome e os
-pacotes. A camada nasce já destinada àquela imagem.
+**Para uma imagem só** (seção **Camadas** da página da imagem): **Construir
+camada**, com o nome e os pacotes. A camada nasce destinada àquela imagem e
+entra nela sozinha quando fica pronta.
 
-Nos dois casos o pedido entra numa fila e a lista abaixo mostra o andamento,
-atualizando sozinha enquanto houver construção em curso:
+O pedido entra numa fila, e a aba **Camadas** mostra o andamento, atualizando
+sozinha enquanto houver construção em curso:
 
 | Estado | O que significa |
 |---|---|
 | na fila | aguardando o worker pegar |
 | construindo | rodando o `apt` dentro do sandbox |
-| pronta | camada gerada, com arquivo e tamanho |
+| pronta | camada gerada, com arquivo, tamanho e md5 |
 | falhou | erro na construção; a mensagem aparece ao lado |
 
-Quando fica **pronta**, aparece o botão **Anexar**, que pede as imagens de
-destino (já preenchido com as que você marcou). Anexar é o passo que faz a
-camada entrar no boot daquelas imagens.
+Cada construção pronta mostra o arquivo, o tamanho, o **md5** (com botão de
+copiar) e **onde está**: no modelo, em quais imagens, ou "ainda não anexada".
 
-Na linha de cada imagem, na lista de imagens, há um botão **camadas**: ele
-abre as camadas já anexadas àquela imagem, com a URL de download de cada uma
-e um botão para **remover** a que não for mais necessária. A janela também
-mostra quantas construções aquela imagem já usou (e a cota, quando houver).
+**Anexar** é o passo que faz a camada entrar no boot. O diálogo oferece:
+
+- **o modelo inteiro** em que ela foi construída. Vale para todas as imagens
+  dele, inclusive as criadas depois, e é o que quase sempre se quer. Só quem
+  gerencia o modelo marca essa opção;
+- **imagens**, uma a uma. As de outro modelo aparecem com um aviso: a camada
+  leva o estado do `apt` da base em que foi construída.
+
+O **Anexar camada** das páginas de modelo e de imagem faz o mesmo a partir de
+uma lista: as camadas em uso e as construções prontas, com o md5 junto (ou à
+mão, com arquivo e md5, para uma camada feita pelo `nb3-pack-upper`). Na página
+de outro modelo a tela avisa antes de anexar uma construção feita sobre outra
+base. Uma construção cujo arquivo sumiu (nem no disco, nem publicado) aparece
+com o **Anexar** desabilitado.
+
+A página da imagem, seção **Camadas**, mostra o que as máquinas dela baixam, na
+ordem do manifest: as camadas próprias da imagem (com **Remover**) e as que vêm
+do modelo, cada uma com papel e md5. Ali também estão as construções daquela
+imagem e quantas ela já usou da cota. A página do modelo mostra, além das
+camadas dele, as que só algumas imagens do modelo têm: era a falta disso que
+fazia a camada "aparecer na imagem e não no modelo".
 
 Ao terminar, a camada é **publicada no servidor de arquivos** e é de lá que as
 máquinas baixam. Se a publicação falhar (servidor fora do ar, por exemplo), a
-camada continua servida pela própria máquina de gestão — o boot não quebra — e
-o painel **Publicação** oferece o botão "Reenviar pendentes". Veja a seção de
-publicação em `docs/operations.md`.
+camada continua servida pela própria máquina de gestão (o boot não quebra), e a
+seção **Publicação de arquivos**, na aba **Sistema**, oferece **Reenviar
+pendentes**. Veja a seção de publicação em `docs/operations.md`.
 
 ## O problema que isto resolve
 
@@ -166,16 +184,32 @@ com o hash. Isso é verificado por teste automatizado
 (`tests/test_layer_builder.py`), que constrói uma camada de mentira com um hash
 plantado e falha se ele aparecer no `.squash`.
 
-### Anexar a uma imagem
+### Anexar ao modelo ou a imagens
 
 Se você não passou `attach_to` na criação, anexe depois:
 
 ```bash
+# ao modelo em que foi construída: todas as imagens dele, inclusive as futuras
+curl -X POST "$SERVER/api/v1/layerbuilds/<id>/attach" \
+    -H "Authorization: Bearer $NB3_ADMIN_KEY" \
+    -H 'Content-Type: application/json' \
+    -d '{"model": true}'
+
+# a imagens escolhidas
 curl -X POST "$SERVER/api/v1/layerbuilds/<id>/attach" \
     -H "Authorization: Bearer $NB3_ADMIN_KEY" \
     -H 'Content-Type: application/json' \
     -d '{"image_ids": ["26spsp", "26mgbh"]}'
 ```
+
+`model: true` é sempre o modelo do job: o worker instalou os pacotes por cima
+das camadas dele, e o estado do `apt` da camada só confere com aquela base. A
+camada entra na frente das outras, com papel `extra`. Os dois campos podem ir
+juntos, e o corpo vazio usa o `attach_to` do pedido. Nada é gravado se alguma
+permissão falhar, e uma construção cujo arquivo sumiu responde `409`.
+
+Uma camada que está no modelo **e** numa imagem dele aparece uma vez só no
+manifest daquela imagem.
 
 Para remover de uma imagem:
 
@@ -205,10 +239,14 @@ curl -X POST "$SERVER/api/v1/site-images/meu-lab/layerbuilds" \
 
 Diferenças em relação ao caminho da administração:
 
-- **Cota por imagem.** Cada imagem só constrói até `build_quota` camadas
-  (padrão 5, herdado do código de convite que a criou). A conta soma todas as
-  tentativas — inclusive as que falharam. Estourou, a resposta é `403`, e a
-  pessoa pede à administração para aumentar. A administração não tem cota.
+- **Cota por imagem.** Pelo token, cada imagem só constrói até `build_quota`
+  camadas (padrão 5, herdado do código de convite que a criou). A conta soma
+  todas as tentativas, inclusive as que falharam. Estourou, a resposta é `403`,
+  e a pessoa pede à administração para aumentar. A administração não tem cota.
+- **Pelo console, a cota é da pessoa.** O sub-admin que constrói pela página
+  da imagem gasta a cota de construções do convite dele, a mesma da construção
+  por modelo, e o job leva o dono. Antes, a rota por imagem dispensava a cota
+  do sub-admin.
 - **Anexação automática.** Não é preciso `attach_to` nem um passo de
   `/attach`: a camada nasce marcada para esta imagem, e o worker a anexa
   sozinho quando termina (camada extra, portanto com prioridade no overlay).
@@ -239,10 +277,11 @@ repositórios do Ubuntu. Isso é uma superfície real; a contenção é em camad
 Mesmo assim, **monitore**. Os jobs ficam visíveis em
 `data/layerbuilds/{queue,running,done,failed}/` e em `GET /api/v1/layerbuilds`
 (administração). Se um código ou uma imagem estiver abusando, você pode revogar
-o código (`DELETE /api/v1/invites/<código>`, que impede novas imagens) e zerar,
-na prática, a construção de uma imagem baixando a `build_quota` no `image.json`
-dela — como a cota conta todas as tentativas, uma cota abaixo do já usado
-bloqueia novos builds na hora.
+o convite (aba **Pessoas** do `/admin/`, ou `PATCH /api/v1/invites/<código>`
+com `{"revoked": true}`), que fecha o console e a criação de imagens, e zerar,
+na prática, a construção baixando a cota: a da pessoa, na página dela, e a da
+imagem, na seção **Geral** da página da imagem. Como a cota conta todas as
+tentativas, uma cota abaixo do já usado bloqueia novos builds na hora.
 
 ## Pré-requisitos do host
 
@@ -326,7 +365,7 @@ baixar — camada corrompida no caminho é descartada e baixada de novo.
 
 ## Acompanhar pela tela
 
-Cada build na lista do `/admin/` tem **ver log**: abre os últimos 8000
-caracteres da saída e acompanha sozinho enquanto o build está na fila ou
-rodando. Antes só apareciam os primeiros 80 caracteres do erro, e um build que
-falhava era um beco sem saída na interface.
+Cada construção, na aba **Camadas** do `/admin/` e na página da imagem, tem
+**Log**: abre os últimos 8000 caracteres da saída e acompanha sozinho enquanto o
+build está na fila ou rodando. Antes só apareciam os primeiros 80 caracteres do
+erro, e um build que falhava era um beco sem saída na interface.

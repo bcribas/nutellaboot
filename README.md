@@ -74,8 +74,8 @@ curl -X POST --data "key=$(cat data/site-images/testes3/boot.key)" \
 
 Telas: `/` (página inicial que guia cada público e monta os links a partir do
 id + token), `/criar/` (criar a própria imagem com código de convite, ou pedir
-acesso), `/admin/` (console: modelos, site-images, credenciais, camadas e —
-para a administração — convites e pedidos),
+acesso), `/admin/` (console, uma aba por assunto: imagens, modelos e camadas;
+para a administração, também pessoas, chaves e sistema),
 `/configureitor/?id=…&tk=…` (configuração da imagem), `/hotconfig/?id=…&tk=…`
 (painel do laboratório), `/lock/` (temas da tela de bloqueio), `/api/v1/docs`
 (API navegável).
@@ -97,9 +97,10 @@ E três papéis:
   publica modelos para outros usarem e gera **códigos de convite**.
 - **Sub-administração**: quem tem um código entra no **mesmo console**, em
   `/admin/`, e vê só o que é dele. Cria modelos próprios (partindo dos
-  públicos), deriva site-images dentro da cota e monta camadas. Não cria nome
-  começando por dígito nem nome reservado, e não vê convites, pedidos nem
-  publicação. O código de convite é a credencial — não há cadastro separado.
+  públicos), deriva site-images dentro da cota e constrói camadas. Não cria
+  nome começando por dígito nem nome reservado, e não vê as abas de pessoas,
+  chaves e sistema. O código de convite é a credencial; não há cadastro
+  separado.
 - **Coordenador de sede** recebe o link do configureitor e do painel; mexe na
   configuração da imagem dele, respeitando os campos travados pelo modelo.
 

@@ -235,7 +235,7 @@ o primeiro. Rota nova de console usa `require_console` + as funções de
 ```bash
 tools/nb3-init                     # instalação nova: emite e IMPRIME a chave
 tools/nb3-dev                      # servidor em 127.0.0.1:8890
-.venv/bin/python -m pytest -q      # 520 testes, ~42 s
+.venv/bin/python -m pytest -q      # 1261 testes, ~3 min
 tools/nb3-seed-testdata            # dados de teste (não é instalação)
 tools/nb3-layer-worker --check     # confere as ferramentas rootless
 ```
@@ -383,6 +383,13 @@ O ambiente de teste tem um nginx externo que faz proxy de
   (400) corpo com `macs`/`mac`/`targets` sem `target`, a ferramenta exige
   `--all` por extenso, e `tests/test_cli_api.py` confere o EFEITO (a fila de
   cada máquina). Subcomando destrutivo novo: teste o efeito, não a rota.
+- **A rota da sede inteira (`/site-images/{sede}/lock` e `/unlock`) recusa
+  corpo com lista de máquinas.** A tela da frota postava ali as sedes em que
+  só ALGUMAS máquinas estavam marcadas: a confirmação dizia "3 máquinas" e a
+  sala inteira travava. Hoje a frota manda a lista por `/machines/{mac}/{cmd}`,
+  e a rota da sede devolve 400 `no_target` para `target` diferente de `"all"`,
+  `targets`, `macs`, `mac` ou `machines`. Há teste do efeito
+  (`tests/test_commands.py`).
 - **Texto de fora não entra cru em `innerHTML`.** O pedido de imagem do
   formulário PÚBLICO (`wanted_name`, `contact`, `note`) era interpolado na
   tela do admin: um anônimo rodava script na sessão que gere as chaves. Nome
@@ -438,9 +445,39 @@ O ambiente de teste tem um nginx externo que faz proxy de
   sem cache antes de concluir que o CSS está errado.
 - O no-undef caseiro de `tests/test_web_js.py` não entende: método abreviado em
   objeto (`{ ack() {} }`), função usada antes da declaração (hoisting), regex
-  com aspa dentro de classe (`/[",]/`). Escreva `const f = () => …` e
-  `{ acompanhar, ack }`, declare antes de usar, e monte a aspa com
-  `String.fromCharCode(34)`.
+  com aspa dentro de classe (`/[",]/`), `import { a as b }`, reexportação
+  (`export { x } from`) e import padrão. Escreva `const f = () => …` e
+  `{ acompanhar, ack }`, declare antes de usar, importe pelo nome e monte a
+  aspa com `String.fromCharCode(34)`.
+- **O console tem três modos: lista, página de detalhe e diálogo.** A tela
+  antiga chegou a 15 cartões numa página, 9 botões por linha de imagem, quatro
+  construtores de `<dialog>` copiados um do outro, `prompt()`/`confirm()` e um
+  painel pendurado no fim do `<body>`: cada remendo trazia mais um jeito. Hoje
+  `<dialog>` só nasce em `web/common/dialogo.js` (`confirmar`, `formulario`,
+  `mostrarSegredo`, `abrirDialogo`), handler assíncrono passa por `acao()` de
+  `web/common/acao.js` (desliga o botão, mostra o erro de um jeito só) e a rota
+  é o hash (`#aba/id/secao`, em `web/admin/rotas.js`). Ação nova vira seção da
+  página do objeto ou um desses diálogos, nunca um cartão ou mais um botão na
+  linha. Dois detalhes que custaram caro: o `<dialog>` modal fica na camada de
+  cima, então `toast()` põe o aviso DENTRO do diálogo aberto (no `<body>` ele
+  ficava atrás); e o segredo mostrado uma vez barra o `keydown` do Esc, porque
+  o `cancel` só é cancelável depois de um gesto do usuário. O endereço da
+  página de uma pessoa usa o `owner_ref`, nunca o código de convite (que é
+  credencial e iria para o histórico). `tests/test_console.py` segura a porta.
+- **Classe de CSS vem do CSS que a tela carrega.** O painel de camadas do
+  console usava `div.detail`, que só existe no `lab.css` do laboratório: saía
+  sem estilo, e cada clique empilhava mais um no fim da página. Componente
+  comum mora em `web/common/style.css`; `tests/test_web_css.py` confere cada
+  classe usada (no HTML e em todo o grafo de módulos) contra o CSS da tela, e
+  os ganchos só de JavaScript ficam numa lista, cada um com o motivo.
+- **O `attach` de uma construção vai ao modelo DELA.** O worker instala os
+  pacotes por cima das camadas daquele modelo, e o estado do apt da camada só
+  confere com aquela base (a tela avisa antes de pôr a camada noutro modelo
+  pela rota comum de camadas). `POST /layerbuilds/{id}/attach` com `model: true`
+  grava no `job.model` (posição 0, papel `extra`, `from_build`); o `attach_to`
+  do pedido só vale com o corpo vazio. E `store.site_image_layers` descarta
+  arquivo repetido (o primeiro vence): uma camada na imagem e no modelo não
+  pode ir duas vezes ao manifest. Há teste (`tests/test_camadas_anexar.py`).
 - **O formulário do modelo se lê por `store.get_schema` (`_esquema`), nunca o
   arquivo.** O `schema.json` cru não tem o campo acrescentado ao esquema padrão
   depois da criação do modelo. Três leitores crus viraram três defeitos no dia

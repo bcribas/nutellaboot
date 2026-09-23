@@ -246,8 +246,8 @@ const desenharConvite = (corpo, inv, modelos) => {
     mudou();
   };
   const perfil = el("select", {},
-    el("option", { value: "free", selected: r.perfil === "free" }, t("profile_free")),
-    el("option", { value: "official", selected: r.perfil === "official" }, t("profile_official")));
+    el("option", { value: "free", selected: r.perfil === "free" }, t("profile_free_short")),
+    el("option", { value: "official", selected: r.perfil === "official" }, t("profile_official_short")));
   perfil.onchange = () => {
     r.perfil = perfil.value;
     mudou();

@@ -304,6 +304,30 @@ export const vista = async (alvo, ctx) => {
   let timer = null;
   ctx.sinal.addEventListener("abort", () => clearTimeout(timer));
 
+  const desenharCatalogo = () =>
+    carregarEm(catalogo.corpo, ctx.sinal, async () => {
+      const d = await api.get("/api/v1/layers/catalog", { ...A, signal: ctx.sinal });
+      const emUso = (d.layers || []).filter((c) => (c.used_by || []).length);
+      catalogo.corpo.replaceChildren(
+        tabela(
+          [t("layer_file"), t("layer_role"), "md5", t("layer_used_by")],
+          emUso.map((c) => [
+            el("span", { class: "mono" }, c.file),
+            rotuloDoPapel(c.role),
+            md5Copiavel(c.md5),
+            el("span", {}, ...(c.used_by || []).flatMap((m, i) => [i ? ", " : "", linkPara(m, "modelos", m)])),
+          ]),
+          { vazio: t("layer_none") }
+        )
+      );
+    });
+
+  // anexar muda as duas seções: onde a construção está e quem usa a camada
+  const aposAnexar = () => {
+    desenhar();
+    desenharCatalogo();
+  };
+
   const desenhar = () =>
     carregarEm(construcoes.corpo, ctx.sinal, async () => {
       const [d, mods, imgs] = await Promise.all([
@@ -316,7 +340,7 @@ export const vista = async (alvo, ctx) => {
       construcoes.corpo.replaceChildren(
         tabela(
           [t("layer_name"), t("packages"), t("status"), t("layer_file"), t("layer_where"), ""],
-          lista.map((b) => linhaDaConstrucao(b, desenhar, contexto)),
+          lista.map((b) => linhaDaConstrucao(b, aposAnexar, contexto)),
           { vazio: t("layer_none") }
         )
       );
@@ -345,20 +369,5 @@ export const vista = async (alvo, ctx) => {
   });
 
   await desenhar();
-  carregarEm(catalogo.corpo, ctx.sinal, async () => {
-    const d = await api.get("/api/v1/layers/catalog", { ...A, signal: ctx.sinal });
-    const emUso = (d.layers || []).filter((c) => (c.used_by || []).length);
-    catalogo.corpo.replaceChildren(
-      tabela(
-        [t("layer_file"), t("layer_role"), "md5", t("layer_used_by")],
-        emUso.map((c) => [
-          el("span", { class: "mono" }, c.file),
-          rotuloDoPapel(c.role),
-          md5Copiavel(c.md5),
-          el("span", {}, ...(c.used_by || []).flatMap((m, i) => [i ? ", " : "", linkPara(m, "modelos", m)])),
-        ]),
-        { vazio: t("layer_none") }
-      )
-    );
-  });
+  desenharCatalogo();
 };

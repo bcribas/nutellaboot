@@ -54,8 +54,8 @@ const desenharGeral = (corpo, img, modelos) => {
   // os controles da administração ficam declarados mesmo sem uso, para o
   // perfil poder mexer na trava
   const perfil = el("select", {},
-    el("option", { value: "official", selected: r.perfil === "official" }, t("profile_official")),
-    el("option", { value: "free", selected: r.perfil === "free" }, t("profile_free")));
+    el("option", { value: "official", selected: r.perfil === "official" }, t("profile_official_short")),
+    el("option", { value: "free", selected: r.perfil === "free" }, t("profile_free_short")));
   const trava = el("input", { type: "checkbox", checked: r.wallpaper_locked });
   const oculta = el("input", { type: "checkbox", checked: r.dashboard_hidden });
   const cota = el("input", { type: "number", min: 0, value: r.build_quota });

@@ -260,10 +260,11 @@ def test_nenhuma_variavel_sem_declaracao(arquivo):
 
 
 def test_o_verificador_acusa_o_bug_original():
-    """Reintroduz o `model: template` no admin/app.js de verdade (em memória)
-    e confere que o verificador aponta exatamente o `template`. Se um dia o
-    verificador afrouxar a ponto de deixar isso passar, este teste avisa."""
-    texto = (REPO / "web" / "admin" / "app.js").read_text(encoding="utf-8")
+    """Reintroduz o `model: template` na criação de imagem do console de
+    verdade (em memória) e confere que o verificador aponta exatamente o
+    `template`. Se um dia o verificador afrouxar a ponto de deixar isso passar,
+    este teste avisa."""
+    texto = (REPO / "web" / "admin" / "imagens.js").read_text(encoding="utf-8")
     alvo = "{ id, fullname, model, unlocked, wallpaper_locked, dashboard_hidden }"
     assert alvo in texto, "a linha da criação de imagem mudou; atualize o teste"
     quebrado = texto.replace(alvo, "{ id, fullname, model: template, unlocked, wallpaper_locked, dashboard_hidden }")
@@ -340,7 +341,8 @@ def test_nenhuma_tela_baixa_direto_do_servidor_de_arquivos():
     sabe isso é o servidor. Uma tela que lê `public_url` e a usa como destino
     entrega o arquivo velho — com a chave de boot anterior — quando a imagem foi
     regerada sem republicar."""
-    for tela in ("common/usb.js", "admin/app.js"):
+    telas = ["common/usb.js"] + [f"admin/{p.name}" for p in sorted((REPO / "web" / "admin").glob("*.js"))]
+    for tela in telas:
         js = (REPO / "web" / tela).read_text(encoding="utf-8")
         codigo = "\n".join(l for l in js.splitlines() if not l.lstrip().startswith("//"))
         assert "public_url ||" not in codigo, tela
@@ -421,10 +423,17 @@ def test_virar_livre_solta_tambem_a_trava_propria_do_wallpaper():
     """A trava DA IMAGEM vence o `unlocked` (é a do convite, de propósito).
     Então o botão Livre do console manda as duas coisas — sem isso, "liberei a
     sede" deixava o wallpaper preso sem nada na tela explicando (o caso
-    26tete, visto em produção)."""
-    js = (REPO / "web" / "admin" / "app.js").read_text(encoding="utf-8")
-    trecho = js.split('t("make_official")')[1].split("load()")[0]
-    assert '{ unlocked: true, wallpaper_locked: false }' in trecho
+    26tete, visto em produção). Na página da imagem, escolher Livre desmarca a
+    trava, e o Salvar manda as duas mudanças."""
+    js = (REPO / "web" / "admin" / "imagem.js").read_text(encoding="utf-8")
+    trecho = js.split("perfil.onchange = () => {")[1].split("\n  };")[0]
+    assert 'perfil.value === "free"' in trecho and "r.wallpaper_locked = false" in trecho
+    salvar = js.split("salvar.onclick = acao(")[1]
+    assert 'mudancas.unlocked = r.perfil === "free"' in salvar
+    assert "mudancas.wallpaper_locked = r.wallpaper_locked" in salvar
+    # e na criação: Livre não sai com a trava ligada
+    criar = (REPO / "web" / "admin" / "imagens.js").read_text(encoding="utf-8")
+    assert "Boolean(v.wallpaper_locked) && !unlocked" in criar
 
 
 def test_a_identidade_da_sede_e_evidente_nas_duas_telas():
@@ -531,7 +540,7 @@ def test_o_padrao_de_lista_com_opcoes_nao_e_partido_na_virgula():
     o texto na vírgula quebrava "('xkb','latam'),('xkb','br')" em quatro
     pedaços e o servidor recusava ("item inválido"). Lista com opções usa o
     controle ordenado, como no configureitor."""
-    texto = (REPO / "web" / "admin" / "app.js").read_text(encoding="utf-8")
+    texto = (REPO / "web" / "admin" / "formulario.js").read_text(encoding="utf-8")
     assert 'i.value.split(",")' not in texto
     inicio = texto.index("function editorDePadrao(")
     fim = texto.index("function editorDeLista(")

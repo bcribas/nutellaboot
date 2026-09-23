@@ -289,40 +289,15 @@ button.linkish {
   font-size: 13px; cursor: pointer; text-decoration: underline;
 }
 
-/* --- console: navegação por âncoras, chaves, visão da frota --- */
-.secnav {
-  position: sticky; top: 0; z-index: 5;
-  display: flex; flex-wrap: wrap; gap: 4px 14px;
-  padding: 8px 12px; margin-bottom: 14px;
-  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-  font-size: 14px;
-}
-.secnav a { color: var(--muted); text-decoration: none; }
-.secnav a:hover { color: var(--accent); }
-/* a âncora não pode parar debaixo da barra grudada */
-.card[id] { scroll-margin-top: 56px; }
-
+/* --- visão da frota, listas de caixas de marcar, valor copiável --- */
 label.inline { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; font-size: 14px; }
 .checks { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 8px 0; }
 .checks.hidden { display: none; }
 .fview { margin: 10px 0 4px; }
 .fview .fview-hint { margin-left: 8px; font-size: 13px; }
 .copiavel code { word-break: break-all; }
-.card.onetime { border-color: var(--accent); margin-top: 10px; }
 
-dialog.reauth {
-  background: var(--panel); color: var(--fg);
-  border: 1px solid var(--accent); border-radius: var(--radius);
-  padding: 20px 22px; max-width: 520px; width: calc(100% - 40px);
-}
-dialog.reauth::backdrop { background: rgba(0, 0, 0, .6); }
-dialog.reauth input[type="password"] { width: 100%; margin: 8px 0 12px; }
-dialog.reauth h3 { margin: 16px 0 6px; }
 tr.row-outside td { opacity: .45; }
-dialog.reauth.wide { max-width: 860px; }
-.whrow { border-top: 1px solid var(--line); padding: 10px 0; }
-.whrow input[type="text"] { margin: 6px 0; }
-.registrar { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 8px; }
 
 /* --- componentes comuns (console e telas de sede) ---
    Cada um existia só no CSS de uma tela e era usado em outra que não o
@@ -404,6 +379,7 @@ dialog.dlg {
   max-height: calc(100vh - 40px);
 }
 dialog.dlg.largo { max-width: 860px; }
+dialog.dlg input[type="password"] { width: 100%; max-width: none; margin: 8px 0 4px; }
 dialog.dlg::backdrop { background: rgba(0, 0, 0, 0.6); }
 dialog.dlg > h2 { margin: 0 0 12px; font-size: 17px; }
 dialog.dlg .acoes-dlg { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }

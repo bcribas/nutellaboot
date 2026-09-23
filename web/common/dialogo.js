@@ -28,7 +28,7 @@ export const abrirDialogo = ({ titulo = "", largo = false, fixo = false, aoFecha
   const quemAbriu = document.activeElement;
   const dlg = el("dialog", { class: largo ? "dlg largo" : "dlg" });
   const form = el("form", { method: "dialog" });
-  const corpo = el("div", { class: "dlg-corpo" });
+  const corpo = el("div", {});
   const rodape = el("div", { class: "acoes-dlg" });
   form.append(corpo, rodape);
   dlg.append(el("h2", {}, titulo), form);

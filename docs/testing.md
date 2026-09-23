@@ -11,7 +11,7 @@ Todos os comandos partem da raiz do repositório (`nutellaboot3/`).
 .venv/bin/python -m pytest
 ```
 
-São 481 testes em cerca de 36 s. O que cada arquivo cobre:
+São 1261 testes em cerca de 3 min. O que cada arquivo cobre:
 
 | Arquivo | O que garante |
 |---|---|
@@ -34,6 +34,9 @@ São 481 testes em cerca de 36 s. O que cada arquivo cobre:
 | `test_migrate_names.py` | a migração de nomes: `--dry-run` não mexe em nada, é idempotente e não sobrescreve destino existente |
 | `test_web_js.py` | um *no-undef* mínimo para o JavaScript das telas (não há node nesta máquina): acusa uso de variável sem declaração que não seja global do navegador — a classe do "template is not defined" que só explodia no clique. Pende para o falso negativo de propósito; não substitui um linter de verdade |
 | `test_web_ids.py` | todo id que o JavaScript procura existe no HTML da tela (erro que deixaria a tela em branco, sem mensagem) |
+| `test_web_css.py` | toda classe que uma tela usa (no HTML e em todo o grafo de módulos JS que ela carrega) existe no CSS que ela carrega. Os ganchos só de JavaScript ficam numa lista, cada um com o motivo. Um autoteste confere que uma classe sem estilo é acusada: o painel de camadas do console antigo usava o `div.detail` do laboratório e aparecia sem estilo |
+| `test_console.py` | o console tem três modos, e só três: lista, página de detalhe e diálogo. Nada de `prompt()`/`confirm()`/`alert()`; `<dialog>` só nasce em `web/common/dialogo.js`; nada é enfiado fora da página; `innerHTML` só para limpar; handler assíncrono passa por `acao()`; abas, rotas e módulos batem; aba desconhecida ou alheia volta ao padrão; o código de convite nunca vai para o endereço |
+| `test_camadas_anexar.py` | anexar uma construção ao modelo (posição 0, papel `extra`, sem duplicar, sem tocar no `attach_to`), a quem gerencia o modelo; o `attached` só lista imagens visíveis; o manifest leva o arquivo uma vez só; o catálogo traz as construções prontas visíveis; construção sem arquivo não anexa |
 | `test_tool_routes.py` | toda rota `/api/v1/…` citada em `tools/` existe na API de verdade |
 | `test_boot_ui.py` | o kit de tela do boot: cada glifo da fonte tem 5 linhas, o banner quebra quando não cabe, o passo fecha a linha antes de um aviso, nenhum temporário é compartilhado entre funções (foi o que causou `sleep RAM`) e **nenhuma mensagem de tela tem acento** — o proxy de "sobrou português" |
 | `test_boot_screens.py` | as telas fatais: o diagnóstico de disco escolhe entre Fast Startup, pouco espaço, disco não detectado e sistema de arquivos não suportado; cada tela **cabe em 25 linhas** (senão o banner rola para fora, como aconteceu na primeira verificação em VM) e toda tela diz o que fazer |

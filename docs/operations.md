@@ -114,8 +114,11 @@ Casos que ele trata:
   então a base é trocada.
 - **regerar a base e registrar de novo**: continua com uma base só.
 
-Também dá para fazer pela tela, em `/admin/` → **Modelos** → *Partir de* — mas
-aí a camada base tem que ser adicionada à mão, com o md5 do arquivo.
+Também dá para fazer pela tela: em `/admin/`, aba **Modelos**, **Novo modelo**
+com *Partir de* o modelo do ano anterior. Mas aí a base nova entra à mão, na
+página do modelo: seção **Camadas**, **Anexar camada**, papel *sistema base* e
+o md5 do arquivo. A tela pede confirmação e troca a base antiga pela nova (não
+soma as duas).
 
 ### Conferir que colou
 
@@ -159,8 +162,9 @@ modelo do Chile. Modelo sem telemetria não é tocado e aparece na saída.
 `--model` (pode repetir) escolhe os modelos um a um, com a mesma camada.
 
 O nome leva data e hora de Brasília, qualquer que seja o fuso do servidor
-(`telemetria-2026-09-22-1418-f2002a.squash`): no catálogo do /admin/, a mais
-recente é a última do dia.
+(`telemetria-2026-09-22-1418-f2002a.squash`): quando há mais de uma no mesmo
+dia, a hora no nome diz qual é a mais recente na lista do **Anexar camada** do
+`/admin/`.
 
 **Mudou algo em `client/telemetry/`? Suba a versão** em
 `client/telemetry/usr/share/mlog/VERSION` (ano.mês.sequência) no mesmo commit. É
@@ -213,10 +217,11 @@ máquina virtual: suba a imagem-mestre, copie `client/initramfs-tools/` para
 
 ### 1.5 Gravar o pendrive
 
-**Pela tela, que é o caminho normal.** Criar uma sede já dispara a geração, e o
-cartão de credenciais mostra o link assim que fica pronto (uns 40 segundos). O
-mesmo aparece no `/admin/`, na seção **Pendrive de boot**, e no configureitor —
-que é a tela que a sede recebe.
+**Pela tela, que é o caminho normal.** Criar uma sede já dispara a geração. No
+`/admin/`, a página da imagem tem a seção **Pendrive de boot**, que mostra o
+link assim que ele fica pronto (uns 40 segundos). O mesmo aparece no
+configureitor, que é a tela que a sede recebe. A aba **Sistema** tem a visão
+de todas as imagens de uma vez e a imagem genérica do pendrive.
 
 São três downloads, e a ordem é de propósito:
 
@@ -236,10 +241,11 @@ leva a chave de boot dentro, então o nome tem um sufixo aleatório
 (`26brbr-7f3a9c21.img`) — sem isso, quem adivinhasse `26brbr.img` no servidor
 de arquivos levaria a chave da sala junto.
 
-**Quando a chave de boot é rotacionada** (ou o initrd é reconstruído), as três
-telas passam a mostrar *desatualizada*, com o motivo e um botão de regerar.
-Nada é regerado sozinho: todo pendrive já gravado vai ter que ser regravado de
-qualquer jeito, e quem rotacionou decide quando.
+**Quando a chave de boot é trocada** (ou o initrd é reconstruído), as telas que
+mostram o pendrive (a página da imagem e a aba **Sistema** do `/admin/`, e o
+configureitor) passam a mostrar *desatualizada*, com o motivo e o botão **Gerar
+de novo**. Nada é regerado sozinho: todo pendrive já gravado vai ter que ser
+regravado de qualquer jeito, e quem trocou a chave decide quando.
 
 **Por linha de comando**, o mesmo gerador:
 
@@ -365,8 +371,9 @@ Se a publicação estiver **desligada** (`enabled: false`), nada é enviado e as
 máquinas baixam da própria máquina de gestão — funciona, mas não é o que você
 quer numa sede grande.
 
-**O painel Publicação**, no `/admin/`, lista cada arquivo com o estado
-(publicado, falhou, desligado) e a URL ou o motivo do erro. Quando o servidor
+**A seção Publicação de arquivos**, na aba **Sistema** do `/admin/`, lista cada
+arquivo com o estado (publicado, falhou, desligado) e a URL ou o motivo do
+erro. Quando o servidor
 de arquivos está fora do ar na hora da construção, a camada fica marcada como
 falha e continua sendo servida pela máquina de gestão — o boot não quebra. Use
 **"Reenviar pendentes"** quando o servidor voltar; ele reenvia tudo que não
@@ -487,24 +494,27 @@ listagem, o que é oficial e o que é de terceiros.
 
 ### Uma de cada vez
 
-Abra `/admin/` no navegador, informe a chave de administração e preencha
-identificador, nome e modelo. A tela devolve, **uma única vez**, o token, a
-chave de máquina, a chave de boot e o link de configuração. Copie tudo antes de
-sair da página.
+Abra `/admin/` no navegador e entre com a chave de administração. Na aba
+**Imagens**, clique em **Nova imagem** e preencha identificador, nome e modelo.
+O perfil já vem **Oficial** (veja "Perfil da imagem", na seção 3). Ao criar, a
+tela abre a página da imagem na seção **Acesso**, com os dois links para
+entregar à sede e as três credenciais (token, chave de boot e chave de
+máquina). Cada uma tem **Mostrar** e **Copiar**. Nada disso aparece uma vez só:
+a página da imagem mostra as credenciais sempre que você voltar a ela.
 
-No mesmo formulário dá para já enviar o **papel de parede** da imagem (PNG ou
-JPEG) e marcar **"não deixar trocar o papel de parede"**. Marcando essa caixa,
+No mesmo diálogo dá para já enviar o **papel de parede** da imagem (PNG ou
+JPEG) e marcar **"Não deixar trocar o papel de parede"**. Marcando essa caixa,
 o papel de parede fica travado: só a administração muda. No configureitor a
 pessoa continua vendo o papel de parede atual, mas os botões de enviar e
 remover ficam desabilitados, com a mensagem de que o papel de parede foi
 definido pela organização.
 
 O envio é feito logo depois de criar a imagem, então uma falha no upload não
-impede a criação — a imagem já existe e você pode enviar o arquivo depois pelo
-configureitor.
+impede a criação: a imagem já existe, e você envia o arquivo depois, na seção
+**Papel de parede** da página dela.
 
-Se preferir travar (ou destravar) o papel de parede de uma imagem que já
-existe, use a API:
+Para travar (ou destravar) o papel de parede de uma imagem que já existe, use a
+caixa da seção **Geral** da página dela e **Salvar**. Ou a API:
 
 ```bash
 curl -X PATCH https://nutellaboot.mdp.naquadah.com.br/api/v1/site-images/26spsp \
@@ -538,7 +548,13 @@ O CSV de saída tem uma linha por sede com `id, ok, token, machine_key,
 configureitor_url, error`. Linhas inválidas não impedem as outras: cada uma é
 tratada de forma independente e o erro aparece na sua própria linha.
 
-Guarde esse arquivo com cuidado — é a única cópia em claro dos tokens.
+Guarde esse arquivo com cuidado: ele traz os tokens em claro. Se ele se perder,
+a página de cada imagem no `/admin/` mostra as credenciais de novo.
+
+Pela tela, o mesmo: aba **Imagens**, **Criação em massa**. Cole as linhas (o
+modelo de cada linha é opcional; sem ele vale o modelo escolhido no diálogo),
+escolha o perfil (**Oficial** já vem marcado) e **Criar todas**. O resultado
+diz quantas deram certo e oferece o mesmo CSV para baixar.
 
 ### Migrar do NutellaBoot 2
 
@@ -571,8 +587,9 @@ instituição pode criar a própria imagem com um **código de convite**. O cód
 
 **Passo 1 — marque ao menos um modelo como público.** Só modelos públicos
 podem ser usados na criação por convite (os modelos de prova bloqueados ficam
-privados, fora do alcance de terceiros). No `/admin/`, na seção de Modelos,
-clique em "Tornar público". Ou pela API:
+privados, fora do alcance de terceiros). No `/admin/`, aba **Modelos**, abra o
+modelo, marque **"Público (disponível para auto-atendimento)"** na seção
+**Geral** e **Salvar**. Ou pela API:
 
 ```bash
 curl -X PATCH "$SERVER/api/v1/models/generico" \
@@ -581,9 +598,11 @@ curl -X PATCH "$SERVER/api/v1/models/generico" \
     -d '{"public": true, "description": "Ubuntu genérico para laboratórios"}'
 ```
 
-**Passo 2 — gere os códigos e entregue.** No `/admin/`, na seção **Convites**,
-escolha quantos códigos, quantas imagens cada um permite e a cota de camadas
-por imagem, e clique em gerar. Ou pela API:
+**Passo 2 — gere os códigos e entregue.** No `/admin/`, aba **Pessoas**, **Novo
+convite**: o rótulo (quem é), quantos códigos, quantas imagens e modelos cada
+um permite, a cota de construções, o modelo das imagens, o perfil (**Livre** já
+vem marcado) e a validade. **Gerar código** mostra os códigos junto com os dois
+endereços que a pessoa usa (`/admin/` e `/criar/`). Ou pela API:
 
 ```bash
 curl -X POST "$SERVER/api/v1/invites" \
@@ -615,17 +634,21 @@ instalar pacotes extras (ver [layer-builds.md](layer-builds.md)), dentro da
 cota do código.
 
 **Passo 4 — a pessoa volta.** O mesmo código abre um **console de
-sub-administração** em `/admin/`: a mesma tela que você usa, mostrando só o
-que é dela. Lá ela cria modelos próprios (partindo dos públicos), deriva
-outras site-images dentro da cota, monta camadas e vê as credenciais das
-imagens dela. Não vê convites, pedidos, publicação nem criação em massa, e não
-cria nome começando por dígito nem nome reservado.
+sub-administração** em `/admin/`: a mesma tela que você usa, só com as abas
+**Imagens**, **Modelos** e **Camadas**, e só com o que é dela. Lá ela cria
+modelos próprios (partindo dos públicos), deriva outras imagens dentro da cota,
+constrói camadas e vê as credenciais das imagens dela. Não vê as abas
+**Pessoas**, **Chaves** e **Sistema** nem a criação em massa, e não cria nome
+começando por dígito nem nome reservado. As imagens que ela cria levam o perfil
+e a trava do papel de parede do convite.
 
-Para revisar ou revogar códigos, use a lista na seção Convites do `/admin/` (o
-botão "Revogar") ou `DELETE /api/v1/invites/<código>`. **Atenção:** revogar
-tira o console de quem já criou coisas. Se o convite tiver objetos, a API
-responde 409 dizendo o que ficaria órfão e só apaga com `?force=true`. Para
-apenas tirar o acesso sem perder o histórico, prefira suspender:
+Para revisar ou revogar códigos, use a aba **Pessoas** do `/admin/`: cada linha
+é um convite, e a página da pessoa tem **Suspender**, **Revogar** e **Apagar**
+(veja "Chaves: ver, criar, revogar", na seção 3). Pela API,
+`DELETE /api/v1/invites/<código>` é o **Apagar**. **Atenção:** apagar tira o
+console de quem já criou coisas. Se o convite tiver objetos, a API responde 409
+dizendo o que ficaria órfão e só apaga com `?force=true`. Para apenas tirar o
+acesso sem perder o histórico, prefira suspender:
 
 ```bash
 curl -X POST "$SERVER/api/v1/owners/invite:NB3-XXXX-XXXX-XXXX/disable" \
@@ -651,11 +674,14 @@ Quem não recebeu um código pode pedir acesso. Na aba "Não tenho código" de
 `/criar/`, a pessoa informa o nome desejado, um contato e uma justificativa. O
 pedido cai na fila.
 
-No `/admin/`, a seção **Pedidos** lista os pendentes. Em cada um você:
+No `/admin/`, a aba **Pessoas** mostra os pendentes no topo, na seção
+**Pedidos**. Em cada um você:
 
-- **Aprova enviando um código** — o servidor gera um convite e você repassa o
-  código para o contato informado; ou
-- **Recusa**.
+- **Emitir convite**: abre o diálogo do convite novo, já preenchido com o
+  pedido. O servidor gera o código e você o repassa para o contato informado;
+- **Criar a imagem**: abre o diálogo da imagem nova, já preenchido, e cria a
+  imagem na hora; ou
+- **Recusar**.
 
 Pela API, os pedidos ficam em `GET /api/v1/requests`, e a decisão é
 `POST /api/v1/requests/<id>/approve` (com `{"action":"issue_code"}` para emitir
@@ -736,6 +762,28 @@ sessões abertas com ela** — a identidade é reconferida a cada requisição.
 > era um defeito: o console regravava o campo de login (vazio no carregamento)
 > por cima da chave guardada. Não é mais preciso contornar isso.
 
+Se a sessão cair no meio do trabalho (30 dias sem uso, ou chave revogada), a
+tela pede a chave de novo e volta para a mesma página, com o que estava sendo
+editado.
+
+### Como o console se organiza
+
+O `/admin/` tem uma aba por assunto: **Imagens** (a que abre), **Modelos**,
+**Camadas**, **Pessoas**, **Chaves** e **Sistema**. As três últimas são só da
+administração; o sub-admin vê as três primeiras. **Frota** e **Dashboard** ficam
+no topo da página.
+
+Cada aba começa por uma lista. Clique numa linha para abrir a página daquele
+objeto (uma imagem, um modelo, uma pessoa), com uma seção por assunto e um
+**Salvar** por seção. Diálogo só aparece para criar, escolher, confirmar e
+mostrar um segredo. O que não tem volta (apagar uma imagem ou um modelo, trocar
+a chave de boot) pede para digitar o nome antes.
+
+O endereço acompanha a página: `/admin/#imagens/26brbr` abre a imagem direto, e
+`/admin/#imagens/26brbr/acesso` já rola até a seção **Acesso**. Dá para mandar
+esse endereço para outra pessoa da administração: ele não leva credencial
+nenhuma. Sair de uma página com algo não salvo pede confirmação.
+
 ### A página inicial
 
 O endereço raiz do servidor (`https://nutellaboot.mdp.naquadah.com.br/`) é a porta
@@ -747,11 +795,13 @@ e **documentação**. É para lá que você manda as pessoas.
 
 ### Pegar o token e o link de uma imagem
 
-O jeito fácil: em `/admin/`, na lista de imagens, clique em **"ver credenciais
-e link"** na linha da imagem. Aparece um cartão com o token, a chave de boot, a
-chave de máquina e os links prontos do configureitor e do hotconfig — cada um
-com um botão de copiar. Isso **não** rotaciona nada, então os links já
-distribuídos continuam válidos.
+O jeito fácil: em `/admin/`, aba **Imagens**, clique na imagem e vá à seção
+**Acesso** da página dela. Lá estão os dois links prontos (configuração e
+laboratório) e as três credenciais (token, chave de boot e chave de máquina),
+mascarados, cada um com **Mostrar** e **Copiar**. Ver não troca nada, então os
+links já distribuídos continuam válidos. No topo da página, **Abrir a
+configuração** e **Abrir o laboratório** abrem as duas telas com a sua sessão,
+sem precisar do link.
 
 Cada imagem tem um link próprio, já com o token embutido:
 
@@ -760,8 +810,9 @@ https://nutellaboot.mdp.naquadah.com.br/configureitor/?id=26spsp&tk=nb3i_...
 ```
 
 Esse link **é** a credencial: quem tem o link configura a imagem. Mande por
-canal privado. Se vazar, gere outro em `/admin/` ("Gerar novo token") — aí os
-links antigos param de funcionar e você distribui o novo.
+canal privado. Se vazar, troque o token na seção **Acesso** (**Trocar**, ao
+lado do token, pede confirmação). Aí os links antigos param de funcionar e você
+distribui os novos.
 
 Todas as páginas funcionam em português, inglês e espanhol — o idioma é
 detectado pelo navegador e pode ser trocado no canto superior direito.
@@ -790,16 +841,18 @@ por exemplo, o firewall e as permissões).
 ### Escolher o que a sede pode mudar
 
 Quais campos ficam bloqueados é decisão sua, e se ajusta pela tela. No
-`/admin/`, na seção do modelo, **clique no nome do modelo**: abre a lista de
-todos os campos daquele modelo, cada um com um cadeado.
+`/admin/`, aba **Modelos**, abra o modelo: a seção **Formulário da sede** lista
+todos os campos daquele modelo, cada um com o valor padrão e a caixa **Só a
+administração** (o cadeado).
 
-- **Cadeado fechado** — só a administração muda aquele campo.
-- **Cadeado aberto** — a sede pode mudar.
+- **Marcada**: só a administração muda aquele campo.
+- **Desmarcada**: a sede pode mudar.
 
-Clique nos cadeados que quiser inverter e use **"Salvar cadeados"**. A mudança
-vale para todas as imagens **Oficiais** daquele modelo; as imagens **Livres**
-continuam editando tudo, independentemente dos cadeados (veja o perfil logo
-abaixo).
+Mude as caixas que quiser (e os valores padrão, se for o caso) e use
+**Salvar**, no fim da seção. A mudança vale para todas as imagens **Oficiais**
+daquele modelo; as imagens **Livres** continuam editando tudo,
+independentemente dos cadeados (veja o perfil logo abaixo). Se você sair da
+página com algo não salvo, a tela pergunta antes.
 
 É assim que se faz, por exemplo, "nesta temporada as sedes escolhem a RAM
 mínima, mas o firewall continua fechado": abra o cadeado da RAM mínima e deixe
@@ -834,14 +887,17 @@ Quais campos ficam bloqueados depende do **perfil** da imagem:
 
 Como se define:
 
-- **Criando pelo `/admin/`**: o formulário tem um seletor de perfil (padrão
-  Oficial). A criação em massa (TSV) sempre gera imagens Oficiais.
+- **Criando pelo `/admin/`**: a **Nova imagem**, a **Criação em massa** e o
+  **Criar a imagem** de um pedido têm o seletor de perfil, com **Oficial** já
+  marcado.
 - **Convites**: ao gerar um código você escolhe o perfil que as imagens dele
-  vão ter — o padrão é **Livre** (quem cria a própria imagem manda nela). Marque
-  Oficial se estiver convidando uma sub-sede que precisa seguir as regras.
-- **Trocando depois**: na lista de imagens do `/admin/` cada linha mostra uma
-  pílula **Oficial/Livre** e um botão que alterna — é assim que você "volta uma
-  imagem com tudo liberado", sem recriar nada nem invalidar links.
+  vão ter. O padrão é **Livre** (quem cria a própria imagem manda nela). Marque
+  Oficial se estiver convidando uma sub-sede que precisa seguir as regras. O
+  sub-admin não escolhe outro perfil: as imagens dele seguem o do convite.
+- **Trocando depois**: a lista de imagens do `/admin/` mostra o perfil de cada
+  uma, e a seção **Geral** da página da imagem tem o seletor. É assim que você
+  "volta uma imagem com tudo liberado", sem recriar nada nem invalidar links.
+  Virar **Livre** também desmarca a trava do papel de parede.
 
 Quais campos são obrigatórios em cada perfil é decisão do **modelo** (campos
 marcados `locked` no `schema.json`), não da imagem. Ou seja: dá para ter um
@@ -906,11 +962,14 @@ O `/dashboard/` é a tela de transmissão: placar da frota, mapa de calor por
 região, histórico com recorte de período e as visões de hardware, editores e
 disco. Para pôr num telão ou entregar a um jornalista SEM entregar o console:
 
-1. no `/admin/`, cartão da frota, **Compartilhar dashboard** — sai uma URL
-   pronta (`/dashboard/?tk=nb3s_…`). A chave aparece UMA vez;
+1. no `/admin/`, aba **Chaves**, seção **Chaves de serviço**, **Compartilhar
+   dashboard**. Sai uma URL pronta (`/dashboard/?tk=nb3s_…`), que aparece UMA
+   vez;
 2. a chave só LÊ os agregados: não abre hotconfig, não roda comando, não vê o
    detalhe por máquina no zoom;
-3. para trocar, **Revogar** e criar outra — a URL antiga morre na hora.
+3. o link é uma chave de serviço como as outras, marcada *dashboard* na lista:
+   **Trocar** dá uma URL nova com o mesmo nome, e **Revogar** mata a antiga na
+   hora.
 
 O seletor de período ("30 min · 2 h · 5 h · 24 h · desde…") fica na URL:
 `/dashboard/?since=<epoch>` abre já recortado — o link do telão pode apontar
@@ -918,9 +977,9 @@ para o início da prova.
 
 Ao compartilhar, escolha o que o link mostra: **o link segue a minha seleção**
 (o padrão: ele mostra a visão da frota da administração, e muda na hora em que
-você a muda) ou **estas imagens** (um recorte fixo por globs, como `26br*`). O
-link que segue a seleção nunca se alarga sozinho, e os globs continuam sendo o
-teto.
+você a muda) ou **o link mostra só as imagens informadas abaixo** (um recorte
+fixo por globs, como `26br*`). O link que segue a seleção nunca se alarga
+sozinho, e os globs continuam sendo o teto.
 
 ### A visão da frota: o que o dashboard e os laboratórios mostram
 
@@ -936,48 +995,70 @@ compartilhado que o segue):
 | **por dono** | as imagens dos donos marcados (só a administração) |
 | **escolhidas à mão** | as sedes marcadas na tela dos laboratórios |
 
-O seletor está no cartão da frota do `/admin/` e no topo do `/laboratorios/`.
-Para escolher à mão: em `/laboratorios/` marque **mostrar todas, sem salvar** (as
-sedes de fora da visão aparecem esmaecidas), marque as que você quer, escolha
-**escolhidas à mão** e **Gravar**. Imagem criada depois disso fica **fora** até
+O seletor está no topo do `/laboratorios/` (o botão **Frota**, no topo do
+`/admin/`, leva para lá). Para escolher à mão: em `/laboratorios/` marque
+**mostrar todas, sem salvar** (as sedes de fora da visão aparecem esmaecidas),
+marque as que você quer, escolha **escolhidas à mão** e **Gravar**. Imagem criada depois disso fica **fora** até
 ser escolhida, e a tela avisa ("N imagens novas fora da seleção"): o laboratório
 novo de alguém não pula para o telão sozinho. `dashboard_hidden` continua sendo
 exclusão dura, acima de qualquer visão.
 
 Toda lista de imagens (no `/admin/` e nos laboratórios) diz **de quem é** cada
-uma: a administração, ou o rótulo do convite de quem a criou. Mude o rótulo em
-**Convites → Editar**; ele acompanha em todas as telas. O código do convite
-nunca aparece nessas listas: ele é a credencial de console daquela pessoa.
+uma: a administração, ou o rótulo do convite de quem a criou. Mude o rótulo na
+página da pessoa (aba **Pessoas**, seção **Convite e cotas**); ele acompanha em
+todas as telas. O código do convite nunca aparece nessas listas nem no endereço
+da página: ele é a credencial de console daquela pessoa.
+
+### Pessoas: convites e sub-administradores
+
+A aba **Pessoas** do `/admin/` (só da administração) tem uma linha por convite,
+com o rótulo, a situação (não usado, em uso, suspenso, revogado, vencido), o uso
+das cotas (modelos, imagens, construções) e o último acesso. Quem entrou por
+convite é a mesma linha: o convite é a credencial do console da pessoa, e as
+cotas moram nele. Os pedidos pendentes aparecem no topo da aba.
+
+Clique na linha para abrir a página da pessoa:
+
+- **Código do convite**: escondido; **Mostrar o código** quando for preciso
+  reenviá-lo.
+- **Convite e cotas**: rótulo, validade, perfil das imagens, trava do papel de
+  parede e as três cotas, com um **Salvar** só.
+- **Uso**: o que a pessoa já criou.
+- **Acesso**: **Suspender** (existe depois que a pessoa entrou) fecha o console
+  e a criação de imagens pelo `/criar/`. **Revogar** fecha o convite, com o
+  mesmo efeito, e vale também para um código que ainda não foi usado. Nada é
+  apagado, e os dois dão para desfazer (**Reativar**, **Reabrir**).
+- **Apagar o convite**: o definitivo. Se a pessoa já criou coisas, a tela
+  mostra o que ficaria sem dono e pergunta de novo antes de ir.
 
 ### Chaves: ver, criar, revogar
 
-O cartão **Chaves** do `/admin/` (só da administração) reúne o que antes pedia
+A aba **Chaves** do `/admin/` (só da administração) reúne o que antes pedia
 `curl` ou acesso ao servidor:
 
 - **Chaves de administração**: a lista (quem criou, quando, último uso, quantas
   sessões abertas, e qual é a desta sessão), criar e revogar. Criar e revogar
   pedem **a sua chave de novo**: o navegador lembra a sessão, não a pessoa.
-  Não existe "rotacionar": crie a nova, **entre com ela**, e só então revogue a
+  Não existe "trocar": crie a nova, **entre com ela**, e só então revogue a
   velha. A última chave não se revoga. Foi assim que a chave de admin que passou
   pela conversa com o assistente do MOJ pôde ser trocada sem acesso ao servidor.
 - **Chaves de serviço** (o MOJ, o telão): todas aparecem, com escopos, globs,
-  criada em e último uso. Criar com os escopos do catálogo; **Rotacionar** dá
-  uma chave nova com o mesmo nome (a antiga morre na hora); nome repetido é
-  erro, não sobrescrita. O recomendado é uma chave por evento.
-- **Auditoria**: o que foi feito com chaves e convites, por quem e de onde. Não
-  guarda segredo nenhum.
+  criada em e último uso. **Nova chave de serviço** com os escopos do catálogo;
+  **Editar** muda escopos e globs; **Trocar** dá uma chave nova com o mesmo
+  nome (a antiga morre na hora); **Revogar** apaga. Nome repetido é erro, não
+  sobrescrita. O recomendado é uma chave por evento. O link do dashboard
+  compartilhado é uma delas (veja "Compartilhar o dashboard").
 
-Em **Sub-administradores**: suspender (corta o console sem apagar nada), ajustar
-cotas, ver o uso e o último acesso. Em **Convites**: **Revogar** agora é
-reversível (fecha o console e a criação de imagens, e não deixa nada órfão);
-**Apagar** é o definitivo, e avisa o que ficaria sem dono antes de ir.
+A **Auditoria das credenciais** (o que foi feito com chaves e convites, por quem
+e de onde) fica na aba **Sistema**. Ela não guarda segredo nenhum.
 
-Na linha de cada imagem, **Chaves** mostra a chave de boot (a que vai no
-`nutellaboot.conf`) e a rotaciona, e troca a **chave de máquina**, que não tinha
-rotação. A máquina só recebe a chave de máquina no boot: use a **carência**
-(12 h por padrão) para as máquinas ligadas não ficarem mudas; "sem carência" é
-para chave vazada, e é recusada enquanto houver máquina travada (ela não
-receberia o destravar).
+As chaves de cada imagem ficam na página dela, seção **Acesso**. A chave de boot
+(a que vai no `nutellaboot.conf`) e a **chave de máquina** têm **Trocar**. A
+chave de boot pede para digitar o identificador da imagem: os pendrives da sede
+param de bootar até serem atualizados. A máquina só recebe a chave de máquina no
+boot: use a **carência** (12 h por padrão) para as máquinas ligadas não ficarem
+mudas; "sem carência" é para chave vazada, e a tela avisa quando há máquina
+travada (ela não receberia o destravar) e pergunta de novo antes de forçar.
 
 `last_used` é aproximado (vai ao disco uma vez por minuto): serve para achar a
 chave esquecida, não para perícia.
@@ -1140,8 +1221,8 @@ tela, com a janela de dias escolhida.
 
 A imagem de teste dos times (perfil Livre, distribuída publicamente) fica
 marcada **"Fora do dashboard"** no `/admin/`: centenas de máquinas de casa
-não entram no placar, nas médias nem nos gráficos da frota. O botão ao lado
-do perfil liga e desliga a marca.
+não entram no placar, nas médias nem nos gráficos da frota. A caixa fica na
+seção **Geral** da página da imagem, e a lista de imagens mostra a marca.
 
 ### Relatório da frota
 
@@ -1193,15 +1274,17 @@ eles cobrem), então o MOJ não precisa que ninguém digite os ids das sedes.
 
 #### Webhooks do MOJ: quem instala, para onde apontam e onde ver a falha
 
-Pela tela: na linha da imagem no `/admin/`, **Webhooks** abre a lista da sede
-(a do MOJ inclusive): acrescentar, mudar os eventos, trocar o segredo (gerado
-no navegador e mostrado uma vez), **Enviar teste** (bate na URL agora e mostra
-o status) e as entregas que falharam. Ali também: **Editar** (nome, modelo,
-cota de builds), e nas camadas da imagem, **Registrar uma camada já
-construída** (o caminho do `nb3-pack-upper`: arquivo em `data/blobs` e md5).
-No cartão de publicação, **Publicar** manda um arquivo específico. Em
-Pedidos, **Criar a imagem** aprova criando a sede na hora (com id, modelo e
-perfil) em vez de emitir um código.
+Pela tela: na página da imagem no `/admin/`, a seção **Webhooks** mostra os
+webhooks da sede (o do MOJ inclusive): acrescentar, mudar os eventos, trocar o
+segredo (gerado no navegador e mostrado uma vez), **Enviar teste** (bate na URL
+agora e mostra o status) e as entregas que falharam. Na mesma página: a seção
+**Geral** (nome, modelo, cota de construções), e na seção **Camadas**, **Anexar
+camada** com *(informar à mão)* registra uma camada já construída (o caminho
+do `nb3-pack-upper`: arquivo em `data/blobs` e md5). Na aba **Sistema**, seção
+**Publicação de arquivos**, **Publicar um arquivo** manda um arquivo
+específico. Em **Pessoas**, o pedido pendente tem **Criar a imagem**, que
+aprova criando a sede na hora (com id, modelo e perfil) em vez de emitir um
+código.
 
 Com `webhooks:write` o próprio MOJ instala e remove o webhook dele
 (`POST …/webhooks`, `DELETE …/webhooks/<id>`), sem a chave de administração.
@@ -1375,10 +1458,11 @@ O `NB_BOOT_KEY` do `nutellaboot.conf` não bate com o da imagem. Pegue a atual:
 curl "$SERVER/api/v1/site-images/26spsp/boot-key" -H "Authorization: Bearer $NB3_ADMIN_KEY"
 ```
 
-Se alguém rodou `boot-key/rotate`, **todos** os pendrives daquela imagem
-precisam ser atualizados. Por isso a rotação só existe por linha de comando: o
-console mostra a chave, mas não oferece um botão para trocá-la — é a única
-operação do sistema que invalida material já distribuído fisicamente.
+Se alguém trocou a chave de boot (`boot-key/rotate`, ou **Trocar** na seção
+**Acesso** da página da imagem), **todos** os pendrives daquela imagem precisam
+ser atualizados. Por isso o console pede para digitar o identificador da imagem
+antes de trocar: é a única operação do sistema que invalida material já
+distribuído fisicamente.
 
 ### A tela vermelha "NO DISK"
 

@@ -302,9 +302,13 @@ def test_o_front_nao_guarda_mais_credencial():
     assert "sessionStorage.setItem" not in api
     assert "localStorage.setItem" not in api
 
-    for tela in ("admin/app.js", "criar/app.js", "index.js", "common/chave.js"):
-        texto = (web / tela).read_text(encoding="utf-8")
-        assert "nb3-admin-key" not in texto, f"{tela} ainda guarda a chave"
+    telas = [p for p in sorted((web / "admin").glob("*.js"))] + [p for p in sorted((web / "common").glob("*.js"))]
+    telas += [web / "criar" / "app.js", web / "index.js"]
+    for tela in telas:
+        texto = tela.read_text(encoding="utf-8")
+        assert "nb3-admin-key" not in texto, f"{tela.name} ainda guarda a chave"
+        if tela.parent.name == "admin":
+            assert "localStorage.setItem" not in texto and "sessionStorage.setItem" not in texto, tela.name
 
 
 def test_o_console_entra_pela_sessao_no_carregamento():

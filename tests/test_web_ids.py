@@ -51,11 +51,13 @@ def test_ids_do_js_existem_no_html(html, js):
     assert faltando == set(), f"{js.relative_to(REPO)} procura ids que {html.name} não tem: {sorted(faltando)}"
 
 
-def test_console_tem_os_elementos_da_secao_de_modelos():
-    """A seção de Modelos é a novidade do console; se algum campo sumir, a
-    criação de modelo para de funcionar sem erro na tela."""
-    ids = ids_no_html(WEB / "admin" / "index.html")
-    assert {"mod_name", "mod_desc", "mod_from", "mod_create", "modlist", "modpanel"} <= ids
+def test_o_console_cria_modelo_com_nome_descricao_e_origem():
+    """Criar e duplicar modelo são o mesmo diálogo; se um campo sumir do
+    corpo, a criação para de copiar camadas e formulário sem erro na tela."""
+    js = (WEB / "admin" / "modelo.js").read_text(encoding="utf-8")
+    trecho = js.split('api.post("/api/v1/models"', 1)[1].split(")", 1)[0]
+    for campo in ("name:", "description:", "from:"):
+        assert campo in trecho, campo
 
 
 def test_painel_do_laboratorio_tem_a_faixa_de_alerta():
@@ -91,18 +93,20 @@ def test_alerta_chega_sem_esperar_o_agrupamento():
 
 
 @pytest.mark.parametrize(
-    "secao",
-    ["invites", "requests_admin", "publish_section", "bulk", "keys_section", "owners_section", "audit_section"],
+    "aba,so_admin",
+    [("imagens", False), ("modelos", False), ("camadas", False), ("pessoas", True), ("chaves", True), ("sistema", True)],
 )
-def test_console_marca_o_que_e_so_da_administracao(secao):
-    """Sub-admin não pode ver convites, pedidos, publicação nem criação em
-    massa — o JS esconde pelo atributo, então ele precisa estar no cartão."""
+def test_console_marca_o_que_e_so_da_administracao(aba, so_admin):
+    """Sub-admin não vê convites, pedidos, chaves, publicação nem auditoria: a
+    aba some (data-admin-only) E o roteador não a abre (`admin: true`), para o
+    endereço digitado à mão também voltar à aba padrão."""
     html = (WEB / "admin" / "index.html").read_text(encoding="utf-8")
-    # do último <div class="card... antes do título até o título: é a abertura
-    # do cartão que contém esta seção
-    antes = html.split(f'<h2 data-i18n="{secao}">', 1)[0]
-    abertura = antes.rsplit("<div class=", 1)[-1]
-    assert "data-admin-only" in abertura, f"o cartão de {secao} precisa de data-admin-only"
+    link = re.search(rf'<a href="#{aba}"[^>]*>', html)
+    assert link, f"a aba {aba} sumiu"
+    assert ("data-admin-only" in link.group(0)) is so_admin
+    rotas = (WEB / "admin" / "rotas.js").read_text(encoding="utf-8")
+    assert re.search(rf"\b{aba}: \{{ admin: {'true' if so_admin else 'false'},", rotas), aba
+    assert "ROTAS[aba].admin" in rotas, "o roteador tem de consultar a marca"
 
 
 def _imports(js: Path) -> list[str]:
