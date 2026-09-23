@@ -623,7 +623,18 @@ def site_image_layers(image_id: str) -> list[dict]:
     info = get_site_image(image_id) or {}
     extra = fsdb.read_json(site_image_dir(image_id) / "layers-extra.json", []) or []
     tpl = fsdb.read_json(model_dir(info.get("model", "")) / "model.json", {}) or {}
-    return list(extra) + list(tpl.get("layers", []))
+    # a mesma camada pode estar na imagem e no modelo (anexada à imagem pela
+    # construção e, depois, ao modelo inteiro): a máquina a montaria duas vezes
+    # no lowerdir. Fica a primeira, que é a de maior prioridade.
+    vistas: set[str] = set()
+    camadas = []
+    for c in list(extra) + list(tpl.get("layers", [])):
+        arquivo = str(c.get("file", ""))
+        if arquivo in vistas:
+            continue
+        vistas.add(arquivo)
+        camadas.append(c)
+    return camadas
 
 
 def config_values(image_id: str) -> dict:

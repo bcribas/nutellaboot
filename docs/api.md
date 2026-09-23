@@ -194,7 +194,7 @@ ALLOWNETWORKCHANGE='f'
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| POST | `/api/v1/site-images` | C | `{id, fullname, model, unlocked?, wallpaper_locked?, dashboard_hidden?, country?}` (`dashboard_hidden` só a administração; `country` é ISO alpha-2) | imagem criada **com as credenciais em claro** (única vez) |
+| POST | `/api/v1/site-images` | C | `{id, fullname, model, unlocked?, wallpaper_locked?, dashboard_hidden?, country?}` (`dashboard_hidden` só a administração; `country` é ISO alpha-2). Para o sub-admin o convite decide: `unlocked: true` só se o convite for Livre, e `wallpaper_locked` é o do convite (valor diferente: **403**); a imagem herda o `build_quota` do convite | imagem criada **com as credenciais em claro** (única vez) |
 | POST | `/api/v1/site-images/bulk` | A | TSV ou `{rows:[…]}` | `{results:[…]}`; com `?format=csv`, CSV das credenciais |
 | GET | `/api/v1/site-images?prefix=` | C, S (qualquer escopo) | — | `{images:[…]}` (o sub-admin vê só as dele). Para a chave de serviço: só as imagens do glob, como `{id, fullname, country?, machines_total}` |
 | GET | `/api/v1/site-images/{img}` | C, I, S (qualquer escopo, dentro do glob) | — | `image.json` **sem o `owner` cru** para quem não é o console dono (ver abaixo); sempre com `owner_kind`, `owner_label`, `owner_ref` |
@@ -258,14 +258,14 @@ telemetria, wifi, pacotes) e o formulário que cada sede preenche
 | POST | `/api/v1/models` | C | `{name, description?, public?, from?}` | modelo criado |
 | POST | `/api/v1/models/{n}/duplicate` | C | `{name, description?}` | cópia com as mesmas camadas e o mesmo formulário |
 | GET | `/api/v1/models` | C | — | `{models:[{name, description, public, owner, mine, layers, used_by, can_manage}]}` |
-| GET | `/api/v1/models/{n}` | C | — | `model.json` + `schema` |
+| GET | `/api/v1/models/{n}` | C | — | `model.json` + `schema` + `can_manage`, `mine` e `image_extras:[{id, fullname, unlocked, layers:[{file, md5, role, from_build}]}]` (as imagens deste modelo que quem pergunta enxerga, com as camadas só delas) |
 | PATCH | `/api/v1/models/{n}` | C | `{public?, description?}` | modelo atualizado (só **A** publica) |
 | DELETE | `/api/v1/models/{n}` | C | — | `204`; **409** se alguma site-image ainda deriva dele |
 | POST | `/api/v1/models/{n}/layers` | C | `{file, md5, cdn_url?, size?, position?, role?, replace_role?}` | `{layers:[…]}` |
 | DELETE | `/api/v1/models/{n}/layers/{file}` | C | — | `{layers:[…]}` |
 | PUT | `/api/v1/models/{n}/layers/order` | C | `{files:[…]}` | `{layers:[…]}` |
 | PUT | `/api/v1/models/{n}/layers` | C | `{layers:[…]}` | substitui a lista inteira (prefira o `POST`: uma leitura desatualizada aqui apaga o que outro acabou de acrescentar) |
-| GET | `/api/v1/layers/catalog` | C | — | camadas já em uso, com `used_by` |
+| GET | `/api/v1/layers/catalog` | C | — | camadas já em uso, com `used_by`, e as construções prontas visíveis a quem pergunta (`build:{id, name, model, finished_at}`, `available`) |
 | GET | `/api/v1/models/{n}/schema` | C | — | campos com `default`, `label`, `help` e `locked` |
 | PUT | `/api/v1/models/{n}/schema/locks` | C | `{locks:{CAMPO:true|false}}` | schema atualizado |
 | PATCH | `/api/v1/models/{n}/schema/fields/{key}` | C | `{default?, locked?, label?, help?}` | schema atualizado |
@@ -300,8 +300,8 @@ Notas que economizam depuração:
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/whoami` | C, S (qualquer escopo) | — | console: `{kind, label, owner, can_create_reserved, can_publish_models, can_manage_invites, quotas, usage}`; chave de serviço: `{kind:"service", name, label, scopes, image_globs, images}` |
-| GET | `/api/v1/owners` | A | — | `{owners:[{id, label, quotas, usage, console_ok}]}` |
+| GET | `/api/v1/whoami` | C, S (qualquer escopo) | — | console: `{kind, label, owner, can_create_reserved, can_publish_models, can_manage_invites, quotas, usage:{models, site_images, builds}}`, e para o sub-admin `invite_profile:{unlocked, wallpaper_locked}`; chave de serviço: `{kind:"service", name, label, scopes, image_globs, images}` |
+| GET | `/api/v1/owners` | A | — | `{owners:[{id, owner_ref, label, quotas, usage, console_ok}]}` |
 | POST | `/api/v1/owners/{id}/disable` | A | `{disabled?: true}` | suspende (ou reativa) o console |
 | PATCH | `/api/v1/owners/{id}/quotas` | A | `{max_models?, max_images?, build_quota?}` | `{id, quotas, usage}` |
 
@@ -309,7 +309,7 @@ Notas que economizam depuração:
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/invites` | A | — | `{invites:[…]}` |
+| GET | `/api/v1/invites` | A | — | `{invites:[{code, owner_ref, …}]}`: o `owner_ref` junta o convite ao sub-admin (e às imagens dele) sem repetir o código |
 | POST | `/api/v1/invites` | A | `{label?, note?, model?, count?, max_images?, max_models?, build_quota?, expires_at?, unlocked?, wallpaper_locked?}` | `{invites:[…]}` — **com os códigos**; `count` emite vários de uma vez |
 | PATCH | `/api/v1/invites/{code}` | A | qualquer de `{label, note, max_images, max_models, build_quota, expires_at, revoked, unlocked, wallpaper_locked, model}` | o convite atualizado. `revoked: true` fecha o console e a criação **sem destruir nada** (o dono dos objetos fica) e volta atrás com `false` |
 | DELETE | `/api/v1/invites/{code}` | A | — | **409** listando o que ficaria órfão; `?force=true` apaga assim mesmo |
@@ -351,7 +351,7 @@ Do outro lado, a administração despacha os pedidos:
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
 | GET | `/api/v1/requests` | A | — | `{requests:[…]}` |
-| POST | `/api/v1/requests/{rid}/approve` | A | `{action:"issue_code"\|"create", model?, max_images?, build_quota?, unlocked?}` | o código emitido, ou a imagem já criada com as credenciais |
+| POST | `/api/v1/requests/{rid}/approve` | A | `{action:"issue_code"\|"create", …}`: com `issue_code`, os mesmos campos do `POST /invites` (`max_images` padrão 1, rótulo do pedido); com `create`, `{id, fullname?, model, unlocked?, build_quota?}` | o código emitido, ou a imagem já criada com as credenciais |
 | POST | `/api/v1/requests/{rid}/reject` | A | `{reason?}` | pedido marcado como recusado |
 
 `issue_code` devolve um convite para a pessoa se virar; `create` já cria a
@@ -710,8 +710,8 @@ token e a chave de máquina de cada sede. Nome fora da lista é `404`.
 | GET | `/api/v1/site-images/{img}/commands` | C, I, S`commands:write` | — | `{allowed:[…], blocked:{comando: campo}}` |
 | GET | `/api/v1/site-images/{img}/machines/{mac}/commands?wait=25` | M | — | `{commands:[…], lock}` (long-poll) |
 | POST | `/api/v1/site-images/{img}/machines/{mac}/commands/{cid}/ack` | M | `{status, output?}` | `{ok, found}` |
-| POST | `/api/v1/site-images/{img}/lock` | C, I, S`commands:write` | — | trava a TELA de todas as máquinas |
-| POST | `/api/v1/site-images/{img}/unlock` | C, I, S`commands:write` | — | destrava a tela de todas |
+| POST | `/api/v1/site-images/{img}/lock` | C, I, S`commands:write` | — | trava a TELA de todas as máquinas. Corpo com `target` (≠ `"all"`), `targets`, `macs`, `mac` ou `machines` dá **400 `no_target`**: para algumas máquinas, a rota por MAC |
+| POST | `/api/v1/site-images/{img}/unlock` | C, I, S`commands:write` | — | destrava a tela de todas (mesmo portão do `lock`) |
 | POST | `/api/v1/site-images/{img}/machines/{mac}/lock` | C, I, S`commands:write` | — | idem, para uma máquina |
 | POST | `/api/v1/site-images/{img}/machines/{mac}/unlock` | C, I, S`commands:write` | — | idem |
 
@@ -796,9 +796,9 @@ Eventos: `machine.first_seen`, `machine.status`, `machine.locked`,
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
 | POST | `/api/v1/layerbuilds` | C | `{name, model, packages:[…], attach_to?}` | job criado (sub-admin gasta `build_quota`) |
-| GET | `/api/v1/layerbuilds` | C | — | `{builds:[{…, state}]}` (filtrado por dono) |
+| GET | `/api/v1/layerbuilds` | C | — | `{builds:[{…, state}]}` (filtrado por dono); as prontas trazem `attached:{images, model}` (onde a camada está: imagens que quem pergunta enxerga, e o modelo da construção) e `available` (o arquivo ainda tem de onde ser baixado) |
 | GET | `/api/v1/layerbuilds/{job}` | C | — | job + últimos 8000 caracteres do log |
-| POST | `/api/v1/layerbuilds/{job}/attach` | C | `{image_ids:[…]}` | `{ok, layer, images}` |
+| POST | `/api/v1/layerbuilds/{job}/attach` | C | `{image_ids?:[…], model?: true}` | `{ok, layer, images, model}`. `model: true` anexa ao modelo **da construção** (nunca a outro: a camada leva o estado do apt daquela base), na frente. Corpo vazio usa o `attach_to` do pedido. Sem arquivo para baixar: **409** |
 | GET | `/api/v1/site-images/{img}/layers` | C, I | — | `{extra:[…], all:[…]}` |
 | POST | `/api/v1/site-images/{img}/layers` | C | `{md5, file, size?, cdn_url?}` | `{ok, layer}` |
 | DELETE | `/api/v1/site-images/{img}/layers/{file}` | C | — | `204` |
@@ -873,7 +873,7 @@ de pacotes extras, gastando a cota dela:
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| POST | `/api/v1/site-images/{img}/layerbuilds` | C, I | `{name, packages:[…]}` | job criado + `quota` restante |
+| POST | `/api/v1/site-images/{img}/layerbuilds` | C, I | `{name, packages:[…]}` | job criado + `quota` (a da imagem, para o token dela). O sub-admin gasta a cota **dele**, a mesma do `POST /layerbuilds` |
 | GET | `/api/v1/site-images/{img}/layerbuilds` | C, I | — | `{jobs:[…], quota}` |
 
 ### Publicação no servidor de arquivos

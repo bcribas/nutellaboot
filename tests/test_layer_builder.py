@@ -236,6 +236,9 @@ def test_attach_coloca_camada_na_frente(client, admin_key, data_root):
         "output": {"file": "extra.squash", "md5": "b" * 32, "size": 123},
     }
     fsdb.write_json(data_root / "layerbuilds" / "done" / "j2.json", job)
+    # o worker deixa o arquivo em data/blobs: sem ele não há de onde baixar
+    (data_root / "blobs").mkdir(parents=True, exist_ok=True)
+    (data_root / "blobs" / "extra.squash").write_bytes(b"x" * 123)
 
     r = client.post("/api/v1/layerbuilds/j2/attach", json={"image_ids": ["alvo"]}, headers=h)
     assert r.status_code == 200, r.text

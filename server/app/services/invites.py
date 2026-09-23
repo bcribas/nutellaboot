@@ -108,6 +108,12 @@ def is_valid(code: str) -> tuple[bool, str]:
     if inv.get("revoked"):
         # revogado fecha as duas portas: o console (abaixo) e a criação
         return False, "código revogado"
+    from . import owners  # owners importa este módulo
+
+    if owners.disabled(owners.owner_id(code)):
+        # suspender corta o acesso: o console já barrava, e o /criar/ com o
+        # mesmo código continuava criando imagem
+        return False, "código suspenso"
     if inv.get("expires_at") and time.time() > inv["expires_at"]:
         return False, "código expirado"
     if len(inv.get("used_images", [])) >= inv.get("max_images", 1):

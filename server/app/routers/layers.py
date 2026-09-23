@@ -1,9 +1,9 @@
-"""Camadas extras: fila de construção e anexação às imagens.
+"""Camadas extras: fila de construção e anexação às imagens e ao modelo.
 
 Fluxo: a API só enfileira; quem constrói é o worker (tools/nb3-layer-worker),
-que roda como usuário comum — sem root. Ao terminar, o worker chama
-/layerbuilds/{job}/attach para registrar a camada nas imagens escolhidas; o
-banco continua sendo escrito só pela API.
+que roda como usuário comum — sem root. Ao terminar, o worker anexa a camada às
+imagens escolhidas no pedido; anexar depois (a outras imagens, ou ao modelo
+inteiro) é por /layerbuilds/{job}/attach.
 """
 
 from __future__ import annotations
@@ -15,18 +15,13 @@ import time
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from .. import auth, fsdb
-from ..services import ownership, publish, store
+from ..services import layerbuilds, ownership, store
 from ..settings import settings
 
 router = APIRouter(prefix="/api/v1")
 
 PKG_RE = re.compile(r"^[a-z0-9][a-z0-9+._-]*$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,48}$")
-ESTADOS = ("queue", "running", "done", "failed")
-
-
-def _dir(estado: str):
-    return settings.data_root / "layerbuilds" / estado
 
 
 def _validate_packages(pacotes) -> list[str]:
@@ -38,52 +33,16 @@ def _validate_packages(pacotes) -> list[str]:
     return [str(x) for x in pacotes]
 
 
-def _layer_url(saida: dict) -> str:
-    """URL de download da camada: a publicada no servidor de arquivos quando
-    existe, senão a servida pela máquina de gestão."""
-    if saida.get("url"):
-        return saida["url"]
-    estado = publish.state(saida["file"])
-    if estado and estado.get("status") == "done" and estado.get("url"):
-        return estado["url"]
-    return f"{settings.base_url}/blobs/{saida['file']}"
-
-
-def _builds_for_image(image_id: str) -> int:
-    """Conta as tentativas de build de uma imagem (todos os estados) — base da
-    quota do auto-atendimento."""
-    n = 0
-    for estado in ESTADOS:
-        d = _dir(estado)
-        if not d.is_dir():
-            continue
-        for f in d.glob("*.json"):
-            job = fsdb.read_json(f) or {}
-            if job.get("image") == image_id or image_id in (job.get("attach_to") or []):
-                n += 1
-    return n
-
-
-def _builds_for_owner(owner: str) -> int:
-    """Cota de build do sub-admin: conta tentativas, não sucessos. Contar só
-    os que deram certo faria uma fila de builds quebrados sair de graça."""
-    n = 0
-    for estado in ESTADOS:
-        d = _dir(estado)
-        if not d.is_dir():
-            continue
-        for f in d.glob("*.json"):
-            if (fsdb.read_json(f) or {}).get("owner") == owner:
-                n += 1
-    return n
-
-
-def _find(job_id: str) -> tuple[str, dict] | tuple[None, None]:
-    for estado in ESTADOS:
-        p = _dir(estado) / f"{job_id}.json"
-        if p.is_file():
-            return estado, fsdb.read_json(p)
-    return None, None
+def _exigir_cota_do_dono(p) -> None:
+    """A cota de construções do sub-admin vale para TODO pedido dele, por modelo
+    ou por imagem. A construção por imagem dispensava a cota e saía sem `owner`,
+    então nem entrava na conta: era a porta dos fundos da cota."""
+    if p.kind == "admin":
+        return
+    limite = ownership.quota(p, "builds")
+    usados = layerbuilds.contar_do_dono(p.owner)
+    if limite is not None and usados >= limite:
+        raise HTTPException(403, f"cota de construções esgotada ({usados}/{limite})")
 
 
 @router.post("/layerbuilds", status_code=201)
@@ -95,11 +54,7 @@ async def create_build(body: dict, p=Depends(auth.require_console)) -> dict:
     if not ownership.can_manage_model(p, model):
         raise HTTPException(404, "modelo não existe")
 
-    if p.kind != "admin":
-        limite = ownership.quota(p, "builds")
-        usados = _builds_for_owner(p.owner)
-        if limite is not None and usados >= limite:
-            raise HTTPException(403, f"cota de builds esgotada ({usados}/{limite})")
+    _exigir_cota_do_dono(p)
 
     destinos = [str(i) for i in (body.get("attach_to") or [])]
     for image_id in destinos:
@@ -117,7 +72,7 @@ async def create_build(body: dict, p=Depends(auth.require_console)) -> dict:
         "created_at": time.time(),
         "attach_to": destinos,
     }
-    fsdb.write_json(_dir("queue") / f"{job['id']}.json", job)
+    fsdb.write_json(layerbuilds.pasta("queue") / f"{job['id']}.json", job)
     return job
 
 
@@ -128,21 +83,25 @@ async def create_build_for_image(
     request: Request,
     authorization: str | None = Header(None),
 ) -> dict:
-    """Build de camada da PRÓPRIA imagem. Aceito do admin (sem limite) ou do
-    dono da imagem (token da imagem), respeitando a quota da imagem. A camada
-    é anexada automaticamente a esta imagem quando fica pronta."""
-    sem_cota = _acesso_a_imagem(image, request, authorization)
+    """Construção de camada da PRÓPRIA imagem, anexada a ela sozinha quando
+    fica pronta. O admin não tem cota; o sub-admin dono gasta a cota dele (a
+    mesma do pedido por modelo); o token da imagem gasta a cota da imagem."""
+    p = _acesso_a_imagem(image, request, authorization)
     info = store.get_site_image(image)
     if info is None:
         raise HTTPException(404, "imagem não existe")
 
-    if not sem_cota:
-        quota = int(info.get("build_quota", 0))
-        usados = _builds_for_image(image)
-        if usados >= quota:
+    quota_da_imagem = None
+    if p.kind == "image":
+        quota_da_imagem = int(info.get("build_quota", 0))
+        usados = layerbuilds.contar_da_imagem(image)
+        if usados >= quota_da_imagem:
             raise HTTPException(
-                403, f"cota de builds da imagem esgotada ({usados}/{quota}); peça ao administrador"
+                403,
+                f"cota de construções da imagem esgotada ({usados}/{quota_da_imagem}); peça ao administrador",
             )
+    else:
+        _exigir_cota_do_dono(p)
 
     nome = str(body.get("name", "")).strip()
     if not NAME_RE.match(nome):
@@ -154,13 +113,15 @@ async def create_build_for_image(
         "name": nome,
         "model": info.get("model", ""),
         "packages": pacotes,
-        "requested_by": "console" if sem_cota else f"image:{image}",
+        "requested_by": f"image:{image}" if p.kind == "image" else p.name,
         "created_at": time.time(),
         "image": image,
         "attach_to": [image],  # anexa sozinho ao terminar
     }
-    fsdb.write_json(_dir("queue") / f"{job['id']}.json", job)
-    return {**job, "quota": None if sem_cota else int(info.get("build_quota", 0))}
+    if p.kind != "image":
+        job["owner"] = p.owner
+    fsdb.write_json(layerbuilds.pasta("queue") / f"{job['id']}.json", job)
+    return {**job, "quota": quota_da_imagem}
 
 
 @router.get("/site-images/{image}/layerbuilds")
@@ -169,48 +130,65 @@ async def list_builds_for_image(
     request: Request,
     authorization: str | None = Header(None),
 ) -> dict:
-    sem_cota = _acesso_a_imagem(image, request, authorization)
+    p = _acesso_a_imagem(image, request, authorization)
     info = store.get_site_image(image)
     if info is None:
         raise HTTPException(404, "imagem não existe")
 
     builds = []
-    for estado in ESTADOS:
-        d = _dir(estado)
-        if not d.is_dir():
-            continue
-        for f in sorted(d.glob("*.json")):
-            job = fsdb.read_json(f) or {}
-            if job.get("image") == image or image in (job.get("attach_to") or []):
-                builds.append({"id": job.get("id"), "name": job.get("name"),
-                               "packages": job.get("packages"), "state": estado,
-                               "output": job.get("output"), "error": job.get("error")})
+    for estado, job in layerbuilds.todos():
+        if job.get("image") == image or image in (job.get("attach_to") or []):
+            builds.append({"id": job.get("id"), "name": job.get("name"),
+                           "packages": job.get("packages"), "state": estado,
+                           "output": job.get("output"), "error": job.get("error")})
     quota = int(info.get("build_quota", 0))
-    return {"builds": builds, "used": len(builds), "quota": None if sem_cota else quota}
+    return {"builds": builds, "used": len(builds), "quota": quota if p.kind == "image" else None}
+
+
+def _imagens_por_arquivo(p) -> dict[str, list[str]]:
+    """Arquivo → imagens (visíveis a quem pergunta) que têm a camada entre as
+    próprias. Montado uma vez por requisição: a lista de construções pergunta
+    isso para cada linha."""
+    imagens = store.list_site_images() if p.kind == "admin" else store.list_site_images(owner=p.owner)
+    por_arquivo: dict[str, list[str]] = {}
+    for img in imagens:
+        extras = fsdb.read_json(store.site_image_dir(img["id"]) / "layers-extra.json", []) or []
+        for c in extras:
+            por_arquivo.setdefault(str(c.get("file", "")), []).append(img["id"])
+    return por_arquivo
 
 
 @router.get("/layerbuilds")
 async def list_builds(p=Depends(auth.require_console)) -> dict:
+    por_arquivo = _imagens_por_arquivo(p)
+    do_modelo: dict[str, set[str]] = {}
     out = []
-    for estado in ESTADOS:
-        d = _dir(estado)
-        if not d.is_dir():
+    for estado, job in layerbuilds.todos():
+        if not layerbuilds.visivel(p, job):
             continue
-        for f in sorted(d.glob("*.json")):
-            job = fsdb.read_json(f) or {}
-            if not _job_visivel(p, job):
-                continue
-            out.append({**job, "state": estado})
+        item = {**job, "state": estado}
+        saida = job.get("output") or {}
+        if estado == "done" and saida.get("file"):
+            modelo = str(job.get("model", ""))
+            if modelo not in do_modelo:
+                tpl = store.get_model(modelo) or {}
+                do_modelo[modelo] = {str(c.get("file", "")) for c in tpl.get("layers", [])}
+            item["attached"] = {
+                "images": sorted(por_arquivo.get(saida["file"], [])),
+                "model": saida["file"] in do_modelo[modelo],
+            }
+            item["available"] = layerbuilds.disponivel(saida)
+        out.append(item)
     out.sort(key=lambda j: j.get("created_at", 0), reverse=True)
     return {"builds": out}
 
 
 @router.get("/layerbuilds/{job_id}")
 async def get_build(job_id: str, p=Depends(auth.require_console)) -> dict:
-    estado, job = _find(job_id)
-    if job is None or not _job_visivel(p, job):
+    estado, job = layerbuilds.achar(job_id)
+    if job is None or not layerbuilds.visivel(p, job):
         raise HTTPException(404, "job não existe")
-    log = _dir(estado) / f"{job_id}.log"
+    log = layerbuilds.pasta(estado) / f"{job_id}.log"
     return {
         **job,
         "state": estado,
@@ -220,10 +198,17 @@ async def get_build(job_id: str, p=Depends(auth.require_console)) -> dict:
 
 @router.post("/layerbuilds/{job_id}/attach")
 async def attach(job_id: str, body: dict, p=Depends(auth.require_console)) -> dict:
-    """Registra a camada pronta nas imagens indicadas. As camadas extras vão
-    na frente do manifest, então têm prioridade sobre a imagem base."""
-    estado, job = _find(job_id)
-    if job is None or not _job_visivel(p, job):
+    """Anexa a camada pronta às imagens indicadas (`image_ids`) e/ou ao modelo
+    da construção (`model: true`). As camadas extras vão na frente do manifest,
+    então têm prioridade sobre a imagem base.
+
+    O modelo é SEMPRE o da construção: o worker instala os pacotes em cima das
+    camadas daquele modelo, e a camada leva o `dpkg/status` dele. Em outro
+    modelo, com outra base, ela sobreporia o estado do apt com o de uma base
+    alheia.
+    """
+    estado, job = layerbuilds.achar(job_id)
+    if job is None or not layerbuilds.visivel(p, job):
         raise HTTPException(404, "job não existe")
     if estado != "done":
         raise HTTPException(400, f"job ainda não terminou (estado: {estado})")
@@ -235,32 +220,49 @@ async def attach(job_id: str, body: dict, p=Depends(auth.require_console)) -> di
         raise HTTPException(400, "job sem md5 válido")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", str(saida.get("file", ""))):
         raise HTTPException(400, "job sem arquivo de saída válido")
+    if not layerbuilds.disponivel(saida):
+        raise HTTPException(
+            409, "a camada não tem mais de onde ser baixada (o arquivo saiu do disco e não foi publicado)"
+        )
 
-    imagens = body.get("image_ids") or job.get("attach_to") or []
-    if not imagens:
-        raise HTTPException(400, "informe image_ids")
+    imagens = [str(i) for i in (body.get("image_ids") or [])]
+    no_modelo = bool(body.get("model"))
+    if not imagens and not no_modelo:
+        # corpo vazio: o destino que a construção já pedia
+        imagens = [str(i) for i in (job.get("attach_to") or [])]
+    if not imagens and not no_modelo:
+        raise HTTPException(400, "informe image_ids ou model")
+
+    # todas as permissões antes de gravar qualquer coisa: uma imagem alheia no
+    # meio da lista não pode deixar as anteriores anexadas e as seguintes não
+    for image_id in imagens:
+        if not ownership.can_manage_site_image(p, image_id):
+            raise HTTPException(404, f"imagem '{image_id}' não existe")
+    modelo = None
+    if no_modelo:
+        modelo = str(job.get("model", ""))
+        if not modelo or not ownership.can_manage_model(p, modelo):
+            raise HTTPException(404, "modelo não existe")
 
     camada = {
         "md5": saida["md5"],
         "file": saida["file"],
         # se a camada já foi publicada no servidor de arquivos, é de lá que as
         # máquinas baixam; senão, a própria máquina de gestão serve
-        "cdn_url": _layer_url(saida),
+        "cdn_url": layerbuilds.url_da_camada(saida),
         "size": saida.get("size"),
         "from_build": job_id,
     }
-    aplicadas = []
     for image_id in imagens:
-        if not ownership.can_manage_site_image(p, image_id):
-            raise HTTPException(404, f"imagem '{image_id}' não existe")
         d = store.site_image_dir(image_id)
         with fsdb.locked(d):
             extras = fsdb.read_json(d / "layers-extra.json", []) or []
             extras = [c for c in extras if c.get("file") != camada["file"]]
             extras.insert(0, {**camada, "role": "extra"})
             fsdb.write_json(d / "layers-extra.json", extras)
-        aplicadas.append(image_id)
-    return {"ok": True, "layer": camada, "images": aplicadas}
+    if modelo:
+        store.add_model_layer(modelo, {**camada, "role": "extra"}, 0)
+    return {"ok": True, "layer": camada, "images": imagens, "model": modelo}
 
 
 @router.post("/site-images/{image}/layers")
@@ -312,11 +314,10 @@ async def list_layers(image: str, p=Depends(auth.require_image_access())) -> dic
     }
 
 
-def _acesso_a_imagem(image: str, request: Request, authorization: str | None) -> bool:
-    """Quem pode pedir build desta imagem: admin, o sub-admin dono dela, ou o
-    próprio token da imagem (é o que o configureitor usa). Devolve True quando
-    o pedido não gasta a cota — ela existe para conter o auto-atendimento, não
-    quem administra a imagem.
+def _acesso_a_imagem(image: str, request: Request, authorization: str | None) -> auth.Principal:
+    """Quem pode pedir construção desta imagem: admin, o sub-admin dono dela,
+    ou o próprio token da imagem (é o que o configureitor usa). A cota é
+    decidida por quem chama, pelo `kind` devolvido.
 
     Passa por `auth.principal` como todo o resto. Enquanto lia `Authorization`
     na mão, o console inteiro (que autentica por cookie desde a sessão) levava
@@ -328,19 +329,7 @@ def _acesso_a_imagem(image: str, request: Request, authorization: str | None) ->
     if p.kind in ("admin", "subadmin"):
         if not ownership.can_manage_site_image(p, image):
             raise HTTPException(404, "imagem não existe")
-        return True
+        return p
     if p.kind == "image" and p.name == image:
-        return False
+        return p
     raise HTTPException(401, "credencial inválida")
-
-
-def _job_visivel(p, job: dict) -> bool:
-    """O sub-admin vê os builds que pediu e os que caem nas imagens dele — um
-    build alheio pode anexar numa imagem dele se o admin quiser, e nesse caso
-    ele precisa acompanhar o resultado."""
-    if p.kind == "admin":
-        return True
-    if job.get("owner") == p.owner:
-        return True
-    alvos = list(job.get("attach_to") or []) + ([job["image"]] if job.get("image") else [])
-    return any(store.site_image_owner(i) == p.owner for i in alvos)

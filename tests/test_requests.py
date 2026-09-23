@@ -77,3 +77,31 @@ def test_campos_do_pedido_sao_truncados(client, base, data_root):
     assert len(p["wanted_name"]) == 64
     assert len(p["contact"]) == 200
     assert len(p["note"]) == 1000
+
+
+def test_aprovar_emitindo_codigo_leva_os_campos_do_dialogo(client, base, ha):
+    """A aprovação com código lia três campos; rótulo, validade, cota de modelos
+    e trava do papel de parede eram descartados em silêncio."""
+    rid = client.post(
+        "/api/v1/public/requests", json={"wanted_name": "Escola Z", "contact": "z@example.org"}
+    ).json()["id"]
+    r = client.post(
+        f"/api/v1/requests/{rid}/approve",
+        json={"action": "issue_code", "label": "Escola Z (turma B)", "max_models": 5, "max_images": 4,
+              "build_quota": 7, "unlocked": False, "wallpaper_locked": True, "expires_at": 4102444800},
+        headers=ha,
+    )
+    assert r.status_code == 200, r.text
+    code = r.json()["issued"]["code"]
+    inv = next(i for i in client.get("/api/v1/invites", headers=ha).json()["invites"] if i["code"] == code)
+    assert inv["label"] == "Escola Z (turma B)"
+    assert (inv["max_models"], inv["max_images"], inv["build_quota"]) == (5, 4, 7)
+    assert inv["unlocked"] is False and inv["wallpaper_locked"] is True
+    assert inv["expires_at"] == 4102444800
+    # sem campos, os padrões de antes: uma imagem, rótulo do pedido
+    rid2 = client.post(
+        "/api/v1/public/requests", json={"wanted_name": "Escola W", "contact": "w@example.org"}
+    ).json()["id"]
+    code2 = client.post(f"/api/v1/requests/{rid2}/approve", json={"action": "issue_code"}, headers=ha).json()["issued"]["code"]
+    inv2 = next(i for i in client.get("/api/v1/invites", headers=ha).json()["invites"] if i["code"] == code2)
+    assert inv2["label"] == "Escola W" and inv2["max_images"] == 1

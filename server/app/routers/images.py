@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse
 
 from .. import auth
 from ..models import BulkRequest, SiteImageCreate, SiteImagePatch
-from ..services import audit, eventos, fleet_views, ownership, presence, seeders, store, usb
+from ..services import audit, eventos, fleet_views, invites, owners, ownership, presence, seeders, store, usb
 
 router = APIRouter(prefix="/api/v1")
 
@@ -24,7 +24,24 @@ async def create_image(body: SiteImageCreate, p=Depends(auth.require_console)) -
     if not ownership.can_use_model(p, body.model):
         raise HTTPException(404, "modelo não existe")
     extra = {}
-    if body.wallpaper_locked:
+    unlocked = body.unlocked
+    wallpaper_locked = body.wallpaper_locked
+    if p.kind != "admin":
+        # O convite decide, como na auto-criação (`routers/public.py`). O PATCH
+        # já proibia o sub-admin de mudar perfil e trava; a criação deixava
+        # escolher, e uma imagem Livre ignora todos os cadeados do modelo.
+        # Oficial (mais restrito que o convite) continua sendo escolha dele.
+        inv = invites.get(owners.code_of(p.owner)) or {}
+        if unlocked and not bool(inv.get("unlocked", True)):
+            raise HTTPException(403, "o convite só permite imagens Oficiais")
+        trava = bool(inv.get("wallpaper_locked", False))
+        if "wallpaper_locked" in body.model_fields_set and wallpaper_locked != trava:
+            raise HTTPException(403, "a trava do papel de parede vem do convite")
+        wallpaper_locked = trava
+        # a cota de construções por imagem também: sem ela, a imagem criada
+        # pelo console ficava com cota 0 e a do /criar/ com a do convite
+        extra["build_quota"] = int(inv.get("build_quota", invites.DEFAULT_BUILD_QUOTA))
+    if wallpaper_locked:
         extra["wallpaper_locked"] = True
     if body.dashboard_hidden:
         if p.kind != "admin":
@@ -38,7 +55,7 @@ async def create_image(body: SiteImageCreate, p=Depends(auth.require_console)) -
             body.id,
             body.fullname,
             body.model,
-            unlocked=body.unlocked,
+            unlocked=unlocked,
             owner=p.owner,
             extra=extra or None,
         )

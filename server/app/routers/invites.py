@@ -10,29 +10,46 @@ from ..services import audit, invites, owners, ownership, requests, store, usb
 router = APIRouter(prefix="/api/v1")
 
 
-@router.post("/invites", status_code=201)
-async def create_invite(body: dict, p=Depends(auth.require_admin)) -> dict:
+def _campos_do_convite(body: dict, *, label: str = "", note: str = "") -> dict:
+    """Os campos de um convite novo, do mesmo jeito para quem o emite direto e
+    para quem aprova um pedido emitindo código. A aprovação lia só três campos:
+    rótulo, validade, cota de modelos e trava do papel de parede do diálogo
+    eram descartados em silêncio."""
     model = body.get("model")
     if model and not store.model_exists(model):
         raise HTTPException(400, f"modelo '{model}' não existe")
-    novos = invites.create(
-        max_images=int(body.get("max_images", invites.DEFAULT_MAX_IMAGES)),
-        max_models=int(body.get("max_models", owners.DEFAULT_MAX_MODELS)),
-        build_quota=int(body.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),
-        model=model,
-        expires_at=body.get("expires_at"),
-        note=str(body.get("note", "")),
-        label=str(body.get("label", "")),
-        count=int(body.get("count", 1)),
-        unlocked=bool(body.get("unlocked", True)),
-        wallpaper_locked=bool(body.get("wallpaper_locked", False)),
-    )
+    try:
+        return {
+            "max_images": int(body.get("max_images", invites.DEFAULT_MAX_IMAGES)),
+            "max_models": int(body.get("max_models", owners.DEFAULT_MAX_MODELS)),
+            "build_quota": int(body.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),
+            "model": model,
+            "expires_at": body.get("expires_at"),
+            "note": str(body.get("note") or note),
+            "label": str(body.get("label") or label),
+            "unlocked": bool(body.get("unlocked", True)),
+            "wallpaper_locked": bool(body.get("wallpaper_locked", False)),
+        }
+    except (TypeError, ValueError):
+        raise HTTPException(400, "cotas precisam ser números")
+
+
+@router.post("/invites", status_code=201)
+async def create_invite(body: dict, p=Depends(auth.require_admin)) -> dict:
+    novos = invites.create(count=int(body.get("count", 1)), **_campos_do_convite(body))
     return {"invites": novos}
 
 
 @router.get("/invites")
 async def list_invites(p=Depends(auth.require_admin)) -> dict:
-    return {"invites": invites.list_all()}
+    # `owner_ref` junta o convite ao sub-admin na tela sem pôr o código (que é
+    # credencial) no endereço da página
+    return {
+        "invites": [
+            {**inv, "owner_ref": ownership.owner_ref(owners.owner_id(inv["code"]))}
+            for inv in invites.list_all()
+        ]
+    }
 
 
 _INTEIROS = ("max_images", "max_models", "build_quota")
@@ -118,14 +135,12 @@ async def approve_request(rid: str, body: dict, p=Depends(auth.require_admin)) -
     # o admin escolhe: emitir um código para a pessoa se virar, ou já criar a
     # imagem e devolver as credenciais para repassar
     if body.get("action") == "issue_code":
-        code = invites.create(
-            max_images=int(body.get("max_images", 1)),
-            build_quota=int(body.get("build_quota", invites.DEFAULT_BUILD_QUOTA)),
-            model=body.get("model"),
-            note=f"pedido {rid}: {req.get('wanted_name', '')}",
+        campos = _campos_do_convite(
+            {"max_images": 1, **body},
             label=str(req.get("wanted_name", "")),
-            unlocked=bool(body.get("unlocked", True)),
-        )[0]
+            note=f"pedido {rid}: {req.get('wanted_name', '')}",
+        )
+        code = invites.create(count=1, **campos)[0]
         requests.set_status(rid, "approved", {"issued_code": code["code"]})
         return {"issued": code}
 

@@ -229,6 +229,34 @@ def test_lock_sets_state_and_command(client, img, hm, hi):
     assert client.get(f"/boot/v3/testes3/machines/{MAC}/lockstate").text.strip() == "unlocked"
 
 
+def test_a_trava_da_sede_inteira_recusa_lista_de_maquinas(client, img, hm, hi):
+    """O painel da frota, com só algumas máquinas marcadas, chamava a rota da
+    SEDE para cada sede tocada: a sala toda travava, e a confirmação mostrava o
+    número menor. A rota da sede não lê corpo; um corpo que escolhe máquinas é
+    recusado, e nada muda (nem a trava, nem a fila)."""
+    outra = "52-54-00-ab-cd-03"
+    for mac in (MAC, outra):
+        client.post(f"/api/v1/site-images/testes3/machines/{mac}/status", json={}, headers=hm)
+    for rota in ("lock", "unlock"):
+        for corpo in ({"target": [MAC]}, {"macs": [MAC]}, {"mac": MAC}, {"machines": [MAC]}, {"targets": {"testes3": [MAC]}}):
+            r = client.post(f"/api/v1/site-images/testes3/{rota}", json=corpo, headers=hi)
+            assert r.status_code == 400, (rota, corpo)
+            assert r.json()["code"] == "no_target"
+    for mac in (MAC, outra):
+        assert client.get(f"/boot/v3/testes3/machines/{mac}/lockstate").text.strip() == "unlocked"
+        assert client.get(f"/api/v1/site-images/testes3/machines/{mac}/commands", headers=hm).json()["commands"] == []
+
+    # sem corpo, `{}` e `{"target": "all"}` continuam sendo a sala inteira
+    for corpo in (None, {}, {"target": "all"}):
+        kw = {} if corpo is None else {"json": corpo}
+        r = client.post("/api/v1/site-images/testes3/lock", headers=hi, **kw)
+        assert r.status_code == 200 and r.json()["machines"] == 2, corpo
+        for mac in (MAC, outra):
+            assert client.get(f"/boot/v3/testes3/machines/{mac}/lockstate").text.strip() == "locked"
+        r = client.post("/api/v1/site-images/testes3/unlock", headers=hi, **kw)
+        assert r.status_code == 200 and r.json()["machines"] == 2, corpo
+
+
 def test_precontest_grava_a_trava_no_servidor(client, img, hm, hi):
     """A macro do fim do warmup inclui travar a tela, e a trava só dura se o
     SERVIDOR souber dela: o agente obedece o lockstate do long-poll, então o

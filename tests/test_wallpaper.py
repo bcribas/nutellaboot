@@ -230,3 +230,29 @@ def test_o_modelo_so_aceita_imagem(client, ha, data_root):
         headers=ha,
     )
     assert r.status_code == 400, r.text
+
+
+def test_a_previa_do_modelo_carrega_pelo_cookie_sem_o_cabecalho(data_root, admin_key, ha):
+    """A prévia do console é um `<img>`, que não manda `X-NB-Console`. Pelo
+    `require_console` ela nunca carregou (401), e cada tentativa gastava o
+    limitador de login do IP: abrir modelos em sequência fazia o próximo login
+    com a chave digitada errada levar 429."""
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+    from server.app.services import ratelimit
+
+    ratelimit.reset()
+    c = TestClient(create_app(), base_url="https://testserver")
+    fsdb.write_json(data_root / "models" / "t" / "model.json", {"layers": []})
+    sobe_no_modelo(c, ha)
+
+    for _ in range(15):
+        assert c.get("/api/v1/models/t/wallpaper").status_code == 401
+    r = c.post("/api/v1/session", json={"key": "nb3a_errada"}, headers={"X-NB-Console": "1"})
+    assert r.status_code == 401, r.text  # e não 429
+
+    assert c.post("/api/v1/session", json={"key": admin_key}, headers={"X-NB-Console": "1"}).status_code == 200
+    r = c.get("/api/v1/models/t/wallpaper")  # só o cookie, como o <img>
+    assert r.status_code == 200 and r.content == PNG2
+    ratelimit.reset()

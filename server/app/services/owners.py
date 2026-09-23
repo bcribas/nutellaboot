@@ -109,11 +109,12 @@ def quotas(owner: str) -> dict:
 
 def usage(owner: str) -> dict:
     """Uso atual, varrendo o disco."""
-    from . import store
+    from . import layerbuilds, store
 
     return {
         "models": len(store.list_models(owner=owner)),
         "site_images": len(store.list_site_images(owner=owner)),
+        "builds": layerbuilds.contar_do_dono(owner),
     }
 
 

@@ -502,17 +502,46 @@ async def _lock(image: str, macs: list[str], locked: bool, by: str) -> dict:
     return {"command_id": cid, "machines": len(macs), "locked": locked}
 
 
+async def _sem_lista_de_maquinas(request: Request) -> None:
+    """A rota da sede inteira não lê corpo: quem manda uma lista de máquinas
+    aqui queria travar só elas, e travava a sala toda. Foi o que o painel da
+    frota fez com seleção parcial, com a confirmação mostrando o número menor.
+    É o mesmo portão do `POST …/commands`."""
+    bruto = await request.body()
+    if not bruto.strip():
+        return
+    try:
+        corpo = json.loads(bruto)
+    except ValueError:
+        return
+    if not isinstance(corpo, dict):
+        return
+    alvo = corpo.get("target")
+    if (alvo is not None and alvo != "all") or any(
+        k in corpo for k in ("targets", "macs", "mac", "machines")
+    ):
+        raise erro(
+            400, "no_target", "esta rota trava a sede inteira; para algumas máquinas use …/machines/{mac}/lock"
+        )
+
+
 @router.post("/site-images/{image}/lock")
 async def lock_all(
-    image: str, p=Depends(auth.require_image_access(service_scope="commands:write"))
+    image: str,
+    request: Request,
+    p=Depends(auth.require_image_access(service_scope="commands:write")),
 ) -> dict:
+    await _sem_lista_de_maquinas(request)
     return await _lock(image, m.list_macs(image), True, p.name)
 
 
 @router.post("/site-images/{image}/unlock")
 async def unlock_all(
-    image: str, p=Depends(auth.require_image_access(service_scope="commands:write"))
+    image: str,
+    request: Request,
+    p=Depends(auth.require_image_access(service_scope="commands:write")),
 ) -> dict:
+    await _sem_lista_de_maquinas(request)
     return await _lock(image, m.list_macs(image), False, p.name)
 
 

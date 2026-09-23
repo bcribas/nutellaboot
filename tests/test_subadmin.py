@@ -461,3 +461,99 @@ def test_nao_ve_build_de_outro(client, base, ha):
     assert client.get(f"/api/v1/layerbuilds/{job['id']}", headers=_hs(a)).status_code == 404
     assert client.get("/api/v1/layerbuilds", headers=_hs(a)).json()["builds"] == []
     assert client.get(f"/api/v1/layerbuilds/{job['id']}", headers=ha).status_code == 200
+
+
+def test_a_construcao_por_imagem_gasta_a_mesma_cota(client, base, ha):
+    """A construção "por imagem" dispensava a cota do sub-admin e saía sem
+    `owner`, então nem entrava na conta: a porta dos fundos da cota."""
+    code = _convite(client, ha, build_quota=1)
+    assert client.post(
+        "/api/v1/site-images", json={"id": "labx", "fullname": "X", "model": "oficial"}, headers=_hs(code)
+    ).status_code == 201
+    corpo = {"name": "extras", "packages": ["htop"]}
+    r = client.post("/api/v1/site-images/labx/layerbuilds", json=corpo, headers=_hs(code))
+    assert r.status_code == 201, r.text
+    assert r.json()["owner"] == f"invite:{code}"
+    r = client.post("/api/v1/site-images/labx/layerbuilds", json={**corpo, "name": "outra"}, headers=_hs(code))
+    assert r.status_code == 403 and "cota" in r.json()["detail"]
+    # a cota é uma só: o pedido por modelo também já esgotou
+    client.post("/api/v1/models/oficial/duplicate", json={"name": "meu"}, headers=_hs(code))
+    r = client.post(
+        "/api/v1/layerbuilds", json={"name": "maisuma", "model": "meu", "packages": ["htop"]}, headers=_hs(code)
+    )
+    assert r.status_code == 403
+    assert client.get("/api/v1/whoami", headers=_hs(code)).json()["usage"]["builds"] == 1
+    # e a administração segue sem cota
+    assert client.post("/api/v1/site-images/labx/layerbuilds", json=corpo, headers=ha).status_code == 201
+
+
+def test_o_perfil_da_imagem_vem_do_convite(client, base, ha):
+    """O PATCH já não deixava o sub-admin virar a chave (Livre ignora todos os
+    cadeados do modelo); a criação deixava. Agora o convite decide, como na
+    auto-criação; Oficial, mais restrito, continua sendo escolha dele."""
+    code = _convite(client, ha, unlocked=False, wallpaper_locked=True, build_quota=4)
+    hs = _hs(code)
+    assert client.get("/api/v1/whoami", headers=hs).json()["invite_profile"] == {
+        "unlocked": False, "wallpaper_locked": True,
+    }
+    r = client.post("/api/v1/site-images", json={"id": "livrex", "model": "oficial", "unlocked": True}, headers=hs)
+    assert r.status_code == 403
+    r = client.post(
+        "/api/v1/site-images", json={"id": "livrey", "model": "oficial", "wallpaper_locked": False}, headers=hs
+    )
+    assert r.status_code == 403
+    assert store.get_site_image("livrex") is None and store.get_site_image("livrey") is None
+
+    assert client.post("/api/v1/site-images", json={"id": "labok", "model": "oficial"}, headers=hs).status_code == 201
+    info = store.get_site_image("labok")
+    assert not info.get("unlocked") and info.get("wallpaper_locked") is True
+    # e a cota de construções por imagem, como no /criar/
+    assert info.get("build_quota") == 4
+
+
+def test_convite_livre_deixa_escolher(client, base, ha):
+    code = _convite(client, ha, unlocked=True)
+    hs = _hs(code)
+    assert client.post(
+        "/api/v1/site-images", json={"id": "livre1", "model": "oficial", "unlocked": True}, headers=hs
+    ).status_code == 201
+    assert store.get_site_image("livre1")["unlocked"] is True
+    assert client.post(
+        "/api/v1/site-images", json={"id": "oficial1", "model": "oficial", "unlocked": False}, headers=hs
+    ).status_code == 201
+    assert not store.get_site_image("oficial1").get("unlocked")
+
+
+def test_a_administracao_escolhe_o_perfil_livremente(client, base, ha):
+    r = client.post(
+        "/api/v1/site-images",
+        json={"id": "admlivre", "model": "oficial", "unlocked": True, "wallpaper_locked": False},
+        headers=ha,
+    )
+    assert r.status_code == 201
+    assert store.get_site_image("admlivre")["unlocked"] is True
+
+
+def test_suspenso_nao_cria_pelo_autoatendimento(client, base, ha):
+    """Suspender corta o acesso: o console já barrava, e o /criar/ com o mesmo
+    código continuava criando imagem."""
+    code = _convite(client, ha, model="oficial")
+    assert client.get("/api/v1/whoami", headers=_hs(code)).status_code == 200
+    client.post(f"/api/v1/owners/invite:{code}/disable", json={"disabled": True}, headers=ha)
+    r = client.post("/api/v1/public/site-images", json={"code": code, "id": "depoisdesuspenso"})
+    assert r.status_code == 403
+    assert store.get_site_image("depoisdesuspenso") is None
+
+
+def test_convite_e_dono_se_juntam_pelo_owner_ref(client, base, ha):
+    """A tela junta convite e sub-admin numa linha só, e a rota da pessoa não
+    pode levar o código (credencial) no endereço."""
+    code = _convite(client, ha)
+    client.get("/api/v1/whoami", headers=_hs(code))  # o registro nasce no primeiro uso
+    client.post("/api/v1/site-images", json={"id": "labref", "model": "oficial"}, headers=_hs(code))
+    convite = next(i for i in client.get("/api/v1/invites", headers=ha).json()["invites"] if i["code"] == code)
+    dono = next(o for o in client.get("/api/v1/owners", headers=ha).json()["owners"] if o["id"] == f"invite:{code}")
+    imagem = next(i for i in client.get("/api/v1/site-images", headers=ha).json()["images"] if i["id"] == "labref")
+    assert convite["owner_ref"] == dono["owner_ref"] == imagem["owner_ref"]
+    assert code not in convite["owner_ref"]
+    assert dono["usage"]["builds"] == 0

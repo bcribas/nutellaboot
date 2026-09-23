@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 
 from .. import auth
-from . import invites, owners, store
+from . import invites, layerbuilds, owners, store
 
 
 def is_admin(p: auth.Principal) -> bool:
@@ -211,9 +211,11 @@ def whoami(p: auth.Principal) -> dict:
             "usage": {
                 "models": len(store.list_models()),
                 "site_images": len(store.list_site_images()),
+                "builds": sum(1 for _ in layerbuilds.todos()),
             },
         }
     rec = owners.get(p.owner) or {}
+    inv = invites.get(owners.code_of(p.owner)) or {}
     return {
         "kind": "subadmin",
         "label": rec.get("label") or "sub-administração",
@@ -223,4 +225,10 @@ def whoami(p: auth.Principal) -> dict:
         "can_manage_invites": False,
         "quotas": owners.quotas(p.owner),
         "usage": owners.usage(p.owner),
+        # o que o convite deixa escolher ao criar imagem (a criação recusa o
+        # resto): a tela só oferece Livre quando o convite permite
+        "invite_profile": {
+            "unlocked": bool(inv.get("unlocked", True)),
+            "wallpaper_locked": bool(inv.get("wallpaper_locked", False)),
+        },
     }

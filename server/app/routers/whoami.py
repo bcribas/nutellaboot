@@ -25,7 +25,9 @@ async def whoami(p=Depends(auth.require_console_or_service)) -> dict:
 async def list_owners(p=Depends(auth.require_admin)) -> dict:
     """Sub-admins existentes, com cota e uso — a lista que a administração
     olha para decidir quem precisa de mais espaço ou de ser suspenso."""
-    return {"owners": owners.list_all()}
+    return {
+        "owners": [{**o, "owner_ref": ownership.owner_ref(o.get("id", ""))} for o in owners.list_all()]
+    }
 
 
 @router.post("/owners/{owner_id}/disable")
