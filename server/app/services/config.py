@@ -36,7 +36,16 @@ class ConfigError(ValueError):
 #
 # `options` porque sem elas o editor do console monta uma lista VAZIA e não dá
 # para escolher o padrão de um `select` — que foi o defeito relatado.
-HERDADOS_DO_PADRAO = ("sep", "item_pattern", "item_reserved", "hash", "options")
+HERDADOS_DO_PADRAO = ("sep", "hash", "options")
+
+# A regra do que o cliente aguenta consumir vem SEMPRE do esquema padrão, por
+# cima do arquivo do modelo: nenhuma rota deixa um modelo escolhê-la, então o
+# que o arquivo guarda é só uma cópia antiga dela. E o `completar_esquemas`
+# grava essa cópia em todo modelo quando o servidor sobe: com "o arquivo
+# vence", o `_` que o padrão passou a aceitar no nome do allowlist não chegava
+# a nenhum modelo que já existia, e a sede com o nome gerado pelo MOJ
+# continuava sem salvar.
+DITADOS_PELO_PADRAO = ("item_pattern", "item_reserved")
 
 
 def schema_for(image_id: str) -> dict:
@@ -55,6 +64,9 @@ def _com_padroes(schema: dict) -> dict:
             continue
         for chave in HERDADOS_DO_PADRAO:
             if chave not in f and chave in base:
+                f[chave] = base[chave]
+        for chave in DITADOS_PELO_PADRAO:
+            if chave in base:
                 f[chave] = base[chave]
 
     # CAMPO NOVO do esquema padrão entra nos modelos que já existem.

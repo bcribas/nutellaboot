@@ -140,6 +140,18 @@ def test_o_stuff_separa_a_lista_do_firewall_por_virgula(imagem):
     ), linha
 
 
+def test_nome_com_sublinhado_chega_a_maquina(imagem, raiz):
+    """O nome de prova que o MOJ gera tem `_`: passa pela validação do
+    servidor, sai no stuff e vira hosts/<nome> com o IP, como qualquer outro."""
+    nome = "saad_2026_2_tg_prova_1_parte_1.moj.naquadah.com.br"
+    config.write_values("sala1", {"FIREWALL_ALLOWLIST": [*DOIS_HOSTS, f"{nome} 177.70.23.195"]}, is_admin=True)
+    r = roda_consumidor(imagem, "nb3_post_firewall", raiz)
+    assert r.returncode == 0, r.stderr
+    hosts = raiz / "usr/share/maratona-firewall/hosts"
+    assert (hosts / nome).read_text().strip() == "177.70.23.195"
+    assert (hosts / "boca-server").read_text().strip() == "200.145.148.81"
+
+
 def test_host_com_barra_nao_escreve_fora_de_hosts(imagem, raiz, data_root):
     """O nome vira caminho de arquivo, como root, dentro do sistema montado.
     O servidor recusa o valor; isto é a segunda tranca, para um stuff gerado

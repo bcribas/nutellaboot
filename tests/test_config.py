@@ -313,6 +313,56 @@ def test_nome_reservado_no_allowlist_e_recusado(client, img, admin_key):
     assert r.status_code == 200, r.text
 
 
+NOME_DO_MOJ = "saad_2026_2_tg_prova_1_parte_1.moj.naquadah.com.br 177.70.23.195"
+# a regra que o `completar_esquemas` gravou em todo modelo da produção
+REGRA_SEM_SUBLINHADO = r"[A-Za-z0-9][A-Za-z0-9.-]*\s+[0-9a-fA-F.:]+"
+
+
+def test_nome_com_sublinhado_e_aceito(client, img, admin_key):
+    """O MOJ gera o nome da prova com `_` e o DNS o aceita: recusá-lo
+    impedia a sede de salvar ("formato inválido"). O nome continua sem
+    barra nem ponto no começo: na máquina ele vira nome de arquivo."""
+    h = {"Authorization": f"Bearer {admin_key}"}
+    r = client.put(
+        "/api/v1/site-images/testes3/config",
+        json={"values": {"FIREWALL_ALLOWLIST": ["global.naquadah.com.br 177.70.23.143", NOME_DO_MOJ]}},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    for ruim in ("../x 1.2.3.4", "a/b 1.2.3.4", ".oculto 1.2.3.4", "_x 1.2.3.4"):
+        r = client.put(
+            "/api/v1/site-images/testes3/config",
+            json={"values": {"FIREWALL_ALLOWLIST": [ruim]}},
+            headers=h,
+        )
+        assert r.status_code == 400, ruim
+        assert "formato inválido" in r.json()["detail"]
+
+
+def test_a_regra_do_padrao_vence_a_copia_do_modelo(data_root):
+    """O `completar_esquemas` gravou a regra de ENTÃO no schema.json de todo
+    modelo. Com "o arquivo vence", afrouxar a regra no padrão não chegava a
+    nenhum modelo existente. Nenhuma rota deixa o modelo escolher a regra, então
+    a do padrão vale por cima, e o restart regrava o arquivo dizendo o quê."""
+    from server.app.services import store
+
+    esquema = build_default_schema()
+    for f in esquema["fields"]:
+        if f["key"] == "FIREWALL_ALLOWLIST":
+            f["item_pattern"] = REGRA_SEM_SUBLINHADO
+    fsdb.write_json(data_root / "models" / "velho3" / "model.json", {"layers": []})
+    fsdb.write_json(data_root / "models" / "velho3" / "schema.json", esquema)
+    store.create_site_image("sala11", "S", "velho3", unlocked=True)
+
+    cfg.write_values("sala11", {"FIREWALL_ALLOWLIST": [NOME_DO_MOJ]}, is_admin=True)
+    assert cfg.effective_values("sala11")["FIREWALL_ALLOWLIST"] == [NOME_DO_MOJ]
+
+    assert store.completar_esquemas() == {"velho3": ["FIREWALL_ALLOWLIST.item_pattern"]}
+    gravado = {f["key"]: f for f in fsdb.read_json(data_root / "models" / "velho3" / "schema.json")["fields"]}
+    assert gravado["FIREWALL_ALLOWLIST"]["item_pattern"] != REGRA_SEM_SUBLINHADO
+    assert store.completar_esquemas() == {}
+
+
 def test_nome_reservado_vale_para_schema_antigo(data_root):
     """Modelo gravado antes do `item_reserved` existir também recusa: o
     metadado é herdado do esquema padrão, como o `item_pattern`."""

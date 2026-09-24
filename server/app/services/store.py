@@ -129,13 +129,27 @@ def get_schema(name: str) -> dict:
     return _esquema(model_dir(name))
 
 
+def _o_que_mudou(cru: dict, completo: dict) -> list[str]:
+    antes = {f.get("key"): f for f in cru.get("fields", [])}
+    mudou = []
+    for f in completo.get("fields", []):
+        velho = antes.get(f.get("key"))
+        if velho is None:
+            mudou.append(f["key"])
+            continue
+        mudou += [f"{f['key']}.{k}" for k in sorted(set(f) | set(velho)) if f.get(k) != velho.get(k)]
+    return mudou
+
+
 def completar_esquemas() -> dict[str, list[str]]:
     """Grava em cada modelo o que o `_esquema` acrescenta ao arquivo.
 
     Roda quando o servidor sobe: o deploy é `git pull` + restart, e assim o
     campo novo do esquema padrão chega ao `schema.json` de TODO modelo sem passo
-    à mão. Só acrescenta (o `_com_padroes` nunca sobrescreve o que o modelo
-    tem) e não regrava o que já está completo. Devolve {modelo: campos novos}.
+    à mão. Acrescenta campo e metadado que faltam e troca a regra que o padrão
+    dita (`config.DITADOS_PELO_PADRAO`); o que é do modelo (padrão, cadeado,
+    textos) fica. Não regrava o que já está completo. Devolve {modelo: o que
+    mudou}: o campo novo pelo nome, o metadado como `CAMPO.metadado`.
     """
     base = settings.data_root / "models"
     feitos: dict[str, list[str]] = {}
@@ -147,14 +161,11 @@ def completar_esquemas() -> dict[str, list[str]]:
         try:
             with fsdb.locked(d):
                 cru = _esquema_cru(d)
-                antes = {f.get("key") for f in cru.get("fields", [])}
                 completo = _esquema(d)
                 if completo == cru:
                     continue
                 fsdb.write_json(d / "schema.json", completo)
-            feitos[d.name] = [
-                f["key"] for f in completo.get("fields", []) if f.get("key") not in antes
-            ]
+            feitos[d.name] = _o_que_mudou(cru, completo)
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
             # um modelo com arquivo estragado não pode impedir o servidor de
             # subir nem os outros de serem completados

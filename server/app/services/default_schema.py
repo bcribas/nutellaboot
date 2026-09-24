@@ -180,8 +180,12 @@ def build_default_schema() -> dict:
                 "options": [],
                 # o par que o `help` promete. O nome vira NOME DE ARQUIVO no
                 # cliente (usr/share/maratona-firewall/hosts/<nome>), então
-                # aqui é o lugar de garantir que ele não tem `/` nem `..`
-                "item_pattern": r"[A-Za-z0-9][A-Za-z0-9.-]*\s+[0-9a-fA-F.:]+",
+                # aqui é o lugar de garantir que ele não tem `/` nem `..`.
+                # O `_` entra: o MOJ gera nome de prova com ele
+                # (saad_2026_2_tg_prova_1_parte_1.moj.naquadah.com.br), o DNS
+                # aceita, e na máquina o nome é arquivo e linha do /etc/hosts,
+                # comparados como texto. Recusá-lo impedia salvar a sede.
+                "item_pattern": r"[A-Za-z0-9][A-Za-z0-9._-]*\s+[0-9a-fA-F.:]+",
                 # "maratona" é o hostname fixo das máquinas: o boot grava
                 # hosts/maratona com 127.0.1.1 DEPOIS do whitelist, então uma
                 # entrada com esse nome seria sobrescrita em silêncio

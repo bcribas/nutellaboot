@@ -11,7 +11,7 @@ Todos os comandos partem da raiz do repositório (`nutellaboot3/`).
 .venv/bin/python -m pytest
 ```
 
-São 1261 testes em cerca de 3 min. O que cada arquivo cobre:
+São 1264 testes em cerca de 3 min. O que cada arquivo cobre:
 
 | Arquivo | O que garante |
 |---|---|

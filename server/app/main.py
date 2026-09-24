@@ -109,7 +109,7 @@ async def _vida(app: FastAPI):
 
     for modelo, campos in store.completar_esquemas().items():
         logging.getLogger("uvicorn.error").warning(
-            "formulario do modelo %s completado com o esquema padrao: %s", modelo, ", ".join(campos)
+            "formulario do modelo %s atualizado pelo esquema padrao: %s", modelo, ", ".join(campos)
         )
 
     # o gravador da série da frota vive no worker único (invariante 2): um

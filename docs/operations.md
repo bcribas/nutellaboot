@@ -1827,7 +1827,11 @@ máquinas sem reiniciar o serviço. Rota nova, sim, precisa de reinício.
 Campo novo no formulário padrão (`server/app/services/default_schema.py`) chega
 aos modelos que já existem no reinício: ao subir, o serviço grava o campo no
 `schema.json` de cada modelo que não o tem, com o padrão e o cadeado do esquema
-padrão, sem mexer no que o modelo já tinha. O journal diz quais:
+padrão, sem mexer no que o modelo já tinha. O mesmo vale para a regra de
+formato de um item de lista (`item_pattern`, `item_reserved`): ela é sempre a
+do esquema padrão, e o reinício a regrava em todo modelo. O journal diz o que
+mudou em cada modelo (o campo novo pelo nome, a regra como
+`FIREWALL_ALLOWLIST.item_pattern`):
 
 ```bash
 journalctl -u nutellaboot3 --since -5min | grep "formulario do modelo"

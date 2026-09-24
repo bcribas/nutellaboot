@@ -235,7 +235,7 @@ o primeiro. Rota nova de console usa `require_console` + as funções de
 ```bash
 tools/nb3-init                     # instalação nova: emite e IMPRIME a chave
 tools/nb3-dev                      # servidor em 127.0.0.1:8890
-.venv/bin/python -m pytest -q      # 1261 testes, ~3 min
+.venv/bin/python -m pytest -q      # 1264 testes, ~3 min
 tools/nb3-seed-testdata            # dados de teste (não é instalação)
 tools/nb3-layer-worker --check     # confere as ferramentas rootless
 ```
@@ -486,6 +486,11 @@ O ambiente de teste tem um nginx externo que faz proxy de
   vinha sem o campo, e o modelo derivado nascia copiando a falta. Há teste que
   conta os leitores. E o servidor grava os campos novos em todos os modelos ao
   subir (`store.completar_esquemas`, no lifespan): o deploy de sempre propaga.
+  A regra de formato do item (`item_pattern`, `item_reserved`) é
+  `config.DITADOS_PELO_PADRAO`: vale a do padrão POR CIMA do arquivo. Com "o
+  arquivo vence", afrouxar a regra do allowlist para aceitar o `_` do nome que
+  o MOJ gera não chegou a nenhum modelo, porque o `completar_esquemas` já tinha
+  gravado a regra antiga em todos.
 - **`--check` que só confere `which` mente.** O worker de camadas dizia
   "pré-requisitos ok" numa máquina sem `uidmap` e com userns proibido pelo
   kernel; o job morreu com código 127 depois de baixar a base. A construção
