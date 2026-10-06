@@ -526,6 +526,12 @@ O ambiente de teste tem um nginx externo que faz proxy de
   journal (`logger -t nb3-lock`). Teste com gjs de verdade em
   `tests/test_lock_screen.py`.
 
+## Pull requests
+
+Todo PR segue `docs/pull-requests.md`: levantamento, revisão adversária,
+decisão do mantenedor PR a PR, execução num worktree e publicação só com o OK
+dele. Mesclar não é deployar.
+
 ## Estilo
 
 Código, comentários, mensagens e documentação em **português do Brasil**.
