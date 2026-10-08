@@ -176,7 +176,13 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
     são da sede e não se toca. Falha de REDE não conta como tentativa (nada foi
     tocado, e blip de rede não pode condenar máquina); falha de ESCRITA conta, e
     o marcador em `$STORAGEDIR/.usbupd-tried` é o que impede um pendrive
-    protegido contra escrita de reiniciar a máquina para sempre. A identidade
+    protegido contra escrita de reiniciar a máquina para sempre: na segunda
+    vez a máquina segue com o pendrive velho. O marcador e os arquivos baixados
+    só sobrevivem ao reinício porque o `nb_usb_update` monta o disco local
+    antes (`nb_find_storage`/`nb_mount_storage`, do `40-mount.sh`): quem
+    montava era o `mount_layers`, que roda depois, e até 2026-10 tudo ia para a
+    RAM do initrd. O laço só apareceu em VM com o pendrive em readonly; o teste
+    tinha um STORAGEDIR que persistia, e agora modela a RAM e o disco. A identidade
     vem de `tools/nb3-build-initrd`, que carimba `/etc/nutellaboot-build`
     dentro do initrd e o md5 em `client/build/build.json` — o md5 sai da
     ferramenta porque o servidor tem um worker só. Initrd sem carimbo não

@@ -88,7 +88,7 @@ nb_usb_falhou_screen() {
         "  2. Write a fresh drive with the image from the console of this" \
         "     site, under 'pendrive de boot'." \
         "" \
-        "This computer will not try again by itself for this version."
+        "On the next start it boots with the old drive, without trying again."
 }
 
 # Baixa e confere ANTES de tocar no pendrive: quando os arquivos velhos saírem,
@@ -155,12 +155,34 @@ nb_usb_update() {
 
     nb_warn "this USB drive is out of date (${NB_INITRD_BUILD} -> ${NB_USB_BUILD})"
 
-    # Uma tentativa de ESCRITA por versão. O marcador vive no disco local, que
-    # sobrevive ao reinício: sem ele, um pendrive que não aceita escrita
-    # reinicia a máquina para sempre.
+    # O disco local tem de estar montado AQUI: quem o monta é o mount_layers,
+    # que roda depois. Antes disto o $STORAGEDIR era um diretório na RAM do
+    # initrd, e o marcador e os arquivos baixados sumiam no reinício: um
+    # pendrive protegido contra escrita baixava tudo de novo, falhava e
+    # reiniciava a máquina para sempre. Visto em VM, com o pendrive em
+    # readonly; o teste antigo não via porque o STORAGEDIR dele persistia.
+    nb_find_storage
+    _uu_disco=
+    for _uu_d in $possibledisks; do
+        nb_mount_storage "$_uu_d" && {
+            _uu_disco=$_uu_d
+            break
+        }
+    done
+    if [ -z "$_uu_disco" ]; then
+        # sem disco a máquina para no NO DISK logo adiante, que é a tela certa
+        nb_warn "no local disk to prepare the USB update - skipping it"
+        return 0
+    fi
+
+    # Uma tentativa de ESCRITA por versão. Tentada e falha (pendrive protegido
+    # contra escrita, ou com defeito), parar de novo seria reiniciar a máquina
+    # para sempre: segue com o pendrive velho, e o aviso diz o que fazer.
     _uu_marca=$STORAGEDIR/.usbupd-tried
     if [ "$(cat "$_uu_marca" 2> /dev/null)" = "$NB_USB_BUILD" ]; then
-        nb_usb_falhou_screen "already tried once for this version"
+        nb_warn "already tried once to update this USB drive (write-protected?): booting with the old one - write a new drive from the console"
+        umount "$BLOCKROOT" 2> /dev/null
+        return 0
     fi
 
     _uu_dev=$(nb_usb_device) || nb_usb_sem_pendrive_screen
@@ -182,6 +204,7 @@ nb_usb_update() {
     if ! nb_usb_stage "$STORAGEDIR/usbupd"; then
         nb_warn "the new boot files could not be downloaded - keeping the old USB drive"
         rm -rf "$STORAGEDIR/usbupd"
+        umount "$BLOCKROOT" 2> /dev/null
         return 0
     fi
 

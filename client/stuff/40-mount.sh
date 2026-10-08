@@ -1,7 +1,12 @@
 # shellcheck shell=sh
 # Montagem do root (overlayfs sobre as camadas squashfs), home persistente e swap.
 
-mount_layers() {
+# Os drivers de disco, o udev e a varredura (nutella_findblock), uma vez por
+# boot. Quem precisa do disco antes do mount_layers é o nb_usb_update
+# (25-usbupdate.sh): o marcador de "uma tentativa por versão" e os arquivos
+# novos têm de sobreviver ao reinício.
+nb_find_storage() {
+    [ -n "${nb_storage_scanned:-}" ] && return 0
     for mod in squashfs overlay loop ahci ext4 fuse virtio_blk virtio_net nvme sd_mod; do
         modprobe "$mod" 2>/dev/null
     done
@@ -9,16 +14,25 @@ mount_layers() {
 
     PATH="$PATH:/usr/bin"
     nutella_findblock
+    nb_storage_scanned=1
+}
+
+# Monta $1 em $BLOCKROOT: ext4, senão NTFS (o FSTYPE diz qual).
+nb_mount_storage() {
+    FSTYPE=ext4
+    mount "$1" "$BLOCKROOT" 2> /dev/null && return 0
+    FSTYPE=ntfs
+    mount -t ntfs -o permissions "$1" "$BLOCKROOT" 2> /dev/null
+}
+
+mount_layers() {
+    nb_find_storage
     [ -z "$possibledisks" ] && nb_no_disk_screen
 
     _ok=0
     for disk in $possibledisks; do
         nb_warn "using $disk"
-        FSTYPE=ext4
-        if ! mount "$disk" "$BLOCKROOT" 2>/dev/null; then
-            FSTYPE=ntfs
-            mount -t ntfs -o permissions "$disk" "$BLOCKROOT" 2>/dev/null || continue
-        fi
+        nb_mount_storage "$disk" || continue
         mkdir -p "$STORAGEDIR"
         if nb_retry "${NB_MANIFEST_TRIES:-10}" 10 download_boot_files "$STORAGEDIR"; then
             _ok=1

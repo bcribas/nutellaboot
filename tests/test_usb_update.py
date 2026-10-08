@@ -12,8 +12,13 @@ O que cada teste protege está no seu docstring; o resumo é:
   * o pendrive só é tocado depois de os arquivos novos estarem no disco local e
     com o md5 conferido;
   * falha de REDE não condena o pendrive (nada foi tocado); falha de ESCRITA
-    condena, e por isso é marcada — uma tentativa por versão, ou um pendrive
-    protegido contra escrita reiniciaria a máquina para sempre;
+    condena, e por isso é marcada — uma tentativa por versão, e na seguinte a
+    máquina segue com o pendrive velho, ou um pendrive protegido contra escrita
+    reiniciaria a máquina para sempre;
+  * o marcador e os arquivos novos ficam no DISCO local, que o próprio
+    nb_usb_update monta: o mount_layers, que montava, roda depois, e na RAM do
+    initrd eles sumiam no reinício. Por isso o cenário tem uma "RAM" apagada a
+    cada rodada e um "disco" que só aparece montado;
   * `nutellaboot.conf` e `wifi.conf` são da sede. Não se toca.
 """
 
@@ -72,8 +77,10 @@ def cenario(tmp_path):
     (servidor / "vmlinuz").write_bytes(VMLINUZ)
     (servidor / "initrd.img").write_bytes(INITRD)
 
-    storage = tmp_path / "storage"
-    storage.mkdir()
+    # o disco local; o STORAGEDIR só existe nele depois de "montado"
+    disco = tmp_path / "disco"
+    disco.mkdir()
+    storage = disco / "nutellaboot"
 
     def falso(nome, corpo):
         p = fakebin / nome
@@ -114,12 +121,13 @@ cp "{servidor}/$nome" "$dir/$base"
         pass
 
     c = C()
-    c.tmp, c.fakebin, c.pendrive, c.servidor, c.storage = (
+    c.tmp, c.fakebin, c.pendrive, c.servidor, c.storage, c.disco = (
         tmp_path,
         fakebin,
         pendrive,
         servidor,
         storage,
+        disco,
     )
     c.acoes = tmp_path / "acoes"
     c.resposta = tmp_path / "resposta"
@@ -134,10 +142,17 @@ cp "{servidor}/$nome" "$dir/$base"
 
 def roda(c, *, build="velho-0", extra="", **env):
     corpo = HARNESS + f"""
+# A RAM do initrd: some a cada rodada (é um boot). O disco só aparece em
+# $BLOCKROOT depois do nb_mount_storage, como no mount de verdade.
+rm -rf "{c.tmp}/ram"
+mkdir -p "{c.tmp}/ram/blockroot"
+BLOCKROOT="{c.tmp}/ram/blockroot"
+nb_find_storage() {{ possibledisks=; [ -e "{c.tmp}/sem-disco" ] || possibledisks="{c.disco}"; }}
+nb_mount_storage() {{ rmdir "$BLOCKROOT" && ln -s "$1" "$BLOCKROOT"; }}
 IMAGEROOT=sala1
 NB_SERVER=https://s
 NB_INITRD_BUILD={build}
-STORAGEDIR="{c.storage}"
+STORAGEDIR="$BLOCKROOT/nutellaboot"
 NB_USB_MNT="{c.pendrive}"
 NB_USB_TRIES=1
 NB_USB_WAIT=0
@@ -247,15 +262,43 @@ def test_sem_pendrive_na_maquina_para_com_instrucao(cenario):
 
 def test_uma_tentativa_de_escrita_por_versao(cenario):
     """Sem esta trava, um pendrive protegido contra escrita reinicia a máquina
-    para sempre."""
+    para sempre. A falha aparece uma vez (tela e reinício); no boot seguinte a
+    máquina segue com o pendrive velho, sem baixar nem tentar de novo."""
     (cenario.tmp / "somenteleitura").write_text("")
     r1 = roda(cenario)
     assert "USB FAILED" in r1.stdout, r1.stdout
+    assert cenario.acoes.read_text().count("REBOOT") == 1
     assert (cenario.storage / ".usbupd-tried").read_text().strip() == "novo-1"
 
-    # segunda vez: nem tenta montar
+    # segunda vez: o marcador sobreviveu ao "reinício" (a RAM foi apagada)
     r2 = roda(cenario)
     assert "already tried once" in r2.stdout, r2.stdout
+    assert "USB FAILED" not in r2.stdout
+    assert "SAIU=0" in r2.stdout, "o boot tem de seguir com o pendrive velho"
+    assert cenario.acoes.read_text().count("REBOOT") == 1, "reiniciou de novo"
+    assert (cenario.pendrive / "vmlinuz").read_bytes() == b"kernel velho"
+
+
+def test_o_que_a_atualizacao_guarda_fica_no_disco(cenario):
+    """O marcador e os arquivos baixados iam para a RAM do initrd: o disco só
+    era montado depois, no mount_layers. Visto em VM com o pendrive em
+    readonly: a cada boot, download de novo, falha de novo, reinício."""
+    (cenario.tmp / "somenteleitura").write_text("")
+    roda(cenario)
+    assert (cenario.disco / "nutellaboot" / ".usbupd-tried").exists()
+    assert not (cenario.tmp / "ram" / "blockroot" / "nutellaboot").is_dir() or (
+        cenario.tmp / "ram" / "blockroot"
+    ).is_symlink(), "gravou na RAM e não no disco"
+
+
+def test_sem_disco_local_nao_atualiza_o_pendrive(cenario):
+    """Sem disco não há onde conferir os arquivos novos antes de tocar no
+    pendrive. A máquina segue e para no NO DISK, que é a tela certa."""
+    (cenario.tmp / "sem-disco").write_text("")
+    r = roda(cenario)
+    assert "SAIU=0" in r.stdout, r.stdout
+    assert not cenario.acoes.exists() or "REBOOT" not in cenario.acoes.read_text()
+    assert (cenario.pendrive / "vmlinuz").read_bytes() == b"kernel velho"
 
 
 def test_a_escotilha_da_linha_de_comando(cenario):
