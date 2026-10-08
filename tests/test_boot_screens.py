@@ -72,7 +72,22 @@ def test_pouco_espaco_diz_quanto_falta(tmp_path):
         tmp_path,
     )
     assert "NOT ENOUGH FREE SPACE" in saida
-    assert "15 GB" in saida, "o texto tem que arredondar para cima, senao a pessoa libera de menos"
+    assert "30 GB" in saida, "o texto tem que arredondar para cima, senao a pessoa libera de menos"
+
+
+def test_o_minimo_cabe_o_que_o_boot_grava():
+    """O mínimo de espaço livre tem de caber a home persistente e o swap que o
+    40-mount.sh cria, mais a base em cache: com 15 GB a home de 20 GB não
+    cabia, e a máquina seguia sem home persistente."""
+    import re
+
+    storage = (REPO / "client/stuff/30-storage.sh").read_text()
+    minimo_kb = int(re.search(r"NB_MIN_FREE_KB:-(\d+)", storage).group(1))
+    mount = (REPO / "client/stuff/40-mount.sh").read_text()
+    gigas = [int(g) for g in re.findall(r"fallocate -x -l (\d+)g", mount)]
+    assert sorted(gigas) == [2, 20], gigas  # swap e home; mudou? refaça a conta
+    base_e_camadas_gb = 6
+    assert minimo_kb >= (sum(gigas) + base_e_camadas_gb) * 1024 * 1024
 
 
 def test_nenhuma_particao_aponta_o_modo_raid_da_bios(tmp_path):

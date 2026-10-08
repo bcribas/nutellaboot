@@ -1,7 +1,13 @@
 # shellcheck shell=sh
 # Descoberta de disco local e checagens de pré-montagem.
 
-NB_MIN_FREE_KB=${NB_MIN_FREE_KB:-14971520} # ~14,3 GB
+# 30 GB livres: o que o boot grava no disco. A home persistente (ligada por
+# padrão no GRUB e no iPXE) tem 20 GB, o swap 2 GB, e a base e as outras
+# camadas em cache passam de 6 GB. Com o mínimo antigo, de 15 GB, a máquina
+# passava na checagem, não cabia a home e seguia SEM home persistente, com só
+# um aviso: os arquivos do competidor sumiam no reinício. Partição já usada
+# antes não é medida de novo (o espaço dela já está tomado pelo próprio boot).
+NB_MIN_FREE_KB=${NB_MIN_FREE_KB:-31457280} # 30 GB
 
 # Procura uma partição ext3/ext4/ntfs gravável com espaço suficiente.
 # Resultado em $possibledisks (ext4 na frente; partição já usada vence tudo).

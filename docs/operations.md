@@ -1517,8 +1517,10 @@ distribuído fisicamente.
 ### A tela vermelha "NO DISK"
 
 A máquina não achou onde guardar o sistema: precisa de uma partição
-ext3/ext4/NTFS gravável com pelo menos 15 GB **livres**, para o cache das
-camadas e a home persistente. Nada é apagado — só espaço livre é usado.
+ext3/ext4/NTFS gravável com pelo menos 30 GB **livres**: a home persistente
+tem 20 GB, o swap 2 GB, e a base e as outras camadas em cache passam de 6 GB.
+Nada é apagado — só espaço livre é usado. Uma partição que já foi usada antes
+não é medida de novo.
 
 **A própria tela diz a causa provável e o que fazer.** Ela lista cada partição
 encontrada e por que foi recusada, e escolhe entre quatro diagnósticos:
@@ -1526,7 +1528,7 @@ encontrada e por que foi recusada, e escolhe entre quatro diagnósticos:
 | O que a tela diz | O que fazer |
 |---|---|
 | `WINDOWS FAST STARTUP` | o Windows foi hibernado, não desligado, e deixou o disco travado. Iniciar o Windows e rodar `shutdown /s /t 0`, ou desligar o Fast Startup nas Opções de Energia |
-| `NOT ENOUGH FREE SPACE` | há disco, mas nenhum com 15 GB livres |
+| `NOT ENOUGH FREE SPACE` | há disco, mas nenhum com 30 GB livres |
 | `THE DISK WAS NOT DETECTED AT ALL` | controladora em RAID / Intel RST; trocar para AHCI no setup da BIOS |
 | `NO SUPPORTED FILESYSTEM` | só exFAT/FAT32, ou partição com BitLocker (que não pode ser lida) |
 
