@@ -57,16 +57,23 @@ sistema base sobrescrever tudo, em silêncio.
 Transforma a imagem-mestre num `.squash`:
 
 ```bash
-sudo -E NB3_ADMIN_KEY=nb3a_... NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br \
+NB3_ADMIN_KEY=nb3a_... NB3_BASE_URL=https://nutellaboot.mdp.naquadah.com.br \
     tools/nb3-gerar-squash \
         --raw /caminho/ubuntu-24.04-initial.raw \
         --name maratonalinux2026 \
         --publish
 ```
 
-**Por que sudo:** o comando precisa de `losetup` e `mount` para abrir a
-partição raiz de dentro do `.raw`. É o único motivo — todo o resto do fluxo
-roda como usuário comum.
+**Não precisa de root.** Como usuário comum, a partição raiz do `.raw` abre
+pelo `fuse2fs` (pacote `e2fsprogs`, ou `fuse2fs` no Ubuntu), com `fakeroot`
+para ler o que é só do root, e numa cópia reflink da imagem, apagada no fim:
+o `fuse2fs` grava o superbloco (hora e contador de montagem) mesmo com
+`-o ro`, e a imagem-mestre não pode ser tocada. A cópia é instantânea e não
+gasta espaço, mas exige btrfs ou xfs no diretório da imagem; fora disso, rode
+com `sudo`, que abre por `losetup` e `mount`. As duas dão a mesma camada: em 2026-10-08 a
+listagem inteira da base publicada (282508 entradas, com dono, modo, tamanho e
+alvo de link), as capabilities e os xattrs bateram com os da imagem-mestre
+aberta pelo `fuse2fs`.
 
 Demora bastante (dezenas de GB). No fim ele imprime o caminho, o md5 e o
 tamanho, e diz qual é o comando seguinte.

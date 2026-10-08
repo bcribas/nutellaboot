@@ -5,8 +5,14 @@
 # Substitui o mlinux/gerar-squash, que tinha o nome do .raw e o /mnt fixos no
 # código, e cujo md5 era copiado do terminal para o servidor na mão.
 #
-# Precisa de root só por causa do losetup/mount da imagem-mestre:
-#     sudo tools/nb3-gerar-squash --raw ubuntu-24.04-initial.raw --name icpc-latam2026
+# Com root, abre a imagem-mestre por losetup/mount. Sem root, pelo fuse2fs
+# (e2fsprogs), com fakeroot para ler o que é só do root, e numa CÓPIA reflink
+# da imagem: o fuse2fs grava o superbloco (hora e contador de montagem) mesmo
+# com `-o ro`, e recusa montar o que não pode gravar. As duas dão a mesma
+# camada: conferido em 2026-10-08 contra a base publicada (a mesma listagem de
+# 282508 entradas, com dono, modo, tamanho e alvo de link, e as mesmas
+# capabilities e xattrs).
+#     tools/nb3-gerar-squash --raw ubuntu-24.04-initial.raw --name icpc-latam2026
 #
 # Com --register, registra a camada no modelo (aí precisa da chave de admin);
 # com --publish, envia o arquivo para o servidor de arquivos antes:
@@ -33,7 +39,7 @@ PUBLICAR=0
 
 usage() {
     cat << EOF
-Uso: sudo nb3-gerar-squash --raw IMAGEM.raw --name NOME [opções]
+Uso: nb3-gerar-squash --raw IMAGEM.raw --name NOME [opções]
 
   --raw ARQUIVO      imagem-mestre do Maratona Linux
   --name NOME        nome da camada (vira <nome>.squash-<data>)
@@ -68,24 +74,51 @@ done
 
 [ -n "$RAW" ] && [ -n "$NOME" ] || usage 1
 [ -f "$RAW" ] || { echo "imagem não encontrada: $RAW" >&2; exit 1; }
-[ "$(id -u)" = 0 ] || { echo "precisa de root (losetup/mount da imagem-mestre)" >&2; exit 1; }
+if [ "$(id -u)" != 0 ]; then
+    command -v fuse2fs > /dev/null || {
+        echo "sem root, a imagem-mestre abre pelo fuse2fs (pacote e2fsprogs/fuse2fs)" >&2
+        exit 1
+    }
+fi
 
 SAIDA=${SAIDA:-$DATA/blobs}
 mkdir -p "$SAIDA"
 ARQUIVO="$NOME.squash-$(date +%Y-%m-%d-%H-%M)"
 MNT=$(mktemp -d)
 LOOP=""
+COPIA=""
 
 cleanup() {
-    mountpoint -q "$MNT" && umount "$MNT" || true
+    if mountpoint -q "$MNT"; then
+        if [ "$(id -u)" = 0 ]; then umount "$MNT"; else fusermount3 -u "$MNT" 2> /dev/null || fusermount -u "$MNT"; fi
+    fi
     [ -n "$LOOP" ] && losetup -d "$LOOP" || true
+    [ -n "$COPIA" ] && rm -f "$COPIA" || true
     rmdir "$MNT" 2> /dev/null || true
 }
 trap cleanup EXIT
 
 echo ">> montando $RAW (partição $PARTICAO)"
-LOOP=$(losetup --show -r -fP "$RAW")
-mount -o ro,norecovery "${LOOP}p${PARTICAO}" "$MNT"
+if [ "$(id -u)" = 0 ]; then
+    LOOP=$(losetup --show -r -fP "$RAW")
+    mount -o ro,norecovery "${LOOP}p${PARTICAO}" "$MNT"
+else
+    # O fuse2fs grava o superbloco da imagem que monta, mesmo com `-o ro`: a
+    # imagem-mestre não pode ser ela. A cópia reflink é instantânea e não gasta
+    # espaço (btrfs, xfs); fica ao lado da original porque reflink não cruza
+    # sistemas de arquivos. fakeroot deixa ler o /etc/shadow e afins; o dono e
+    # o modo continuam os de verdade.
+    SETOR=$(sfdisk -d "$RAW" | awk '/^sector-size:/ {print $2}')
+    INICIO=$(partx -g -o START -n "$PARTICAO" "$RAW" | tr -d ' ')
+    [ -n "$SETOR" ] && [ -n "$INICIO" ] || { echo "partição $PARTICAO não encontrada em $RAW" >&2; exit 1; }
+    COPIA="$(dirname "$RAW")/.$(basename "$RAW").nb3-gerar-squash.$$"
+    cp --reflink=always "$RAW" "$COPIA" 2> /dev/null || {
+        echo "sem root, a imagem abre numa cópia reflink, e $(dirname "$RAW") não faz reflink" >&2
+        echo "(precisa de btrfs ou xfs). Rode com sudo, ou mova a imagem." >&2
+        exit 1
+    }
+    fuse2fs "$COPIA" "$MNT" -o "ro,norecovery,fakeroot,offset=$((INICIO * SETOR))"
+fi
 
 echo ">> gerando $ARQUIVO (pode demorar bastante)"
 mksquashfs "$MNT" "$SAIDA/$ARQUIVO" \
@@ -99,7 +132,7 @@ mksquashfs "$MNT" "$SAIDA/$ARQUIVO" \
 
 MD5=$(md5sum "$SAIDA/$ARQUIVO" | cut -d' ' -f1)
 TAMANHO=$(stat -c%s "$SAIDA/$ARQUIVO")
-chown "$(stat -c '%u:%g' "$REPO")" "$SAIDA/$ARQUIVO"
+[ "$(id -u)" = 0 ] && chown "$(stat -c '%u:%g' "$REPO")" "$SAIDA/$ARQUIVO"
 
 echo
 echo "camada base pronta:"
