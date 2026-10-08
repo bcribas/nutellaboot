@@ -35,6 +35,8 @@ import os
 import re
 import secrets
 import shlex
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -55,13 +57,54 @@ def conf() -> dict:
     return {**DEFAULT, **(server.get("usb") or {})}
 
 
-def build_dir() -> Path:
-    """Onde moram o vmlinuz e o initrd.img (compartilhados por todas as sedes).
+# O nome de um par kernel+initrd que não é o padrão. Vira componente de
+# caminho numa rota que só pede a chave de boot de uma sede, e o diretório
+# vizinho dos dados tem a chave de todas: nada de barra, nada de começar por
+# ponto.
+NOME_BUILD_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,48}$")
+
+
+def builds_dir() -> Path:
+    """Onde moram os pares nomeados, um diretório por nome (`client/builds/<nome>/`).
+
+    `NB3_BOOT_BUILDS_DIR` existe para os testes. Não é o `NB3_BUILD_DIR`: esse
+    também é o diretório de trabalho do `nb3-layer-worker`.
+    """
+    return Path(os.environ.get("NB3_BOOT_BUILDS_DIR", str(REPO_ROOT / "client" / "builds")))
+
+
+def build_dir(nome: str = "") -> Path:
+    """Onde moram o vmlinuz e o initrd.img de um par.
+
+    Sem nome, o padrão (`client/build`), que é o de todo modelo sem
+    `boot_build`. Com nome, `client/builds/<nome>`: o kernel tem de casar com os
+    módulos da base do modelo, e uma base nova traz kernel novo sem que as
+    sedes da base antiga mudem.
 
     `NB3_BUILD_DIR` existe para os testes: gerar um initrd de verdade precisa de
     root, e a suíte não pode depender disso.
     """
-    return Path(os.environ.get("NB3_BUILD_DIR", str(REPO_ROOT / "client" / "build")))
+    if not nome:
+        return Path(os.environ.get("NB3_BUILD_DIR", str(REPO_ROOT / "client" / "build")))
+    if not NOME_BUILD_RE.match(nome):
+        raise ValueError(f"nome de kernel inválido: {nome!r}")
+    return builds_dir() / nome
+
+
+def build_da_sede(image_id: str) -> str:
+    """O nome do par que esta sede usa: o `boot_build` do modelo dela.
+
+    Vazio é o padrão. Um nome que não existe (apagado, digitado errado à mão no
+    disco) NÃO cai no padrão: quem chama vê o par ausente e não entrega nada.
+    Cair no padrão regravaria o pendrive com um kernel sem módulos na base
+    deste modelo, e a sala inteira bootaria sem som, vídeo e wifi.
+    """
+    info = fsdb.read_json(settings.data_root / "site-images" / image_id / "image.json", {}) or {}
+    modelo = str(info.get("model") or "")
+    if not modelo or "/" in modelo:
+        return ""
+    tpl = fsdb.read_json(settings.data_root / "models" / modelo / "model.json", {}) or {}
+    return str(tpl.get("boot_build") or "")
 
 
 def _usb_dir() -> Path:
@@ -71,25 +114,142 @@ def _usb_dir() -> Path:
 # --- kernel e initrd: sem eles não há pendrive nenhum ---
 
 
-def kernel_state() -> dict:
-    """O que existe em client/build, com o comando para produzir o que falta."""
+def kernel_state(build: str = "") -> dict:
+    """O que existe no diretório do par, com o comando para produzir o que falta."""
+    try:
+        d = build_dir(build)
+    except ValueError:
+        d = None
     partes = {}
     for nome in ("vmlinuz", "initrd.img"):
-        p = build_dir() / nome
-        if p.is_file():
+        p = d / nome if d else None
+        if p and p.is_file():
             st = p.stat()
             partes[nome] = {"size": st.st_size, "mtime": st.st_mtime}
         else:
             partes[nome] = None
     ok = all(partes.values())
+    comando = "sudo tools/nb3-build-initrd --raw <imagem-mestre>.raw"
+    if build:
+        comando += f" --name {build}"
+    info = build_info(build) if ok else {"build": ""}
     return {
         "ok": ok,
-        "dir": str(build_dir()),
+        "name": build,
+        "dir": str(d) if d else "",
         "files": partes,
+        "build": info["build"],
+        "kernel": versao_do_kernel(build) if ok else "",
         # é o único passo do sistema que precisa de root, então a mensagem tem
         # que ser o comando exato — não "veja a documentação"
-        "hint": "" if ok else "sudo tools/nb3-build-initrd --raw <imagem-mestre>.raw",
+        "hint": "" if ok else comando,
     }
+
+
+def versao_do_kernel(build: str = "") -> str:
+    """A versão do kernel do par (`7.0.0-38-generic`), para a tela pôr ao lado
+    da base do modelo: os dois têm de casar.
+
+    O `nb3-build-initrd` carimba no build.json; par mais antigo que isso tem a
+    versão no cabeçalho do bzImage (o ponteiro em 0x20E, relativo a 0x200).
+    """
+    d = build_dir(build)
+    carimbo = (fsdb.read_json(d / "build.json", {}) or {}).get("kernel")
+    if carimbo:
+        return str(carimbo)
+    try:
+        with open(d / "vmlinuz", "rb") as f:
+            f.seek(0x202)
+            if f.read(4) != b"HdrS":
+                return ""
+            f.seek(0x20E)
+            f.seek(int.from_bytes(f.read(2), "little") + 0x200)
+            texto = f.read(256).split(b"\0", 1)[0].decode(errors="replace")
+    except OSError:
+        return ""
+    return texto.split(" ", 1)[0]
+
+
+_modulos_cache: dict[tuple, list[str]] = {}
+
+
+def kernels_da_base(arquivo: str) -> list[str] | None:
+    """As versões de kernel com módulos dentro de uma camada base
+    (`usr/lib/modules/<versão>`), lidas do blob daqui.
+
+    `None` quando não dá para saber: o blob não está neste servidor, falta o
+    `unsquashfs`, ou a listagem veio vazia. Quem usa isto para recusar algo
+    só recusa com uma lista na mão. Listar só esse diretório leva milissegundos
+    mesmo numa base de 6 GB, e o resultado fica guardado por tamanho e mtime.
+    """
+    if not arquivo or "/" in arquivo:
+        return None
+    p = settings.data_root / "blobs" / arquivo
+    if not p.is_file():
+        return None
+    st = p.stat()
+    chave = (str(p), st.st_size, int(st.st_mtime))
+    if chave not in _modulos_cache:
+        versoes = modulos_no_squash(p)
+        if versoes is None:
+            return None
+        _modulos_cache[chave] = versoes
+    return _modulos_cache[chave]
+
+
+def modulos_no_squash(p: Path) -> list[str] | None:
+    """Os diretórios de `usr/lib/modules` (ou `lib/modules`) de um squashfs.
+    O `nb3-nova-temporada` usa o mesmo, no arquivo que vai registrar."""
+    if not shutil.which("unsquashfs"):
+        return None
+    versoes: set[str] = set()
+    for raiz in ("usr/lib/modules", "lib/modules"):
+        try:
+            r = subprocess.run(
+                ["unsquashfs", "-l", "-d", "", str(p), raiz],
+                capture_output=True, text=True, timeout=60,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        fundo = raiz.count("/") + 2
+        for linha in r.stdout.splitlines():
+            partes = linha.strip("/").split("/")
+            if len(partes) == fundo and "/".join(partes[:-1]) == raiz:
+                versoes.add(partes[-1])
+        if versoes:
+            break
+    return sorted(versoes) or None
+
+
+def kernel_casa_com_base(build: str, camadas: list[dict]) -> dict:
+    """O par `build` serve à base destas camadas? `match` é None quando não dá
+    para saber (par ausente, base sem blob aqui)."""
+    base = next((c for c in camadas if c.get("role") == "base"), None)
+    versao = versao_do_kernel(build) if kernel_state(build)["ok"] else ""
+    lista = kernels_da_base(str(base.get("file") or "")) if base else None
+    return {
+        "base": (base or {}).get("file", ""),
+        "base_kernels": lista,
+        "match": (versao in lista) if (versao and lista is not None) else None,
+    }
+
+
+def kernels() -> list[dict]:
+    """Todos os pares: o padrão, os de `client/builds/` e os que algum modelo
+    cita sem existirem (esses aparecem com `ok: false`, que é o aviso)."""
+    from . import store
+
+    usados: dict[str, list[str]] = {}
+    for m in store.list_models():
+        tpl = fsdb.read_json(settings.data_root / "models" / m / "model.json", {}) or {}
+        usados.setdefault(str(tpl.get("boot_build") or ""), []).append(m)
+    nomes = {""} | set(usados)
+    if builds_dir().is_dir():
+        nomes |= {p.name for p in builds_dir().iterdir() if p.is_dir() and NOME_BUILD_RE.match(p.name)}
+    return [
+        {**kernel_state(n), "default": not n, "models": sorted(usados.get(n, []))}
+        for n in sorted(nomes)
+    ]
 
 
 ARQUIVOS_DE_BOOT = ("vmlinuz", "initrd.img")
@@ -107,7 +267,7 @@ ARQUIVOS_DE_BOOT = ("vmlinuz", "initrd.img")
 TOLERANCIA_RELOGIO = 2.0
 
 
-def build_info() -> dict:
+def build_info(build: str = "") -> dict:
     """O que `tools/nb3-build-initrd` carimbou na construção atual.
 
     `{"build": "20260803-…", "files": {"vmlinuz": {"md5":…, "size":…}, …}}`.
@@ -120,7 +280,10 @@ def build_info() -> dict:
     rota de boot diz `unknown` e a máquina não confere nada: é o único
     comportamento honesto quando não se sabe a própria versão.
     """
-    d = fsdb.read_json(build_dir() / "build.json", {}) or {}
+    try:
+        d = fsdb.read_json(build_dir(build) / "build.json", {}) or {}
+    except ValueError:
+        d = {}
     arquivos = d.get("files") or {}
     if not d.get("build") or not all(
         isinstance(arquivos.get(n), dict) and arquivos[n].get("md5") for n in ARQUIVOS_DE_BOOT
@@ -129,15 +292,21 @@ def build_info() -> dict:
     return {"build": str(d["build"]), "files": {n: arquivos[n] for n in ARQUIVOS_DE_BOOT}}
 
 
-def _kernel_fingerprint() -> str:
+def _kernel_fingerprint(build: str = "") -> str:
     """Impressão do par kernel+initrd usado numa geração.
 
     `(mtime, size)` em vez de md5: são 200 MB, e a pergunta é só "mudou desde
-    que esta imagem foi gerada".
+    que esta imagem foi gerada". O nome do par entra só quando não é o padrão:
+    assim a sede que troca de modelo vê a imagem desatualizada, e as impressões
+    já gravadas do padrão continuam valendo.
     """
-    partes = []
+    try:
+        d = build_dir(build)
+    except ValueError:
+        return ""
+    partes = [f"build:{build}"] if build else []
     for nome in ("vmlinuz", "initrd.img"):
-        p = build_dir() / nome
+        p = d / nome
         if not p.is_file():
             return ""
         st = p.stat()
@@ -285,7 +454,7 @@ def image_state(image_id: str) -> dict:
         estado = {"status": "missing"}
     return _com_derivados(
         estado,
-        esperado_kernel=_kernel_fingerprint(),
+        esperado_kernel=_kernel_fingerprint(build_da_sede(image_id)),
         esperado_boot=_boot_fingerprint(image_id),
     )
 
@@ -362,23 +531,28 @@ async def _rodar(args: list[str]) -> tuple[int, str]:
     return proc.returncode or 0, (saida or b"").decode(errors="replace")[-4000:]
 
 
-async def _gerar(caminho_estado: Path, nome: str, extras: list[str], **campos) -> dict:
-    k = kernel_state()
+async def _gerar(
+    caminho_estado: Path, nome: str, extras: list[str], build: str = "", **campos
+) -> dict:
+    k = kernel_state(build)
     if not k["ok"]:
         return _marcar(
             caminho_estado,
             status="unavailable",
-            error=f"vmlinuz/initrd.img não encontrados em {k['dir']}",
+            error=f"vmlinuz/initrd.img não encontrados em {k['dir'] or build}",
             hint=k["hint"],
         )
 
     destino = file_path(nome)
     destino.parent.mkdir(parents=True, exist_ok=True)
-    args = ["--output", str(destino), *extras]
+    # o par sempre explícito: o padrão do nb3-genusb é client/build, e a sede
+    # de um modelo com kernel próprio sairia com o kernel errado
+    d = build_dir(build)
+    args = ["--output", str(destino), "--kernel", str(d / "vmlinuz"), "--initrd", str(d / "initrd.img"), *extras]
     if publish.enabled():
         args.append("--publish")
 
-    fingerprint = _kernel_fingerprint()
+    fingerprint = _kernel_fingerprint(build)
     _marcar(caminho_estado, status="building", file=nome, error="", hint="", **campos)
 
     # uma geração por vez: são 400 MB de escrita cada, e a criação em massa
@@ -397,6 +571,7 @@ async def _gerar(caminho_estado: Path, nome: str, extras: list[str], **campos) -
         size=tamanho,
         built_at=time.time(),
         kernel_fingerprint=fingerprint,
+        boot_build=build,
         server=settings.base_url,
         error="",
         hint="",
@@ -423,6 +598,7 @@ async def gerar_da_sala(image_id: str) -> dict:
         _image_state_path(image_id),
         _nome_da_sala(image_id, sufixo),
         extras,
+        build=build_da_sede(image_id),
         suffix=sufixo,
         boot_fingerprint=_boot_fingerprint(image_id),
     )

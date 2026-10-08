@@ -260,9 +260,16 @@ def set_model_meta(
     public: bool | None = None,
     description: str | None = None,
     wallpaper_locked: bool | None = None,
+    boot_build: str | None = None,
 ) -> None:
     with fsdb.locked(model_dir(name)):
         tpl = fsdb.read_json(model_dir(name) / "model.json", {}) or {}
+        if boot_build is not None:
+            # vazio volta ao par padrão: sem a chave, o modelo é como era antes
+            if boot_build:
+                tpl["boot_build"] = boot_build
+            else:
+                tpl.pop("boot_build", None)
         if public is not None:
             tpl["public"] = bool(public)
         if description is not None:
@@ -301,11 +308,16 @@ def create_model(
 
     layers: list[dict] = []
     schema = build_default_schema()
+    extra: dict = {}
     if from_model:
         if not model_exists(from_model):
             raise ImageError(f"modelo de origem '{from_model}' não existe")
         base = fsdb.read_json(model_dir(from_model) / "model.json", {}) or {}
         layers = list(base.get("layers", []))
+        # o kernel anda com a base: a cópia leva a base, então leva o par que
+        # tem os módulos dela
+        if base.get("boot_build"):
+            extra["boot_build"] = base["boot_build"]
         # completo: copiar o arquivo cru fazia o derivado nascer sem os campos
         # acrescentados ao padrão depois da origem
         schema = _esquema(model_dir(from_model))
@@ -322,6 +334,7 @@ def create_model(
                 "created_at": time.time(),
                 "derived_from": from_model,
                 "layers": layers,
+                **extra,
             },
         )
         fsdb.write_json(d / "schema.json", schema)

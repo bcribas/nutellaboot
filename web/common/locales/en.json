@@ -752,5 +752,17 @@
   "svckey_new": "New service key",
   "svckey_new_help": "One key per event is recommended, with only the scopes it uses.",
   "usb_ready": "ready",
-  "layer_attach_nothing_left": "This layer is already on the model and on every image you can see."
+  "layer_attach_nothing_left": "This layer is already on the model and on every image you can see.",
+  "model_kernel_label": "Boot kernel",
+  "model_kernel_help": "The kernel+initrd pair on the USB drive of this model's sites. The kernel must have modules in the model's base.",
+  "model_kernel_default": "default",
+  "model_kernel_confirm": "The images of this model ({n}) will rewrite their USB drive by themselves on the next boot, with kernel {kernel}. Continue?",
+  "model_kernel_line": "Boot kernel: {kernel} ({par}).",
+  "model_kernel_mismatch": "The base {base} has no modules for kernel {kernel}: machines start without sound, video and wifi. Choose the right kernel under General.",
+  "model_kernel_missing": "Kernel {par} does not exist on this server: the sites of this model do not update their USB drive.",
+  "usb_kernels_help": "Each model uses one pair: the default, or the one chosen on its page. The USB drive updates itself to the pair of the site's model.",
+  "usb_kernel_name": "Name",
+  "usb_kernel_version": "Kernel",
+  "usb_kernel_models": "Models",
+  "usb_kernel_missing": "missing"
 }

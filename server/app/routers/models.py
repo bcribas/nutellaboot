@@ -7,6 +7,7 @@ Antes isto se chamava "template" e só nascia à mão no disco.
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -14,7 +15,7 @@ from fastapi.responses import FileResponse
 
 from .. import auth, fsdb
 from ..models import ModelLayers
-from ..services import layer_roles, layerbuilds, ownership, store
+from ..services import layer_roles, layerbuilds, ownership, store, usb
 from ..services.config import esquema_publico
 from ..services import wallpaper as wp
 from ..settings import settings
@@ -106,9 +107,22 @@ async def get_model(name: str, p=Depends(auth.require_console)) -> dict:
             }
         )
     achado = wp.do_modelo(name)
+    par = str(tpl.get("boot_build") or "")
+    k = usb.kernel_state(par)
+    # numa thread: a primeira leitura de uma base fria no disco pode levar
+    # centenas de ms, e o servidor tem um worker só (o SSE das salas espera)
+    casa = await asyncio.to_thread(usb.kernel_casa_com_base, par, tpl.get("layers") or [])
     return {
         **tpl,
         **ownership.owner_publico(dono),
+        # a tela põe a versão ao lado da base: os dois têm de casar
+        "boot_kernel": {
+            "name": k["name"],
+            "ok": k["ok"],
+            "build": k["build"],
+            "kernel": k["kernel"],
+            **casa,
+        },
         "can_manage": ownership.can_manage_model(p, name),
         "mine": dono == p.owner,
         "image_extras": imagens,
@@ -123,11 +137,40 @@ async def patch_model(name: str, body: dict, p=Depends(auth.require_console)) ->
         raise HTTPException(404, "modelo não existe")
     if body.get("public") is not None and p.kind != "admin":
         raise HTTPException(403, "só a administração publica um modelo")
+    boot_build = body.get("boot_build")
+    if boot_build is not None:
+        # trocar o kernel regrava o pendrive de toda sede do modelo, e o par
+        # tem de casar com a base: decisão da administração
+        if p.kind != "admin":
+            raise HTTPException(403, "só a administração escolhe o kernel de um modelo")
+        boot_build = str(boot_build).strip()
+        if boot_build and not usb.NOME_BUILD_RE.match(boot_build):
+            raise HTTPException(400, "nome de kernel inválido")
+        # o par tem de estar inteiro e carimbado AGORA: um nome que não existe
+        # deixaria as sedes do modelo sem atualização e o pendrive novo sem kernel
+        k = usb.kernel_state(boot_build) if boot_build else {}
+        if boot_build and not (k["ok"] and k["build"]):
+            raise HTTPException(
+                400,
+                f"o kernel '{boot_build}' não existe neste servidor "
+                f"(sudo tools/nb3-build-initrd --raw <imagem-mestre>.raw --name {boot_build})",
+            )
+        # só recusa com a lista na mão: sem o blob da base aqui, não há como saber
+        casa = await asyncio.to_thread(
+            usb.kernel_casa_com_base, boot_build, (store.get_model(name) or {}).get("layers") or []
+        )
+        if casa["match"] is False:
+            raise HTTPException(
+                400,
+                f"a base {casa['base']} não tem os módulos do kernel {usb.versao_do_kernel(boot_build)} "
+                f"(tem: {', '.join(casa['base_kernels'])}): as máquinas subiriam sem som, vídeo e wifi",
+            )
     store.set_model_meta(
         name,
         public=body.get("public"),
         description=body.get("description"),
         wallpaper_locked=body.get("wallpaper_locked"),
+        boot_build=boot_build,
     )
     return store.get_model(name) or {}
 

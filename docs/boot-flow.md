@@ -160,6 +160,14 @@ No boot pela rede não há o que regravar: a máquina só avisa (abaixo).
 > atualizar no próximo boot**. Cada máquina baixa ~200 MB a mais uma vez e
 > reinicia. Não é o que se faz na véspera da prova.
 
+O par que a rota anuncia é o do **modelo da sede**: o `boot_build` do modelo
+escolhe `client/builds/<nome>/`, e sem ele vale `client/build/`. Gerar um par
+com nome (`nb3-build-initrd --name`) só regrava o pendrive das sedes dos
+modelos que o escolheram. Um pendrive gravado com o padrão que boota numa sede
+de outro par se regrava no primeiro boot, e por isso o mesmo pendrive continua
+servindo para qualquer sede. Par nomeado que não existe no servidor responde
+`BUILD unknown`: a máquina não regrava nada, e nunca recebe o padrão no lugar.
+
 ### Por que existe um pendrive genérico
 
 No NutellaBoot 2, cada sede tinha a sua imagem de pendrive de 400 MB, e a
@@ -233,7 +241,7 @@ Os três arquivos:
 
 | Arquivo | De onde vem |
 |---|---|
-| `vmlinuz`, `initrd.img` | os de `client/build/`, os mesmos do pendrive. A sede baixa com a chave de boot: `curl -fO -H "X-NB-Boot-Key: nb3b_…" https://<servidor>/boot/v3/<sede>/usbfile/initrd.img` (idem `vmlinuz`) |
+| `vmlinuz`, `initrd.img` | os do par do modelo da sede (`client/build/` ou `client/builds/<nome>/`), os mesmos do pendrive. A sede baixa com a chave de boot: `curl -fO -H "X-NB-Boot-Key: nb3b_…" https://<servidor>/boot/v3/<sede>/usbfile/initrd.img` (idem `vmlinuz`) |
 | `nutellaboot.conf` | o mesmo que o console entrega para o pendrive; o `set` na frente das linhas não atrapalha |
 
 Reconstruir o initrd (`nb3-build-initrd`) deixa as sedes de netboot para trás

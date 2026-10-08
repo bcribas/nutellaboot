@@ -109,7 +109,7 @@ mandar a chave no corpo; `aria2c` e `curl` usam o cabeçalho.
 | GET/POST | `/boot/v3/{img}/machines/{mac}/lockstate` | B | tela de bloqueio (a cada 4 s) | `locked` ou `unlocked` |
 | GET/POST | `/boot/v3/{img}/roster/logos/{org}` | B | tela de bloqueio | SVG ou PNG do logotipo |
 | GET/POST | `/boot/v3/{img}/usb` | B | `stuff` | `BUILD <id>` e, nas linhas seguintes, `MD5 ARQUIVO URL` (mesmo formato do manifest) |
-| GET/POST | `/boot/v3/{img}/usbfile/{nome}` | B | `stuff` | o `vmlinuz` ou o `initrd.img` da construção atual |
+| GET/POST | `/boot/v3/{img}/usbfile/{nome}` | B | `stuff` | o `vmlinuz` ou o `initrd.img` do par desta sede |
 
 O join respeita o limite `SEEDMAX` da configuração da imagem (padrão 4):
 pool cheio responde **200 com `accepted=f`** — não é erro, a máquina só pula
@@ -123,6 +123,12 @@ e se for diferente baixa os arquivos, confere o md5 e regrava a partição
 sozinho. Construção sem `client/build/build.json` responde `BUILD unknown`, e
 aí a máquina não confere nada. `{nome}` sai de uma lista fechada
 (`vmlinuz`, `initrd.img`). Veja `docs/boot-flow.md`.
+
+O par é o do **modelo da sede**: o `boot_build` do modelo escolhe
+`client/builds/<nome>/`, e sem ele vale o padrão (`client/build`). Um par
+nomeado que não existe neste servidor responde `BUILD unknown` e `404`, nunca o
+padrão: o kernel do padrão não tem módulos na base de um modelo que pediu
+outro.
 
 ### Exemplo: manifest
 
@@ -392,6 +398,21 @@ usa o do modelo, resolvido na hora de servir — trocar no modelo na véspera
 chega a todas as sedes já criadas, no boot seguinte. O `wallpaper` do
 `GET /config` traz `origin` (`"image"` ou `"model"`) para a tela poder dizer de
 onde veio.
+
+**O kernel do modelo.** `PATCH /api/v1/models/{nome}` aceita `boot_build`
+(só a administração): o nome de um par kernel+initrd em `client/builds/<nome>/`,
+gerado por `nb3-build-initrd --name <nome>`. `""` volta ao padrão. O kernel tem
+de ter módulos na base do modelo, então o servidor recusa (`400`):
+
+- nome fora de `^[a-z0-9][a-z0-9._-]{0,48}$`;
+- par que não existe aqui, ou sem `build.json`;
+- par cujo kernel não está em `usr/lib/modules` da base do modelo, quando o
+  blob da base está em `data/blobs/` (sem o blob não há como saber, e passa).
+
+A cópia de um modelo (`from`, `duplicate`) leva o `boot_build`. O
+`GET /api/v1/models/{nome}` traz `boot_kernel`: `{name, ok, build, kernel,
+base, base_kernels, match}`, em que `match` é `false` quando a base não tem os
+módulos do kernel e `null` quando não dá para saber.
 
 `PATCH /api/v1/models/{nome}` aceita `wallpaper_locked`. A ordem das três
 regras é o contrato: a trava **da própria imagem** vale sempre (o convite a
@@ -818,9 +839,10 @@ lista, que é o que lhes dá prioridade no overlayfs.
 
 | Método | Caminho | Cred. | Corpo | Resposta |
 |---|---|---|---|---|
-| GET | `/api/v1/usb` | A | — | `{kernel, generic, auto_generate, images:[…]}` |
+| GET | `/api/v1/usb` | A | — | `{kernel, kernels:[…], generic, auto_generate, images:[…]}` |
+| GET | `/api/v1/usb/kernels` | A | — | `{kernels:[{name, default, ok, build, kernel, models, hint, …}]}` |
 | POST | `/api/v1/usb/generic` | A | — | `202` + estado (gera em segundo plano) |
-| GET | `/api/v1/site-images/{img}/usb` | C, I | — | `{kernel, generic, image}` |
+| GET | `/api/v1/site-images/{img}/usb` | C, I | — | `{kernel, generic, image}` (`kernel` é o par desta sede) |
 | POST | `/api/v1/site-images/{img}/usb` | C, I | — | `202` + estado |
 | GET | `/api/v1/site-images/{img}/usb/conf` | C, I, `?tk=` | — | `nutellaboot.conf` (texto) |
 | GET | `/api/v1/site-images/{img}/usb/image` | C, I, `?tk=` | — | **302** para o `.img.gz` no servidor de arquivos, ou a imagem compactada aqui |
@@ -852,6 +874,14 @@ O estado de cada imagem é `missing`, `building`, `done`, `failed` ou
 `done`, vem também `stale` e `stale_reason` (`boot_key`, `kernel`, `server`),
 calculados na leitura: rotacionar a chave de boot torna a imagem obsoleta sem
 que ninguém precise avisar o serviço.
+
+**Um par por modelo.** `kernels` lista o padrão (`name: ""`), cada diretório
+de `client/builds/` e os nomes que algum modelo cita sem existirem (esses com
+`ok: false` e o comando em `hint`). A imagem da sala sai com o par do modelo
+dela, e trocar a sede de modelo marca a imagem com `stale_reason: kernel`. A
+genérica sai sempre com o padrão: gravada para uma sede de um modelo com outro
+par, ela se atualiza sozinha no primeiro boot (um reinício a mais), e por isso
+continua servindo para qualquer sede.
 
 Quando a publicação está ligada, a resposta traz `public_url` no servidor de
 arquivos e as telas usam essa URL — a máquina de gestão não serve 400 MB por

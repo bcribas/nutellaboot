@@ -46,12 +46,20 @@ export const dialogoNovoModelo = async ({ modelos = [], partirDe = "" } = {}) =>
   return r;
 };
 
-// --- Geral: descrição, publicação e a trava do papel de parede ---
+// O par kernel+initrd como a tela o nomeia: o padrão não tem nome.
+const rotuloDoPar = (k) => `${k.name || t("model_kernel_default")}${k.kernel ? ` · ${k.kernel}` : ""}`;
 
-const desenharGeral = (corpo, m) => {
+// --- Geral: descrição, publicação, a trava do papel de parede e o kernel ---
+
+const desenharGeral = (corpo, m, kernels) => {
   const admin = ehAdmin();
   const chave = `modelo:${m.name}:geral`;
-  const original = { description: m.description || "", public: Boolean(m.public), wallpaper_locked: Boolean(m.wallpaper_locked) };
+  const original = {
+    description: m.description || "",
+    public: Boolean(m.public),
+    wallpaper_locked: Boolean(m.wallpaper_locked),
+    boot_build: m.boot_build || "",
+  };
   const r = rascunho(chave, () => ({ ...original }));
   const mudou = () => marcarSujo(chave, JSON.stringify(r) !== JSON.stringify(original));
   const desc = el("input", { type: "text", value: r.description });
@@ -69,15 +77,35 @@ const desenharGeral = (corpo, m) => {
     r.wallpaper_locked = trava.checked;
     mudou();
   };
+  // só a administração escolhe: trocar o kernel regrava o pendrive de toda
+  // sede do modelo, e o par tem de casar com a base
+  const pares = (kernels || []).filter((k) => k.ok || k.name === original.boot_build);
+  const kernel = el("select", {},
+    ...pares.map((k) => el("option", { value: k.name, selected: k.name === r.boot_build }, rotuloDoPar(k))));
+  kernel.onchange = () => {
+    r.boot_build = kernel.value;
+    mudou();
+  };
   const campos = [campo(t("model_desc"), desc)];
   if (admin) campos.push(caixa(t("model_public_label"), publico, t("model_public_help")));
   campos.push(caixa(t("model_wallpaper_lock_label"), trava, t("model_wallpaper_lock_help")));
+  if (admin && pares.length) campos.push(campo(t("model_kernel_label"), kernel, t("model_kernel_help")));
   const salvar = el("button", { type: "button", class: "primary" }, t("save"));
   salvar.onclick = acao(async () => {
     const mudancas = {};
     if (r.description.trim() !== original.description) mudancas.description = r.description.trim();
     if (admin && r.public !== original.public) mudancas.public = r.public;
     if (r.wallpaper_locked !== original.wallpaper_locked) mudancas.wallpaper_locked = r.wallpaper_locked;
+    if (admin && r.boot_build !== original.boot_build) {
+      const novo = pares.find((k) => k.name === r.boot_build) || { name: r.boot_build };
+      const ok = await confirmar({
+        texto: t("model_kernel_confirm", { n: (m.image_extras || []).length, kernel: rotuloDoPar(novo) }),
+        acao: t("save"),
+        perigo: true,
+      });
+      if (!ok) return false;
+      mudancas.boot_build = r.boot_build;
+    }
     if (!Object.keys(mudancas).length) return false;
     await api.patch(`/api/v1/models/${encodeURIComponent(m.name)}`, mudancas, A);
     esquecerRascunho(chave);
@@ -88,6 +116,18 @@ const desenharGeral = (corpo, m) => {
 };
 
 // --- camadas do modelo, e as que só algumas imagens dele têm ---
+
+// O kernel fica ao lado da base porque os dois têm de casar: base nova sem o
+// kernel novo sobe sem som, vídeo e wifi, e nada mais reclama.
+const linhaDoKernel = (k) => {
+  if (!k) return "";
+  const par = k.name || t("model_kernel_default");
+  if (!k.ok) return el("p", { class: "msg warn" }, t("model_kernel_missing", { par }));
+  if (k.match === false) {
+    return el("p", { class: "msg bad" }, t("model_kernel_mismatch", { base: k.base, kernel: k.kernel }));
+  }
+  return el("p", { class: "muted" }, t("model_kernel_line", { kernel: k.kernel || "?", par }));
+};
 
 const desenharCamadas = (corpo, nome, gere, contexto, sinal) =>
   carregarEm(corpo, sinal, async () => {
@@ -143,6 +183,7 @@ const desenharCamadas = (corpo, nome, gere, contexto, sinal) =>
     const partes = [
       el("p", { class: "help" }, t("model_layers_help")),
       tabela(["#", t("layer_file"), t("layer_role"), "md5", ""], linhas, { vazio: t("model_empty_warning") }),
+      linhaDoKernel(m.boot_kernel),
     ];
     if (gere) {
       const anexar = el("button", { type: "button", class: "small primary" }, t("layer_attach_title"));
@@ -245,11 +286,13 @@ export const vista = async (alvo, ctx) => {
   let m;
   let lista;
   let imagens;
+  let kernels;
   try {
-    [m, lista, imagens] = await Promise.all([
+    [m, lista, imagens, kernels] = await Promise.all([
       api.get(`/api/v1/models/${encodeURIComponent(nome)}`, { ...A, signal: ctx.sinal }),
       api.get("/api/v1/models", { ...A, signal: ctx.sinal }),
       api.get("/api/v1/site-images", { ...A, signal: ctx.sinal }),
+      ehAdmin() ? api.get("/api/v1/usb/kernels", { ...A, signal: ctx.sinal }) : null,
     ]);
   } catch (e) {
     if (e.status === 404) return naoEncontrado(alvo, "modelos", t("nav_models"));
@@ -277,7 +320,7 @@ export const vista = async (alvo, ctx) => {
   const secoes = [];
   if (gere) {
     const geral = secao({ id: "geral", titulo: t("section_general") });
-    desenharGeral(geral.corpo, m);
+    desenharGeral(geral.corpo, m, kernels && kernels.kernels);
     secoes.push(geral.no);
   }
   const camadas = secao({ id: "camadas", titulo: t("model_layers") });

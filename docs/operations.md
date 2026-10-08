@@ -114,6 +114,27 @@ Casos que ele trata:
   então a base é trocada.
 - **regerar a base e registrar de novo**: continua com uma base só.
 
+**Base com kernel novo.** O kernel do pendrive tem de ter módulos dentro da
+base (`usr/lib/modules/<versão>`). Uma atualização do Ubuntu que troca o
+kernel (24.04.4 → 24.04.5) pede um par kernel+initrd próprio para o modelo
+novo, e as sedes dos modelos antigos não mudam:
+
+```bash
+# o par novo, com nome, em client/builds/24.04.5 (o padrão continua intacto)
+sudo tools/nb3-build-initrd --raw ubuntu-24.04.5-initial.raw --name 24.04.5
+
+tools/nb3-nova-temporada --de maratona2026 --para maratona2026-24045 \
+    --base data/blobs/maratonalinux2026-24.04.5.squash-... \
+    --boot-build 24.04.5 --publish
+```
+
+O `nb3-nova-temporada` lista os módulos dentro do `.squash` e **recusa**,
+antes de enviar qualquer coisa, a base que não tem o kernel do par do modelo
+(sem `--boot-build`, o par que o modelo já usa ou herda). Pelo console, o par
+se escolhe na página do modelo, seção **Geral**, campo *Kernel do boot* (só a
+administração), e a seção **Camadas** diz em vermelho quando a base não casa
+com o kernel. Mais em [1.4](#14-gerar-o-kernel-e-o-initrd).
+
 Também dá para fazer pela tela: em `/admin/`, aba **Modelos**, **Novo modelo**
 com *Partir de* o modelo do ano anterior. Mas aí a base nova entra à mão, na
 página do modelo: seção **Camadas**, **Anexar camada**, papel *sistema base* e
@@ -214,6 +235,35 @@ Se preferir não dar root no servidor, dá para fazer o mesmo dentro de uma
 máquina virtual: suba a imagem-mestre, copie `client/initramfs-tools/` para
 `/etc/initramfs-tools/`, rode `update-initramfs -c -k <versão>` e traga
 `vmlinuz` e `initrd.img` de volta para `client/build/`. O resultado é idêntico.
+
+#### Um par por modelo
+
+O kernel tem de casar com os módulos da base: kernel sem módulos na base sobe
+o sistema sem som, vídeo e wifi, e nada reclama. Por isso cada modelo escolhe
+o seu par:
+
+- **o padrão**, `client/build/`, é o de todo modelo sem `boot_build`. Gerar de
+  novo sem `--name` regrava o pendrive de todas essas sedes no boot seguinte;
+- **um par com nome**, `client/builds/<nome>/`, sai de
+  `nb3-build-initrd --name <nome>` e vale só para os modelos com
+  `boot_build=<nome>` (o `--boot-build` do `nb3-nova-temporada`, ou o campo
+  *Kernel do boot* na página do modelo). A cópia de um modelo leva o par.
+
+O servidor recusa o par que não existe e o par cujo kernel não está na base do
+modelo (quando o blob da base está em `data/blobs/`). Um par que some depois
+(diretório apagado) não cai no padrão: as sedes daquele modelo param de
+atualizar o pendrive, e a aba **Sistema** mostra o par em vermelho com o
+comando para gerá-lo. A mesma aba lista todos os pares, a versão do kernel de
+cada um e os modelos que o usam.
+
+O pendrive genérico sai sempre com o padrão. Numa sede de um modelo com outro
+par ele se regrava sozinho no primeiro boot (um reinício a mais) e continua
+servindo para qualquer sede. A imagem de pendrive da sede sai com o par do
+modelo dela, e trocar a sede de modelo a marca como desatualizada.
+
+E se mesmo assim o kernel e a base não casarem (um boot pela rede com o kernel
+antigo, por exemplo), o boot avisa na tela: `kernel <versão> has no modules in
+this system image`.
 
 ### 1.5 Gravar o pendrive
 

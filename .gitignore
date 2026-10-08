@@ -1,5 +1,7 @@
 # ambiente
 .venv/
+# o worktree aponta para o .venv do checkout por um symlink, que não é diretório
+.venv
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -16,6 +18,7 @@ data/*
 *.squash-*
 *.squashfs
 client/build/
+client/builds/
 
 # logs
 *.log

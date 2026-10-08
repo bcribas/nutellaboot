@@ -1,6 +1,6 @@
-// Aba Sistema (só a administração): o pendrive de boot (o par kernel+initrd e a
-// imagem genérica, iguais para todas as sedes), a publicação no servidor de
-// arquivos e a auditoria das credenciais.
+// Aba Sistema (só a administração): o pendrive de boot (os pares kernel+initrd,
+// um por modelo que pede o seu, e a imagem genérica, igual para todas as
+// sedes), a publicação no servidor de arquivos e a auditoria das credenciais.
 //
 // As ações do pendrive de UMA imagem (baixar, gerar de novo) moram na página
 // dela; aqui fica a visão geral, com o link para cada uma.
@@ -33,14 +33,23 @@ const desenharPendrive = (corpo, sinal) => {
     carregarEm(corpo, sinal, async () => {
       const d = await api.get("/api/v1/usb", { ...A, signal: sinal });
       const partes = [];
-      if (d.kernel.ok) {
-        const v = d.kernel.files["vmlinuz"];
-        const i = d.kernel.files["initrd.img"];
-        partes.push(el("p", { class: "muted" },
-          `${t("usb_kernel")}: vmlinuz ${tamanho(v.size)} · initrd.img ${tamanho(i.size)} · ${quando(i.mtime)}`));
-      } else {
+      if (!d.kernel.ok) {
         partes.push(el("p", { class: "msg warn" }, t("usb_no_kernel"), el("br"), el("code", {}, d.kernel.hint || "")));
       }
+      // um par por modelo: o padrão serve a todo modelo sem boot_build
+      partes.push(
+        el("h3", {}, t("usb_kernel")),
+        el("p", { class: "help" }, t("usb_kernels_help")),
+        tabela([t("usb_kernel_name"), t("usb_kernel_version"), t("usb_kernel_models"), ""], (d.kernels || []).map((k) => [
+          k.name ? el("span", { class: "mono" }, k.name) : t("model_kernel_default"),
+          k.ok ? `${k.kernel || "?"} · ${k.build || "?"}` : el("code", {}, k.hint || ""),
+          (k.models || []).map((n, j) => [j ? ", " : "", linkPara(n, "modelos", n)]).flat(),
+          k.ok
+            ? el("span", { class: "muted small" },
+              `initrd.img ${tamanho(k.files["initrd.img"].size)} · ${quando(k.files["initrd.img"].mtime)}`)
+            : el("span", { class: "pill bad" }, t("usb_kernel_missing")),
+        ]))
+      );
 
       const g = d.generic;
       const gerar = el("button", { type: "button", class: "small", disabled: g.status === "building" }, t("usb_regenerate"));

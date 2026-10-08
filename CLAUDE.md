@@ -181,7 +181,14 @@ Três partes: **servidor** (FastAPI, `server/`), **cliente de boot**
     dentro do initrd e o md5 em `client/build/build.json` — o md5 sai da
     ferramenta porque o servidor tem um worker só. Initrd sem carimbo não
     confere nada. Há teste com pendrive de mentira em disco
-    (`tests/test_usb_update.py`).
+    (`tests/test_usb_update.py`). **O par é do MODELO**: `boot_build` escolhe
+    `client/builds/<nome>/` (sem ele, `client/build/`), porque o kernel tem de
+    ter módulos na base, e com um par só uma base nova obrigava a frota
+    inteira a trocar de kernel junto. Par nomeado ausente nunca cai no padrão
+    (`BUILD unknown`): o padrão regravaria o pendrive com um kernel sem módulos
+    naquela base, e a sala subiria sem som, vídeo e wifi, calada. O nome vira
+    caminho numa rota que só pede a chave de boot, por isso a regex
+    (`usb.NOME_BUILD_RE`). Há teste (`tests/test_kernel_por_modelo.py`).
 
 20. **A produção não recebe edição manual.** Conserto se faz aqui, entra no
     repositório, e chega lá por `git pull` + o que o deploy manda instalar. Foi
@@ -235,7 +242,7 @@ o primeiro. Rota nova de console usa `require_console` + as funções de
 ```bash
 tools/nb3-init                     # instalação nova: emite e IMPRIME a chave
 tools/nb3-dev                      # servidor em 127.0.0.1:8890
-.venv/bin/python -m pytest -q      # 1264 testes, ~3 min
+.venv/bin/python -m pytest -q      # 1300 testes, ~4 min
 tools/nb3-seed-testdata            # dados de teste (não é instalação)
 tools/nb3-layer-worker --check     # confere as ferramentas rootless
 ```

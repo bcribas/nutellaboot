@@ -86,6 +86,7 @@ async def estado_geral(p=Depends(auth.require_admin)) -> dict:
     """Tudo que a seção "Pendrive" do console mostra."""
     return {
         "kernel": usb.kernel_state(),
+        "kernels": usb.kernels(),
         "generic": usb.generic_state(),
         "auto_generate": bool(usb.conf().get("auto_generate", True)),
         "images": [
@@ -93,6 +94,16 @@ async def estado_geral(p=Depends(auth.require_admin)) -> dict:
             for i in store.list_site_images()
         ],
     }
+
+
+@router.get("/usb/kernels")
+async def kernels(p=Depends(auth.require_admin)) -> dict:
+    """Os pares kernel+initrd que o servidor tem, e que modelo usa cada um.
+
+    É o que a página do modelo oferece para escolher, sem o peso do `GET /usb`
+    (que confere o estado do pendrive de cada sede).
+    """
+    return {"kernels": usb.kernels()}
 
 
 @router.post("/usb/generic", status_code=202)
@@ -107,7 +118,8 @@ async def gerar_generica(p=Depends(auth.require_admin)) -> dict:
 @router.get("/site-images/{image}/usb")
 async def estado_da_sala(image: str, p=Depends(auth.require_image_access())) -> dict:
     return {
-        "kernel": usb.kernel_state(),
+        # o par desta sede, que é o do modelo dela
+        "kernel": usb.kernel_state(usb.build_da_sede(image)),
         "generic": usb.generic_state(),
         "image": usb.image_state(image),
     }

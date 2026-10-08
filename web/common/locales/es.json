@@ -752,5 +752,17 @@
   "svckey_new": "Nueva clave de servicio",
   "svckey_new_help": "Se recomienda una clave por evento, solo con los alcances que usa.",
   "usb_ready": "lista",
-  "layer_attach_nothing_left": "Esta capa ya está en el modelo y en todas las imágenes que usted ve."
+  "layer_attach_nothing_left": "Esta capa ya está en el modelo y en todas las imágenes que usted ve.",
+  "model_kernel_label": "Kernel de arranque",
+  "model_kernel_help": "El par kernel+initrd del pendrive de las sedes de este modelo. El kernel debe tener módulos en la base del modelo.",
+  "model_kernel_default": "predeterminado",
+  "model_kernel_confirm": "Las imágenes de este modelo ({n}) van a regrabar su pendrive solas en el próximo arranque, con el kernel {kernel}. ¿Continuar?",
+  "model_kernel_line": "Kernel de arranque: {kernel} ({par}).",
+  "model_kernel_mismatch": "La base {base} no tiene los módulos del kernel {kernel}: las máquinas arrancan sin sonido, video ni wifi. Elija el kernel correcto en General.",
+  "model_kernel_missing": "El kernel {par} no existe en este servidor: las sedes de este modelo no actualizan el pendrive.",
+  "usb_kernels_help": "Cada modelo usa un par: el predeterminado, o el elegido en su página. El pendrive se actualiza solo al par del modelo de la sede.",
+  "usb_kernel_name": "Nombre",
+  "usb_kernel_version": "Kernel",
+  "usb_kernel_models": "Modelos",
+  "usb_kernel_missing": "no existe"
 }

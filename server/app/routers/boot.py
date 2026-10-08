@@ -225,11 +225,15 @@ async def usbcheck(
     Sem `build.json` em client/build (construção anterior a isto), responde
     `BUILD unknown` e o cliente não faz nada — não dá para exigir que um
     pendrive se atualize para uma versão que o servidor não sabe nomear.
+
+    O par é o do MODELO da sede (`boot_build`; sem ele, o padrão). Um par
+    nomeado que não existe também dá `unknown`, nunca o padrão: o kernel do
+    padrão não tem módulos na base de um modelo que pediu outro.
     """
     await _autorizar(request, image, x_nb_boot_key, key)
     from ..services import usb
 
-    info = usb.build_info()
+    info = usb.build_info(usb.build_da_sede(image))
     if not info["build"]:
         return "BUILD unknown\n"
     base = f"{settings.base_url}/boot/v3/{image}/usbfile"
@@ -257,7 +261,10 @@ async def usbfile(
 
     if name not in usb.ARQUIVOS_DE_BOOT:
         raise HTTPException(404, "arquivo desconhecido")
-    caminho = usb.build_dir() / name
+    try:
+        caminho = usb.build_dir(usb.build_da_sede(image)) / name
+    except ValueError:
+        raise HTTPException(404, "arquivo não existe")
     if not caminho.is_file():
         raise HTTPException(404, "arquivo não existe")
     return FileResponse(caminho, media_type="application/octet-stream", filename=name)

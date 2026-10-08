@@ -16,15 +16,19 @@ set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 RAW=""
 KVER=""
+NOME=""
 OUT="$REPO/client/build"
 
 usage() {
     cat << EOF
-Uso: sudo nb3-build-initrd --raw IMAGEM.raw [--kver VERSAO] [--out DIR]
+Uso: sudo nb3-build-initrd --raw IMAGEM.raw [--kver VERSAO] [--name NOME | --out DIR]
 
   --raw ARQUIVO   imagem-mestre do Maratona Linux (partição 2 = raiz)
   --kver VERSAO   versão do kernel (padrão: a mais nova encontrada)
-  --out DIR       destino (padrão: client/build)
+  --name NOME     par com nome, em client/builds/NOME: só as sedes dos modelos
+                  com boot_build=NOME o usam (base nova com kernel novo)
+  --out DIR       destino (padrão: client/build, o par de todo modelo sem
+                  boot_build)
 EOF
     exit "${1:-0}"
 }
@@ -33,6 +37,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --raw) RAW=$2; shift 2 ;;
         --kver) KVER=$2; shift 2 ;;
+        --name) NOME=$2; OUT="$REPO/client/builds/$2"; shift 2 ;;
         --out) OUT=$2; shift 2 ;;
         -h | --help) usage 0 ;;
         *) echo "opção desconhecida: $1" >&2; usage 1 ;;
@@ -40,6 +45,11 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$RAW" ] || usage 1
+# o nome vira caminho numa rota de boot (services/usb.py, NOME_BUILD_RE)
+if [ -n "$NOME" ] && ! printf '%s' "$NOME" | grep -Eq '^[a-z0-9][a-z0-9._-]{0,48}$'; then
+    echo "nome inválido: $NOME (use a-z, 0-9, ponto, _ e -, começando por letra ou dígito)" >&2
+    exit 1
+fi
 [ "$(id -u)" = 0 ] || { echo "precisa de root (veja a alternativa por qemu no cabeçalho)" >&2; exit 1; }
 [ -f "$RAW" ] || { echo "imagem não encontrada: $RAW" >&2; exit 1; }
 
@@ -162,6 +172,7 @@ echo ">> resumindo a construção em build.json"
 cat > "$OUT/build.json" << EOF
 {
   "build": "$BUILD_ID",
+  "kernel": "$KVER",
   "files": {
     "vmlinuz": {
       "md5": "$(md5sum "$OUT/vmlinuz" | awk '{print $1}')",
@@ -181,5 +192,16 @@ echo
 echo "pronto:"
 ls -la "$OUT/vmlinuz" "$OUT/initrd.img"
 echo "  build:     $BUILD_ID"
-echo "  atenção:   os pendrives em campo vão se atualizar sozinhos no próximo boot"
-echo "agora: tools/nb3-genusb --imageroot <sede> --server <url>"
+echo "  kernel:    $KVER"
+if [ -n "$NOME" ]; then
+    echo "  atenção:   os pendrives das sedes dos modelos com boot_build=$NOME vão se"
+    echo "             atualizar sozinhos no próximo boot. A base desses modelos tem"
+    echo "             de ter /lib/modules/$KVER."
+    echo "agora: PATCH /api/v1/models/<modelo> {\"boot_build\": \"$NOME\"}"
+    echo "       (ou tools/nb3-nova-temporada ... --boot-build $NOME)"
+else
+    echo "  atenção:   os pendrives das sedes dos modelos sem boot_build vão se"
+    echo "             atualizar sozinhos no próximo boot. A base desses modelos tem"
+    echo "             de ter /lib/modules/$KVER."
+    echo "agora: tools/nb3-genusb --imageroot <sede> --server <url>"
+fi

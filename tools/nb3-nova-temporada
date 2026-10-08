@@ -16,6 +16,11 @@ geração custa meia hora de `mksquashfs` sobre dezenas de GB.
 Sem `--de`, cria o modelo do zero com só a base (primeira temporada; a
 telemetria entra depois com o `nb3-camada-telemetria`).
 
+O kernel tem de casar com a base: o par kernel+initrd do modelo (o padrão, ou
+o `--boot-build` gerado com `nb3-build-initrd --name`) precisa ter os módulos
+dentro da base. A ferramenta confere no próprio `.squash` e recusa antes de
+enviar qualquer coisa.
+
 Não precisa de root.
 """
 
@@ -35,6 +40,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from server.app.services import layer_roles  # noqa: E402
+from server.app.services.usb import modulos_no_squash  # noqa: E402
 
 
 def erro(msg: str) -> None:
@@ -105,6 +111,10 @@ def main() -> None:
     ap.add_argument("--publish", action="store_true", help="envia o arquivo ao servidor de arquivos")
     ap.add_argument("--dry-run", action="store_true", help="mostra o que faria e sai")
     ap.add_argument("--description", default="", help="descricao do modelo novo")
+    ap.add_argument(
+        "--boot-build", default=None,
+        help="par kernel+initrd do modelo (client/builds/NOME); sem isto, o que o modelo ja usa",
+    )
     ap.add_argument("--server", default=os.environ.get("NB3_BASE_URL", ""))
     ap.add_argument("--admin-key", default=os.environ.get("NB3_ADMIN_KEY", ""))
     args = ap.parse_args()
@@ -158,6 +168,43 @@ def main() -> None:
         print("        ja existe — so a base sera trocada")
 
     mostrar("camadas de agora:" if atuais else "camadas herdadas:", atuais or herdar)
+
+    # O kernel anda com a base. Sem --boot-build o modelo fica com o par que já
+    # tem (ou herda o da origem), e uma base nova com kernel novo subiria sem
+    # som, vídeo e wifi, sem erro em lugar nenhum.
+    if args.boot_build is not None:
+        par = args.boot_build
+    elif existe:
+        par = api("GET", f"/api/v1/models/{args.para}", args.admin_key, args.server).get("boot_build") or ""
+    elif args.de:
+        par = api("GET", f"/api/v1/models/{args.de}", args.admin_key, args.server).get("boot_build") or ""
+    else:
+        par = ""
+    pares = {k["name"]: k for k in api("GET", "/api/v1/usb/kernels", args.admin_key, args.server)["kernels"]}
+    k = pares.get(par)
+    rotulo = par or "padrao"
+    sem_par = not k or not k.get("ok") or not k.get("build")
+    if sem_par and par:
+        erro(
+            f"o par kernel+initrd '{par}' nao existe no servidor\n"
+            f"  gere com: sudo tools/nb3-build-initrd --raw <imagem-mestre>.raw --name {par}"
+        )
+    versoes = modulos_no_squash(arquivo)
+    if sem_par:
+        # instalação nova: o pendrive ainda nem tem kernel, e o console avisa
+        print("kernel: AVISO: o servidor ainda nao tem o par padrao (nb3-build-initrd)")
+    elif versoes is None:
+        print(f"kernel: {rotulo} ({k.get('kernel') or '?'})  AVISO: nao consegui listar os modulos da base")
+    elif k.get("kernel") and k["kernel"] not in versoes:
+        outros = [n or "padrao" for n, v in pares.items() if v.get("kernel") in versoes and v.get("ok")]
+        erro(
+            f"a base nao tem os modulos do kernel {k['kernel']} (o par '{rotulo}')\n"
+            f"  a base tem: {', '.join(versoes)}\n"
+            f"  pares que servem: {', '.join(outros) or 'nenhum'}"
+            " (use --boot-build, ou gere um com nb3-build-initrd --name)"
+        )
+    else:
+        print(f"kernel: {rotulo} ({k.get('kernel') or '?'}), com modulos na base")
 
     if args.dry_run:
         print("\n(--dry-run: nada foi calculado, enviado nem registrado)")
@@ -224,6 +271,13 @@ def main() -> None:
     bases = [c for c in depois if c.get("role") == "base"]
     if len(bases) != 1:
         erro(f"o modelo ficou com {len(bases)} bases — confira antes de usar")
+
+    # depois da base, nunca antes: o servidor recusa o par que não casa com a
+    # base que o modelo tem naquele momento
+    modelo = api("GET", f"/api/v1/models/{args.para}", args.admin_key, args.server)
+    if (modelo.get("boot_build") or "") != par:
+        api("PATCH", f"/api/v1/models/{args.para}", args.admin_key, args.server, {"boot_build": par})
+        print(f">> kernel do modelo: {rotulo}")
     if layer_roles.sem_papel(depois):
         erro(
             "sobrou camada sem papel: " + ", ".join(layer_roles.sem_papel(depois)) + "\n"

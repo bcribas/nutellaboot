@@ -18,6 +18,8 @@ from server.app.settings import settings  # noqa: E402
 def data_root(tmp_path, monkeypatch):
     """data/ isolado por teste."""
     monkeypatch.setattr(settings, "data_root", tmp_path)
+    # os pares nomeados de kernel+initrd: nunca os de client/builds/ da máquina
+    monkeypatch.setenv("NB3_BOOT_BUILDS_DIR", str(tmp_path / "boot-builds"))
     # o disco é por teste; os mapas em memória do processo também têm de ser
     from server.app.services import keyusage, presence
 

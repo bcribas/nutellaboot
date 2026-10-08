@@ -63,6 +63,23 @@ mount_layers() {
         -olowerdir="${_schema#:}",upperdir="$_upper",workdir="$_work" "${rootmnt?}" ||
         nb_fatal "could not mount the overlay"
     log_end_msg
+    nb_kernel_modules_check
+}
+
+# O kernel que bootou sem módulos na base: o sistema sobe, mas sem driver de
+# som, vídeo e wifi, e nada mais reclama. É o par kernel+initrd que não casa
+# com a base do modelo (o boot_build errado, ou a base trocada sem trocar o
+# par), ou um servidor de boot pela rede com o kernel antigo. Aviso e não
+# parada: a máquina ainda serve para a prova.
+nb_kernel_modules_check() {
+    _nkm_v=$(cat /proc/sys/kernel/osrelease 2> /dev/null)
+    [ -n "$_nkm_v" ] || return 0
+    [ -d "${rootmnt?}/usr/lib/modules/$_nkm_v" ] && return 0
+    [ -d "${rootmnt?}/lib/modules/$_nkm_v" ] && return 0
+    nb_warn "kernel $_nkm_v has no modules in this system image: no sound, video or wifi drivers - the boot files do not match the base of this model"
+    # a tela seguinte apaga a linha em menos de um segundo; só neste caso
+    sleep "${NB_KERNEL_WARN_WAIT:-5}"
+    return 0
 }
 
 mount_persistenthome() {
