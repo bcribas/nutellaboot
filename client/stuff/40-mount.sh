@@ -14,7 +14,11 @@ nb_find_storage() {
 
     PATH="$PATH:/usr/bin"
     nutella_findblock
-    nb_storage_scanned=1
+    # varredura vazia não fica guardada: com o pendrive velho ela roda mais
+    # cedo, e um SATA lento que ainda não apareceu ganha a segunda chance no
+    # mount_layers, como tinha antes
+    [ -n "$possibledisks" ] && nb_storage_scanned=1
+    return 0
 }
 
 # Monta $1 em $BLOCKROOT: ext4, senão NTFS (o FSTYPE diz qual).
