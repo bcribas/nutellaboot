@@ -1,6 +1,8 @@
 """Roster, vínculo usuário↔máquina, dados da tela de bloqueio e SSE."""
 
 
+import base64
+
 import pytest
 
 from server.app import fsdb
@@ -112,7 +114,10 @@ def test_binding_and_lockinfo(client, img, hi, hm):
     info = client.get(f"/boot/v3/testes3/lockinfo/{MAC}").json()
     assert info["team"]["display_name"] == "UnB — Os Batatinhas"
     assert info["organization"]["name"] == "Universidade de Brasília"
-    assert info["organization"]["logo_url"].endswith("/roster/logos/unb")
+    # embutido: o tema é file://, um caminho relativo nunca chegaria ao servidor
+    assert info["organization"]["logo_url"] == (
+        "data:image/svg+xml;base64," + base64.b64encode(svg).decode()
+    )
     assert info["country"] == "BRA"
     assert info["seat"] == "012"
 
@@ -120,6 +125,37 @@ def test_binding_and_lockinfo(client, img, hi, hm):
 
     assert client.delete(f"/api/v1/site-images/testes3/machines/{MAC}/binding", headers=hi).status_code == 204
     assert client.get(f"/boot/v3/testes3/lockinfo/{MAC}").json()["team"]["name"] == ""
+
+
+def test_logo_acima_do_teto_nao_vai_embutido(client, img, hi, hm, monkeypatch):
+    """O lockinfo inteiro vai na query string do tema: logo acima do teto volta
+    como caminho (que a tela não mostra), e o lockinfo continua pequeno."""
+    from server.app.routers import roster
+
+    monkeypatch.setattr(roster, "LOGO_EMBUTIDO_MAX", 16)
+    client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
+    client.put("/api/v1/site-images/testes3/roster", json={"roster": ROSTER}, headers=hi)
+    client.put(
+        "/api/v1/site-images/testes3/roster/logos/unb",
+        files={"file": ("unb.svg", b'<svg xmlns="http://www.w3.org/2000/svg"/>', "image/svg+xml")},
+        headers=hi,
+    )
+    client.put(
+        f"/api/v1/site-images/testes3/machines/{MAC}/binding",
+        json={"user_id": "team-001"},
+        headers=hi,
+    )
+    info = client.get(f"/boot/v3/testes3/lockinfo/{MAC}").json()
+    assert info["organization"]["logo_url"] == "/boot/v3/testes3/roster/logos/unb"
+
+
+def test_logo_embutido_recusa_org_com_caminho(img):
+    """O id da organização vem do roster: com barra ou `..`, o lockinfo leria
+    um .svg ou .png fora da pasta dos logos."""
+    from server.app.routers.roster import _logo_url
+
+    for maldoso in ("../../etc/passwd", "a/b", "..", ""):
+        assert _logo_url("testes3", maldoso) == ""
 
 
 def test_binding_rejects_unknown_user(client, img, hi, hm):

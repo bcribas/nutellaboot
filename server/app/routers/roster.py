@@ -11,6 +11,7 @@ autenticação nenhuma, que interpolava parâmetros do usuário direto em `rm` e
 
 from __future__ import annotations
 
+import base64
 import time
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -304,6 +305,31 @@ async def list_bindings(
 # --- consumido pela tela de bloqueio (sem autenticação, como o resto do boot) ---
 
 
+# Teto do logotipo embutido: o lockinfo inteiro vai na query string do tema.
+LOGO_EMBUTIDO_MAX = 512 * 1024
+
+
+def _logo_url(image: str, org_id: str) -> str:
+    """O logotipo EMBUTIDO, como data: URI.
+
+    O tema da tela é aberto de file://: um caminho "/boot/v3/..." vira
+    file:///boot/v3/... e o <img> nem chega ao servidor; e, se chegasse, a rota
+    do logotipo pede a chave de boot, que um <img> não manda. Embutido, o logo
+    chega com o lockinfo (que já vem autenticado), vai para o cache da tela
+    junto com ele e aparece sem rede. A tela em campo não muda: ela já põe o
+    logo_url no <img>."""
+    if not org_id or "/" in org_id or ".." in org_id:
+        return ""
+    d = store.site_image_dir(image) / "roster" / "logos"
+    for ext, media in (("svg", "image/svg+xml"), ("png", "image/png")):
+        f = d / f"{org_id}.{ext}"
+        if f.is_file():
+            if f.stat().st_size > LOGO_EMBUTIDO_MAX:
+                return f"/boot/v3/{image}/roster/logos/{org_id}"
+            return f"data:{media};base64," + base64.b64encode(f.read_bytes()).decode()
+    return ""
+
+
 def lockinfo(image: str, mac: str) -> dict:
     info = store.get_site_image(image) or {}
     binding = fsdb.read_json(m.machine_dir(image, mac) / "binding.json") or {}
@@ -314,11 +340,7 @@ def lockinfo(image: str, mac: str) -> dict:
         )
     org = entry.get("organization") or {}
     org_id = str(org.get("id", ""))
-    logo_url = ""
-    if org_id:
-        d = store.site_image_dir(image) / "roster" / "logos"
-        if any(d.glob(f"{org_id}.*")) if d.is_dir() else False:
-            logo_url = f"/boot/v3/{image}/roster/logos/{org_id}"
+    logo_url = _logo_url(image, org_id)
     return {
         "site": info.get("fullname", image),
         "image": image,

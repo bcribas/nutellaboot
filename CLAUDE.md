@@ -307,7 +307,7 @@ o primeiro. Rota nova de console usa `require_console` + as funções de
 ```bash
 tools/nb3-init                     # instalação nova: emite e IMPRIME a chave
 tools/nb3-dev                      # servidor em 127.0.0.1:8890
-.venv/bin/python -m pytest -q      # 1436 testes, ~4 min
+.venv/bin/python -m pytest -q      # 1438 testes, ~4 min
 tools/nb3-seed-testdata            # dados de teste (não é instalação)
 tools/nb3-layer-worker --check     # confere as ferramentas rootless
 ```
@@ -612,6 +612,16 @@ O ambiente de teste tem um nginx externo que faz proxy de
   assíncrono, `release()` no `finally`, e o que a tela imprime vai para o
   journal (`logger -t nb3-lock`). Teste com gjs de verdade em
   `tests/test_lock_screen.py`.
+- **O tema da tela de bloqueio abre de `file://`, então recurso que vem no
+  lockinfo vai EMBUTIDO (`data:`).** O `logo_url` era `/boot/v3/<sede>/roster/logos/<org>`:
+  o WebKit o resolvia como `file:///boot/v3/...`, e a rota do logo ainda pede a
+  chave de boot, que um `<img>` não manda. De agosto a novembro de 2026 nenhum
+  logo apareceu, e ninguém notou até a final. A tela em campo (camada
+  `telemetria-2026-09-22`) põe o `logo_url` direto no `<img>`, por isso o
+  conserto é no servidor (`roster._logo_url`), sem camada nova. O lockinfo
+  inteiro vai na query string do tema e é baixado por toda a sala no mesmo
+  instante do bloqueio (`curl --max-time 8`; falhou, a tela fica sem time e
+  sem logo): por isso o teto `LOGO_EMBUTIDO_MAX`.
 
 ## Pull requests
 
