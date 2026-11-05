@@ -308,9 +308,27 @@ async def list_bindings(
 # Teto do logotipo embutido: o lockinfo inteiro vai na query string do tema.
 LOGO_EMBUTIDO_MAX = 512 * 1024
 
+# O cartão do logotipo: tamanho fixo e fundo branco. O fundo das telas é
+# escuro, e muito logo é escuro sobre transparente: o da USP São Carlos, preto
+# puro, sumia na final de 2026. Dos 58 logos da final, nenhum era claro sobre
+# transparente, o único caso que o branco apagaria. O tamanho fixo põe todos
+# na mesma moldura, do selo alto ao nome largo. Por fora o cartão também vai
+# em base64: o lock.js decodifica a query duas vezes (URLSearchParams e
+# decodeURIComponent), e um %22 viraria aspas dentro do src do <img>.
+CARTAO = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320" viewBox="0 0 480 320">'
+    '<rect width="480" height="320" rx="28" fill="#fff"/>'
+    '<image x="36" y="32" width="408" height="256" preserveAspectRatio="xMidYMid meet" href="{}"/>'
+    "</svg>"
+)
+
+
+def _data_uri(media: str, conteudo: bytes) -> str:
+    return f"data:{media};base64," + base64.b64encode(conteudo).decode()
+
 
 def _logo_url(image: str, org_id: str) -> str:
-    """O logotipo EMBUTIDO, como data: URI.
+    """O logotipo EMBUTIDO, como data: URI, dentro do `CARTAO`.
 
     O tema da tela é aberto de file://: um caminho "/boot/v3/..." vira
     file:///boot/v3/... e o <img> nem chega ao servidor; e, se chegasse, a rota
@@ -326,7 +344,8 @@ def _logo_url(image: str, org_id: str) -> str:
         if f.is_file():
             if f.stat().st_size > LOGO_EMBUTIDO_MAX:
                 return f"/boot/v3/{image}/roster/logos/{org_id}"
-            return f"data:{media};base64," + base64.b64encode(f.read_bytes()).decode()
+            logo = _data_uri(media, f.read_bytes())
+            return _data_uri("image/svg+xml", CARTAO.format(logo).encode())
     return ""
 
 

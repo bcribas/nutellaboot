@@ -93,6 +93,17 @@ def test_logo_path_traversal_blocked(client, img, hi):
             logo_response("testes3", maldoso)
 
 
+def _logo_do_cartao(logo_url: str) -> str:
+    """O logo que vai dentro do cartão: o `href` da única <image>."""
+    prefixo = "data:image/svg+xml;base64,"
+    assert logo_url.startswith(prefixo), logo_url[:40]
+    # o lock.js decodifica a query duas vezes: nada de % no que vai no src
+    assert "%" not in logo_url
+    cartao = base64.b64decode(logo_url[len(prefixo):]).decode()
+    assert cartao.count("<image ") == 1 and 'fill="#fff"' in cartao
+    return cartao.split(' href="', 1)[1].split('"', 1)[0]
+
+
 def test_binding_and_lockinfo(client, img, hi, hm):
     client.post(f"/api/v1/site-images/testes3/machines/{MAC}/status", json={}, headers=hm)
     client.put("/api/v1/site-images/testes3/roster", json={"roster": ROSTER}, headers=hi)
@@ -115,7 +126,7 @@ def test_binding_and_lockinfo(client, img, hi, hm):
     assert info["team"]["display_name"] == "UnB — Os Batatinhas"
     assert info["organization"]["name"] == "Universidade de Brasília"
     # embutido: o tema é file://, um caminho relativo nunca chegaria ao servidor
-    assert info["organization"]["logo_url"] == (
+    assert _logo_do_cartao(info["organization"]["logo_url"]) == (
         "data:image/svg+xml;base64," + base64.b64encode(svg).decode()
     )
     assert info["country"] == "BRA"

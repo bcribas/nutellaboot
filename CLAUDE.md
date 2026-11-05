@@ -621,7 +621,10 @@ O ambiente de teste tem um nginx externo que faz proxy de
   conserto é no servidor (`roster._logo_url`), sem camada nova. O lockinfo
   inteiro vai na query string do tema e é baixado por toda a sala no mesmo
   instante do bloqueio (`curl --max-time 8`; falhou, a tela fica sem time e
-  sem logo): por isso o teto `LOGO_EMBUTIDO_MAX`.
+  sem logo): por isso o teto `LOGO_EMBUTIDO_MAX`. O logo vai dentro de um
+  cartão SVG branco de tamanho fixo (`roster.CARTAO`): logo escuro sobre
+  transparente sumia no fundo escuro. O cartão também vai em base64, nunca
+  `%`-codificado: o `lock.js` decodifica a query duas vezes.
 
 ## Pull requests
 
