@@ -56,10 +56,17 @@ async def put_config(
     values = body.get("values", body)
     if not isinstance(values, dict):
         raise HTTPException(400, "esperava um objeto com os valores")
+    antes = cfg.allowlist_firewall(image)
     try:
         applied = cfg.write_values(image, values, is_admin=(p.kind == "admin"))
     except cfg.ConfigError as e:
         raise HTTPException(400, str(e))
+    # o allowlist vai à máquina no boot; sem isto, o que entrasse com a sala
+    # já ligada só valia depois de um reboot (o domínio da prova bloqueado)
+    if cfg.allowlist_firewall(image) != antes:
+        from .machines import sincronizar_firewall
+
+        sincronizar_firewall(image, p.name or p.kind)
     # o evento existia no catálogo desde o começo e nunca era emitido: quem
     # inscrevesse um webhook em config.updated não recebia nada
     eventos.publicar(image, "config.updated", {"keys": sorted(applied)})

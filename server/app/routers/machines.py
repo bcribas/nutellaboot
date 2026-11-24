@@ -9,7 +9,7 @@ import time
 import zlib
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from .. import auth, fsdb
 from ..errors import erro
@@ -328,6 +328,40 @@ def alerts_history_da_sede(
     """Todos os alertas da sede, abertos e dispensados, com quem dispensou.
     `def`: varre o alerts.log de cada máquina."""
     return {"history": alerts.history_da_sede(image, since, n)}
+
+
+# Primeira linha da resposta do allowlist. O agente exige vê-la antes de mexer
+# em qualquer coisa: um 200 que não venha daqui (proxy, portal cativo, página
+# de erro) apagaria o allowlist inteiro da sala.
+FIREWALL_CABECALHO = "# nb3-firewall-allowlist v1"
+
+
+@router.get("/site-images/{image}/machines/{mac}/firewall")
+async def firewall_allowlist(
+    image: str, mac: str, x_nb_machine_key: str | None = Header(None)
+) -> PlainTextResponse:
+    """O allowlist do firewall como está AGORA, uma linha "nome ip" por item.
+
+    No boot ele vem no stuff; uma mudança depois dele só chegava à máquina no
+    reboot seguinte — numa prova, o domínio novo bloqueado na sala inteira.
+    O comando `syncfirewall` faz o agente buscar isto e reaplicar."""
+    from ..services import config as cfg
+
+    _machine(image, x_nb_machine_key, mac)
+    linhas = [FIREWALL_CABECALHO] + [f"{n} {ip}" for n, ip in cfg.allowlist_firewall(image)]
+    return PlainTextResponse("\n".join(linhas) + "\n")
+
+
+def sincronizar_firewall(image: str, por: str) -> int:
+    """Manda o `syncfirewall` para todas as máquinas da imagem; devolve quantas."""
+    macs = [x for x in m.list_macs(image) if m.valid_mac(x)]
+    if not macs:
+        return 0
+    cid = m.enqueue(image, macs, "syncfirewall", "", 0, by=por)
+    for mac in macs:
+        notify.wake_machine(image, mac)
+    publicar_evento(image, "command.sent", {"id": cid, "command": "syncfirewall", "machines": len(macs)})
+    return len(macs)
 
 
 @router.get("/site-images/{image}/machines/{mac}/commands")

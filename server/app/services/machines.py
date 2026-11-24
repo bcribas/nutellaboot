@@ -36,6 +36,9 @@ ALLOWED_COMMANDS = {
     "enablefirewall",
     "resetcontaeditores",
     "precontest",
+    # rebusca o allowlist do firewall (GET .../machines/{mac}/firewall) e
+    # reaplica, sem reboot. O servidor o manda sozinho quando o allowlist muda.
+    "syncfirewall",
 }
 
 # Comandos que impõem, na máquina, o valor de um campo do formulário — e o
