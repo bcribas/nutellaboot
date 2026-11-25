@@ -90,6 +90,9 @@ NB3FWEOF
         log_begin_msg "Configuring the firewall"
     fi
 
+    # os nomes que o nutellaboot pôs: o syncfirewall do agente só remove
+    # esses quando saem da lista (os da camada base não são dele)
+    : > "${rootmnt?}/etc/nb3-firewall-allowlist"
     if [ -n "$FIREWALL_ALLOWLIST" ]; then
         # formato: "HOSTNAME IP" separados por vírgula
         _old_ifs=$IFS
@@ -110,7 +113,8 @@ NB3FWEOF
                 maratona) nb_warn "allowlist name 'maratona' is reserved (machine hostname) - skipped"; _host= ;;
             esac
             [ -n "$_host" ] && [ -n "$_ip" ] &&
-                echo "$_ip" > "${rootmnt?}/usr/share/maratona-firewall/hosts/$_host"
+                echo "$_ip" > "${rootmnt?}/usr/share/maratona-firewall/hosts/$_host" &&
+                echo "$_host" >> "${rootmnt?}/etc/nb3-firewall-allowlist"
             IFS=,
         done
         IFS=$_old_ifs

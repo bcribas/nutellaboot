@@ -754,6 +754,7 @@ token e a chave de máquina de cada sede. Nome fora da lista é `404`.
 | GET | `/api/v1/site-images/{img}/commands` | C, I, S`commands:write` | — | `{allowed:[…], blocked:{comando: campo}}` |
 | GET | `/api/v1/site-images/{img}/machines/{mac}/commands?wait=25` | M | — | `{commands:[…], lock}` (long-poll) |
 | POST | `/api/v1/site-images/{img}/machines/{mac}/commands/{cid}/ack` | M | `{status, output?}` | `{ok, found}` |
+| GET | `/api/v1/site-images/{img}/machines/{mac}/firewall` | M | — | texto: `# nb3-firewall-allowlist v1` e uma linha `nome ip` por item do `FIREWALL_ALLOWLIST` efetivo (o que o `syncfirewall` aplica) |
 | POST | `/api/v1/site-images/{img}/lock` | C, I, S`commands:write` | — | trava a TELA de todas as máquinas. Corpo com `target` (≠ `"all"`), `targets`, `macs`, `mac` ou `machines` dá **400 `no_target`**: para algumas máquinas, a rota por MAC |
 | POST | `/api/v1/site-images/{img}/unlock` | C, I, S`commands:write` | — | destrava a tela de todas (mesmo portão do `lock`) |
 | POST | `/api/v1/site-images/{img}/machines/{mac}/lock` | C, I, S`commands:write` | — | idem, para uma máquina |
@@ -787,7 +788,16 @@ na leitura seguinte e registrada nos `acks` da máquina com `status: "expired"`.
 amanhã — o alvo `"all"` inclui as máquinas desligadas no momento do envio.
 Comandos aceitos: `donottouch`, `cantouch`, `cleanhomenow`, `mlreboot`,
 `mlpoweroff`, `disablefirewall`, `enablefirewall`, `resetcontaeditores`,
-`precontest`. Qualquer outro valor é recusado com `400`.
+`precontest`, `syncfirewall`. Qualquer outro valor é recusado com `400`.
+
+`syncfirewall` faz a máquina rebuscar o allowlist do firewall
+(`GET …/machines/{mac}/firewall`) e reaplicá-lo **sem reboot**: grava os
+liberados, tira os que saíram da lista (arquivo e linha do `/etc/hosts`; só os
+que vieram do nutellaboot, listados em `/etc/nb3-firewall-allowlist`) e, com o
+firewall ligado, reinicia o `maratona-firewall`. O servidor o manda sozinho para
+todas as máquinas da sede quando um `PUT …/config` muda o allowlist efetivo, e o
+`enablefirewall` sincroniza antes de ligar. Resposta sem o cabeçalho (proxy,
+portal cativo, erro) não muda nada na máquina.
 
 `precontest` é a macro do fim do warmup: numa tacada, limpa as homes, trava as
 telas, zera a contagem de editores e liga o firewall das máquinas alvo. Além de

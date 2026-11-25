@@ -286,3 +286,30 @@ def write_values(image_id: str, incoming: dict, *, is_admin: bool) -> dict:
 
         fsdb.write_json(d / "config.json", {"values": values})
     return effective_values(image_id)
+
+
+# O nome do allowlist vira NOME DE ARQUIVO na máquina
+# (/usr/share/maratona-firewall/hosts/<nome>) e linha do /etc/hosts. O esquema
+# já valida ao salvar; isto é a segunda barreira, para o valor vindo de antes
+# da validação existir (a mesma do 30-firewall.sh no boot).
+_FW_NOME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_FW_IP = re.compile(r"^[0-9a-fA-F.:]+$")
+
+
+def allowlist_firewall(image_id: str) -> list[tuple[str, str]]:
+    """Os pares (nome, ip) do FIREWALL_ALLOWLIST efetivo desta imagem — o que
+    o boot gravaria hoje. Itens inválidos ficam de fora."""
+    bruto = effective_values(image_id).get("FIREWALL_ALLOWLIST") or []
+    if isinstance(bruto, str):
+        bruto = bruto.split(",")
+    pares = []
+    for item in bruto:
+        partes = str(item).split()
+        if len(partes) < 2:
+            continue
+        nome, ip = partes[0], partes[1]
+        if nome == "maratona" or not _FW_NOME.match(nome) or not _FW_IP.match(ip):
+            continue
+        pares.append((nome, ip))
+    return pares
+

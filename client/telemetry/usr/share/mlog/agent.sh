@@ -222,7 +222,66 @@ cmd_cantouch() {
 cmd_cleanhomenow() { echo cleannow > /dev/shm/icpc-clean-homed.fifo; }
 cmd_mlreboot() { (sleep 20 && reboot) & disown; }
 cmd_mlpoweroff() { (sleep 20 && poweroff) & disown; }
-cmd_enablefirewall() { systemctl start maratona-firewall.service; }
+cmd_enablefirewall() {
+    # ligar com o allowlist de AGORA, não o do boot; se o servidor não
+    # responder, liga com o que já está na máquina
+    cmd_syncfirewall || true
+    systemctl start maratona-firewall.service
+}
+
+# Onde o maratona-firewall lê os liberados, e a lista dos nomes que vieram do
+# nutellaboot (gravada no boot pelo 30-firewall.sh e mantida aqui). Só esses o
+# sync remove: os que a camada base traz não são dele.
+NB3_FW_HOSTS=${NB3_FW_HOSTS:-/usr/share/maratona-firewall/hosts}
+NB3_FW_NOSSOS=${NB3_FW_NOSSOS:-/etc/nb3-firewall-allowlist}
+NB3_ETC_HOSTS=${NB3_ETC_HOSTS:-/etc/hosts}
+
+# Rebusca o allowlist no servidor e reaplica, sem reboot.
+cmd_syncfirewall() {
+    local _resp _nome _ip _velho _tmp _novos=""
+    _resp=$(curl_api "machines/$MAC/firewall" 15 --fail) || {
+        log "syncfirewall: servidor não respondeu"
+        return 1
+    }
+    # sem o cabeçalho não é a resposta do nutellaboot (proxy, portal, erro):
+    # aplicar uma lista vazia apagaria o allowlist da sala
+    if [ "$(printf '%s\n' "$_resp" | head -n1)" != "# nb3-firewall-allowlist v1" ]; then
+        log "syncfirewall: resposta inesperada do servidor"
+        return 1
+    fi
+    while read -r _nome _ip _; do
+        case "$_nome" in '' | '#'*) continue ;; esac
+        case "$_nome" in
+            */* | .* | maratona) log "syncfirewall: nome inválido: $_nome"; continue ;;
+        esac
+        case "$_ip" in '' | *[!0-9a-fA-F.:]*) log "syncfirewall: IP inválido: $_ip"; continue ;; esac
+        printf '%s\n' "$_ip" > "$NB3_FW_HOSTS/$_nome"
+        _novos="$_novos $_nome"
+    done <<< "$_resp"
+    # quem saiu da lista: o arquivo e a linha dele no /etc/hosts (o script do
+    # firewall só reescreve as linhas dos nomes que existem)
+    if [ -f "$NB3_FW_NOSSOS" ]; then
+        while read -r _velho; do
+            case "$_velho" in '' | */* | .* | maratona) continue ;; esac
+            case " $_novos " in *" $_velho "*) continue ;; esac
+            rm -f "$NB3_FW_HOSTS/$_velho"
+            _tmp=$(mktemp)
+            awk -v host="$_velho" '
+                /^[[:space:]]*#/ { print; next }
+                { for (i = 2; i <= NF; i++) if ($i == host) next }
+                { print }
+            ' "$NB3_ETC_HOSTS" > "$_tmp" && cat "$_tmp" > "$NB3_ETC_HOSTS"
+            rm -f "$_tmp"
+        done < "$NB3_FW_NOSSOS"
+    fi
+    printf '%s\n' $_novos > "$NB3_FW_NOSSOS"
+    # firewall ligado: reaplica (o script refaz as regras e o /etc/hosts).
+    # Desligado, fica tudo pronto para o próximo enablefirewall.
+    if systemctl is-active --quiet maratona-firewall.service; then
+        systemctl restart maratona-firewall.service
+    fi
+    log "syncfirewall: allowlist com$( [ -n "$_novos" ] || echo ' nenhum'):$_novos"
+}
 cmd_disablefirewall() { systemctl stop maratona-firewall.service; }
 cmd_resetcontaeditores() { rm -f "$STATE_DIR/editores"; }
 cmd_precontest() {
