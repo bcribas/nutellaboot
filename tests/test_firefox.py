@@ -13,6 +13,7 @@ de `general.*`), então o autoconfig não é uma alternativa: é o único caminh
 
 import json
 import re
+import re
 import subprocess
 from pathlib import Path
 
@@ -37,6 +38,7 @@ def raiz(tmp_path):
     ):
         (r / d).mkdir(parents=True)
     (r / "usr/bin/firefox-esr").touch()
+    (r / "usr/bin/epiphany-browser").touch()
     (r / "etc/dconf/db/local.d/50-favorites").write_text(
         "[org/gnome/shell]\nfavorite-apps=['epiphany.desktop', 'org.gnome.Nautilus.desktop']\n"
     )
@@ -53,6 +55,7 @@ log_end_msg() {{ :; }}
 rootmnt="{raiz}"
 DEFAULTBROWSERURL='{url}'
 nb3_post_firefox
+nb3_post_epiphany
 """
     r = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -186,3 +189,71 @@ def test_sem_firefox_instalado_nao_faz_nada(tmp_path):
     roda(vazia)
     assert not (vazia / "etc/firefox-esr").exists()
     assert not (vazia / "usr").exists()
+
+
+# --- Epiphany sem o Firefox ---
+
+# A expressão com que o MOJ reconhece a máquina no login (cdmoj,
+# server/api/v1/lib/nutella-bind.sh, NB_BIND_UA_RE): imagem, machine-id,
+# boot-id e o MAC no fim.
+UA_DO_MOJ = re.compile(
+    r"MLinux/([A-Za-z0-9._-]{1,64})/[0-9a-f]{32}/([0-9]{1,20})/([0-9a-f]{2}([-:][0-9a-f]{2}){5})([^0-9a-f:-]|$)"
+)
+
+
+@pytest.fixture
+def so_epiphany(tmp_path):
+    """Uma imagem em que o Epiphany é o único navegador."""
+    r = tmp_path / "soepi"
+    for d in ("usr/bin", "etc/rc.local.d", "etc/dconf/db/local.d/locks"):
+        (r / d).mkdir(parents=True)
+    (r / "usr/bin/epiphany-browser").touch()
+    return r
+
+
+def test_sem_firefox_o_epiphany_ainda_recebe_o_carimbo(so_epiphany):
+    """O carimbo do Epiphany ficava depois da guarda do Firefox: numa imagem
+    sem o ESR, a sala submetia sem sede nem máquina e o MOJ não fazia o elo
+    máquina↔time."""
+    roda(so_epiphany)
+    rc = (so_epiphany / "etc/rc.local.d/55-epiphany-uid").read_text()
+    assert "user-agent" in rc and "MLinux/" in rc
+    # nenhum Firefox para configurar
+    assert not (so_epiphany / "etc/rc.local.d/50-firefox-default").exists()
+    assert not (so_epiphany / "etc/firefox-esr").exists()
+
+
+def test_sem_navegador_nenhum_nao_faz_nada(tmp_path):
+    vazia = tmp_path / "semnada"
+    (vazia / "etc").mkdir(parents=True)
+    roda(vazia)
+    assert not (vazia / "etc/rc.local.d").exists()
+
+
+def test_o_carimbo_do_epiphany_sem_firefox_e_o_que_o_moj_reconhece(so_epiphany, tmp_path):
+    """Roda o 55-epiphany-uid de verdade (com /etc e /home desviados para um
+    diretório de teste): o user-agent no dconf casa com a expressão do MOJ, e
+    a mesma linha é publicada para a CLI do juiz."""
+    roda(so_epiphany)
+    sistema = tmp_path / "sistema"
+    (sistema / "etc/dconf/db/local.d/locks").mkdir(parents=True)
+    (sistema / "home").mkdir()
+    (sistema / "etc/imageroot-icpc").write_text("lab219\n")
+    (sistema / "home/.machine-id").write_text("0123456789abcdef0123456789abcdef\n")
+    (sistema / "home/.machine-id-boot").write_text("1764000000\n")
+    (sistema / "etc/mac-icpc").write_text("9c-6b-00-0a-bd-d8\n")
+    rc = (so_epiphany / "etc/rc.local.d/55-epiphany-uid").read_text()
+    rc = rc.replace("/etc/", f"{sistema}/etc/").replace("/home/", f"{sistema}/home/")
+    r = subprocess.run(["bash", "-c", rc], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+    dconf = (sistema / "etc/dconf/db/local.d/90-epiphany-user-agent").read_text()
+    m = re.search(r"user-agent='([^']*)'", dconf)
+    assert m, dconf
+    ua = m.group(1)
+    casou = UA_DO_MOJ.search(ua)
+    assert casou, ua
+    assert casou.group(1) == "lab219" and casou.group(3) == "9c-6b-00-0a-bd-d8"
+    assert (sistema / "etc/moj/user-agent").read_text().strip() == ua
+    trava = (sistema / "etc/dconf/db/local.d/locks/90-epiphany-user-agent").read_text()
+    assert trava.strip() == "/org/gnome/epiphany/web/user-agent"

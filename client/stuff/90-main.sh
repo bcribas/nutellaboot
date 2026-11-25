@@ -20,6 +20,7 @@ runpostmountconfigs() {
     nb3_post_dconf
     nb3_post_polkit
     nb3_post_firefox
+    nb3_post_epiphany
     nb3_post_wallpaper
     nb3_post_clionkey
     nb3_post_nm_wifi

@@ -109,14 +109,32 @@ xdg-settings set default-web-browser firefox-esr.desktop
 EOF
     chmod a+x "${rootmnt?}/etc/rc.local.d/50-firefox-default"
 
-    # O Epiphany continua instalado, e quem o abrir submete sem identificação
-    # nenhuma. O nb2 carimbava os dois; o nb3 tinha perdido este.
+    log_end_msg
+}
+
+# Epiphany: o mesmo carimbo, numa função À PARTE. Ele morava dentro da
+# nb3_post_firefox, depois da guarda do Firefox ESR, e numa imagem SEM o ESR
+# (o Epiphany como único navegador) a função saía antes de chegar nele: a sala
+# inteira submetia com o user-agent de fábrica ("Mozilla/5.0 (Maratona Linux)
+# Epiphany/…"), sem sede nem máquina, e o MOJ não fazia o elo máquina↔time.
+nb3_post_epiphany() {
+    [ -e "${rootmnt?}/usr/bin/epiphany-browser" ] || [ -e "${rootmnt?}/usr/bin/epiphany" ] || return 0
+    log_begin_msg "Configuring Epiphany"
+    mkdir -p "${rootmnt?}/etc/rc.local.d"
     cat > "${rootmnt?}/etc/rc.local.d/55-epiphany-uid" << 'EOF'
 #!/bin/bash
-# gerado pelo NutellaBoot 3 — o mesmo carimbo, no outro navegador: lê o que o
-# 50-firefox-default gravou, para os dois dizerem exatamente a mesma coisa
-UID_EPI=$(< /etc/moj/user-agent)
-[ -n "$UID_EPI" ] || UID_EPI="Mozilla/5.0 (MLinux/$(< /etc/imageroot-icpc)/$(< /home/.machine-id)/$(< /home/.machine-id-boot)/$(< /etc/mac-icpc)) Epiphany/42.1"
+# gerado pelo NutellaBoot 3 — carimba a identidade da máquina no user-agent do
+# Epiphany. Com o Firefox, lê o que o 50-firefox-default gravou, para os dois
+# dizerem exatamente a mesma coisa; sem ele, monta o carimbo e o publica em
+# /etc/moj/user-agent, que a CLI do juiz (moj-comp) manda como o navegador.
+UID_EPI=$(cat /etc/moj/user-agent 2>/dev/null)
+if [ -z "$UID_EPI" ]; then
+    UID_EPI="Mozilla/5.0 (MLinux/$(< /etc/imageroot-icpc)/$(< /home/.machine-id)/$(< /home/.machine-id-boot)/$(< /etc/mac-icpc)) Epiphany/42.1"
+    mkdir -p /etc/moj
+    printf '%s\n' "$UID_EPI" > /etc/moj/user-agent
+    chmod 0644 /etc/moj/user-agent
+fi
+mkdir -p /etc/dconf/db/local.d/locks
 cat > /etc/dconf/db/local.d/90-epiphany-user-agent << INNER
 [org/gnome/epiphany/web]
 user-agent='$UID_EPI'
@@ -124,6 +142,5 @@ INNER
 echo "/org/gnome/epiphany/web/user-agent" > /etc/dconf/db/local.d/locks/90-epiphany-user-agent
 EOF
     chmod a+x "${rootmnt?}/etc/rc.local.d/55-epiphany-uid"
-
     log_end_msg
 }
